@@ -54,7 +54,7 @@ it('fails boot when legacy_matchers is set without API_KEYS_LEGACY_ACCEPT_UNTIL'
         ->toThrow(RuntimeException::class, 'API_KEYS_LEGACY_ACCEPT_UNTIL');
 });
 
-it('fails boot when API_KEYS_LEGACY_ACCEPT_UNTIL is not a parseable date', function (): void {
+it('fails boot when API_KEYS_LEGACY_ACCEPT_UNTIL is not an absolute DATE_ATOM timestamp', function (): void {
     config([
         'api-keys.product_prefix' => 'tst',
         'api-keys.legacy_matchers' => [RegexLegacyTokenMatcher::class],
@@ -64,5 +64,47 @@ it('fails boot when API_KEYS_LEGACY_ACCEPT_UNTIL is not a parseable date', funct
     app()->forgetInstance(TokenCodec::class);
 
     expect(fn () => app(TokenCodec::class))
-        ->toThrow(RuntimeException::class, 'valid date/time');
+        ->toThrow(RuntimeException::class, 'DATE_ATOM');
+});
+
+it('rejects relative accept_until strings at boot', function (string $relative): void {
+    config([
+        'api-keys.product_prefix' => 'tst',
+        'api-keys.legacy_matchers' => [RegexLegacyTokenMatcher::class],
+        'api-keys.legacy.accept_until' => $relative,
+    ]);
+
+    app()->forgetInstance(TokenCodec::class);
+
+    expect(fn () => app(TokenCodec::class))
+        ->toThrow(RuntimeException::class, 'DATE_ATOM');
+})->with([
+    'now',
+    'tomorrow',
+    '+10 years',
+]);
+
+it('boots when accept_until is an absolute DATE_ATOM timestamp', function (): void {
+    config([
+        'api-keys.product_prefix' => 'tst',
+        'api-keys.legacy_matchers' => [],
+        'api-keys.legacy.accept_until' => '2027-01-01T00:00:00+00:00',
+    ]);
+
+    // Empty matchers: codec boots without requiring accept_until.
+    app()->forgetInstance(TokenCodec::class);
+    expect(app(TokenCodec::class))->toBeInstanceOf(TokenCodec::class);
+
+    config([
+        'api-keys.legacy_matchers' => [RegexLegacyTokenMatcher::class],
+        'api-keys.legacy.accept_until' => '2027-01-01T00:00:00+00:00',
+    ]);
+    app()->forgetInstance(TokenCodec::class);
+
+    // RegexLegacyTokenMatcher needs acceptUntil via container — bind a fixture.
+    app()->bind(RegexLegacyTokenMatcher::class, fn () => RegexLegacyTokenMatcher::externaEkStyle(
+        new DateTimeImmutable('2027-01-01T00:00:00+00:00'),
+    ));
+
+    expect(app(TokenCodec::class))->toBeInstanceOf(TokenCodec::class);
 });

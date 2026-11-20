@@ -57,7 +57,8 @@ return [
 
     'legacy' => [
         /*
-         * ISO-8601 / Carbon-parseable cut-off. Required when legacy_matchers is non-empty.
+         * Absolute ISO-8601 with offset (DATE_ATOM), e.g. 2027-01-01T00:00:00+00:00.
+         * Required when legacy_matchers is non-empty. Relative strings are rejected.
          */
         'accept_until' => env('API_KEYS_LEGACY_ACCEPT_UNTIL'),
     ],

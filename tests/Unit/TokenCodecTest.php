@@ -198,7 +198,7 @@ it('uses legacy matchers only when the canonical shape misses', function (): voi
     $codec = codec(legacyMatchers: [$miss, $hit]);
     $now = codecNow();
 
-    $legacyToken = 'ek_ABCDEFGHI'.str_repeat('y', 32);
+    $legacyToken = 'ek_ABCDEFGHI'.str_repeat('y', 31);
 
     expect($codec->prefixOf($legacyToken, $now))->toBe('ek_ABCDEFGHI')
         ->and($miss->prefixOfCalls)->toBe(1)
@@ -214,13 +214,13 @@ it('returns null from prefixOf when every legacy matcher misses', function (): v
     $miss = new RecordingLegacyTokenMatcher(null, new DateTimeImmutable('2099-01-01T00:00:00Z'));
     $codec = codec(legacyMatchers: [$miss]);
 
-    expect($codec->prefixOf('ek_ABCDEFGHI'.str_repeat('y', 32), codecNow()))->toBeNull()
+    expect($codec->prefixOf('ek_ABCDEFGHI'.str_repeat('y', 31), codecNow()))->toBeNull()
         ->and($miss->prefixOfCalls)->toBe(1);
 });
 
-it('rejects matcher prefixes that are not a strict prefix leaving SECRET_LENGTH chars', function (): void {
+it('rejects matcher prefixes that are not a strict prefix leaving the matcher secret length', function (): void {
     $acceptUntil = new DateTimeImmutable('2099-01-01T00:00:00Z');
-    // Prefix equals the whole "token" → not a strict prefix with a secret remainder.
+    // Default secretLength 31 (Externa). Prefix equal to token → refused.
     $matcher = new RecordingLegacyTokenMatcher('ek_SHORT', $acceptUntil);
     $empty = new RecordingLegacyTokenMatcher('', $acceptUntil);
     $codec = codec(legacyMatchers: [$matcher]);
@@ -228,14 +228,26 @@ it('rejects matcher prefixes that are not a strict prefix leaving SECRET_LENGTH 
 
     expect($codec->prefixOf('ek_SHORT', $now))->toBeNull()
         ->and($codec->legacyMatcherFor('ek_SHORT', $now))->toBeNull()
-        ->and($codec->prefixOf('ek_SHORT'.str_repeat('y', 31), $now))->toBeNull()
-        ->and($codec->legacyMatcherFor('ek_SHORT'.str_repeat('y', 31), $now))->toBeNull()
-        ->and($codec->prefixOf('ek_SHORT'.str_repeat('y', 32), $now))->toBe('ek_SHORT')
-        ->and($codec->legacyMatcherFor('ek_SHORT'.str_repeat('y', 32), $now))->toBe($matcher);
+        ->and($codec->prefixOf('ek_SHORT'.str_repeat('y', 30), $now))->toBeNull()
+        ->and($codec->legacyMatcherFor('ek_SHORT'.str_repeat('y', 30), $now))->toBeNull()
+        ->and($codec->prefixOf('ek_SHORT'.str_repeat('y', 31), $now))->toBe('ek_SHORT')
+        ->and($codec->legacyMatcherFor('ek_SHORT'.str_repeat('y', 31), $now))->toBe($matcher);
 
     $emptyCodec = codec(legacyMatchers: [$empty]);
-    expect($emptyCodec->prefixOf('ek_ABCDEFGHI'.str_repeat('y', 32), $now))->toBeNull()
-        ->and($emptyCodec->legacyMatcherFor('ek_ABCDEFGHI'.str_repeat('y', 32), $now))->toBeNull();
+    expect($emptyCodec->prefixOf('ek_ABCDEFGHI'.str_repeat('y', 31), $now))->toBeNull()
+        ->and($emptyCodec->legacyMatcherFor('ek_ABCDEFGHI'.str_repeat('y', 31), $now))->toBeNull();
+});
+
+it('honours isAccepting as an early-stop even before the cut-off', function (): void {
+    $acceptUntil = new DateTimeImmutable('2099-01-01T00:00:00Z');
+    $stopped = (new RecordingLegacyTokenMatcher('ek_ABCDEFGHI', $acceptUntil))->withoutAccepting();
+    $codec = codec(legacyMatchers: [$stopped]);
+    $now = codecNow();
+    $token = 'ek_ABCDEFGHI'.str_repeat('y', 31);
+
+    expect($codec->prefixOf($token, $now))->toBeNull()
+        ->and($codec->isValidKeyPrefix('ek_ABCDEFGHI', $now))->toBeFalse()
+        ->and($stopped->prefixOfCalls)->toBe(0);
 });
 
 it('returns null from legacyMatcherFor for canonical tokens even when a matcher would match', function (): void {

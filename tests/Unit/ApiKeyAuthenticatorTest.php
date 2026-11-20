@@ -22,6 +22,7 @@ use Qiick\ApiKeys\Testing\FixedClock;
 use Qiick\ApiKeys\Testing\FixedEnvironment;
 use Qiick\ApiKeys\Testing\FixedRandomSource;
 use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
+use Qiick\ApiKeys\Tests\Support\RegexLegacyTokenMatcher;
 use Qiick\ApiKeys\TokenCodec;
 use Qiick\ApiKeys\TokenEnvironment;
 use Qiick\ApiKeys\UsageRecorder;
@@ -175,10 +176,48 @@ it('authenticates a valid current secret and records usage', function (): void {
 
     expect($result->record->id())->toBe('42')
         ->and($result->usedPreviousSecret)->toBeFalse()
+        ->and($result->legacyMatcherClass)->toBeNull()
         ->and($result->grantedScopes->allows(Scope::tryFromString('items:read')))->toBeTrue()
         ->and($repository->recordedUsages)->toHaveCount(1)
         ->and($limiter->hitsFor('api-key:42'))->toBe(1)
         ->and($sideEffect->wasFirstUse)->toBeTrue();
+});
+
+it('authenticates a real Externa ek_+9+31 legacy token', function (): void {
+    $matcher = RegexLegacyTokenMatcher::externaEkStyle(new DateTimeImmutable('2099-01-01T00:00:00+00:00'));
+    $codec = new TokenCodec(
+        productPrefix: 'tst',
+        environment: new FixedEnvironment(TokenEnvironment::Test),
+        random: new FixedRandomSource('fixed-seed-for-deterministic-api-key-tests!!'),
+        legacyMatchers: [$matcher],
+    );
+    $legacyPlain = 'ek_ABCDEFGHI'.str_repeat('y', 31);
+    $record = new InMemoryApiKeyRecord(
+        id: 'ek-1',
+        keyPrefix: 'ek_ABCDEFGHI',
+        keyHash: hash('sha256', $legacyPlain),
+        scopes: ['items:read'],
+    );
+    $auth = new ApiKeyAuthenticator(
+        codec: $codec,
+        repository: new FakeApiKeyRepository([$record]),
+        authorizer: new FakeKeyAuthorizer,
+        vocabulary: new ArrayScopeVocabulary(['items:read', 'items:write', 'files:read']),
+        ipAllowlist: new IpAllowlist,
+        usageRecorder: new UsageRecorder,
+        clock: new FixedClock(new DateTimeImmutable('2026-01-15T12:00:00+00:00')),
+        attemptLimiter: new FakeAttemptLimiter,
+        defaultRateLimitPerMinute: 0,
+    );
+
+    $result = $auth->authenticate($legacyPlain, keyContext());
+
+    expect($result->record->id())->toBe('ek-1')
+        ->and($result->legacyMatcherClass)->toBe(RegexLegacyTokenMatcher::class)
+        ->and($result->usedPreviousSecret)->toBeFalse();
+
+    expect(fn () => $auth->authenticate('ek_ABCDEFGHI', keyContext()))
+        ->toThrow(ApiKeyRejection::class);
 });
 
 it('accepts the previous secret inside the grace window', function (): void {

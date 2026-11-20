@@ -136,7 +136,7 @@ final class TokenCodec
             }
 
             $prefix = $matcher->prefixOf($presentedToken);
-            if ($prefix !== null && $this->isUsableMatcherPrefix($presentedToken, $prefix)) {
+            if ($prefix !== null && $this->isUsableMatcherPrefix($presentedToken, $prefix, $matcher)) {
                 return $prefix;
             }
         }
@@ -164,7 +164,7 @@ final class TokenCodec
             }
 
             $prefix = $matcher->prefixOf($presentedToken);
-            if ($prefix !== null && $this->isUsableMatcherPrefix($presentedToken, $prefix)) {
+            if ($prefix !== null && $this->isUsableMatcherPrefix($presentedToken, $prefix, $matcher)) {
                 return $matcher;
             }
         }
@@ -173,12 +173,21 @@ final class TokenCodec
     }
 
     /**
-     * Reject when `$now >= min(config cut-off, matcher->acceptUntil())`.
-     * Ignores {@see LegacyTokenMatcher::isAccepting()} so a buggy matcher cannot
-     * outlive the package config.
+     * Floor for matcher-declared secret remainders (blocks near-whole-token "prefixes").
+     */
+    private const int MIN_LEGACY_SECRET_REMAINDER = 20; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+
+    /**
+     * Accepted only when {@see LegacyTokenMatcher::isAccepting} is true **and**
+     * `$now < min(config cut-off, matcher->acceptUntil())` (exactly-at = rejected).
+     * Products can stop legacy early via `isAccepting`; config is a hard ceiling.
      */
     private function legacyStillAccepted(LegacyTokenMatcher $matcher, \DateTimeImmutable $now): bool
     {
+        if (! $matcher->isAccepting($now)) {
+            return false;
+        }
+
         $matcherUntil = $matcher->acceptUntil();
         // min(config, matcher): equality is equivalent either side; ignore ≤ vs <.
         $until = $this->legacyAcceptUntil === null || $matcherUntil < $this->legacyAcceptUntil // @pest-mutate-ignore: SmallerToSmallerOrEqual
@@ -190,15 +199,20 @@ final class TokenCodec
 
     /**
      * Matcher output must be a strict prefix of the token, leaving at least
-     * {@see secretLength()} characters so secret material cannot become key_prefix.
+     * max(20, {@see LegacyTokenMatcher::secretLength()}) characters.
      */
-    private function isUsableMatcherPrefix(string $token, string $prefix): bool
-    {
+    private function isUsableMatcherPrefix(
+        string $token,
+        string $prefix,
+        LegacyTokenMatcher $matcher,
+    ): bool {
         if ($prefix === '' || $prefix === $token || ! str_starts_with($token, $prefix)) {
             return false;
         }
 
-        return (strlen($token) - strlen($prefix)) >= $this->secretLength();
+        $minRemainder = max(self::MIN_LEGACY_SECRET_REMAINDER, $matcher->secretLength());
+
+        return (strlen($token) - strlen($prefix)) >= $minRemainder;
     }
 
     public function parse(#[\SensitiveParameter] string $presentedToken): ?ParsedToken

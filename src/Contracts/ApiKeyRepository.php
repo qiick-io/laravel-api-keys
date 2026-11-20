@@ -12,7 +12,7 @@ interface ApiKeyRepository
     /**
      * @return iterable<ApiKeyRecord>
      */
-    public function findCandidatesByPrefix(string $keyPrefix): iterable;
+    public function findCandidatesByPrefix(#[\SensitiveParameter] string $keyPrefix): iterable;
 
     /**
      * Persist last_used_* via saveQuietly; must not bump updated_at.

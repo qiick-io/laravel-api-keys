@@ -29,7 +29,7 @@ final class FakeApiKeyRepository implements ApiKeyRepository
     /**
      * @return list<ApiKeyRecord>
      */
-    public function findCandidatesByPrefix(string $keyPrefix): iterable
+    public function findCandidatesByPrefix(#[\SensitiveParameter] string $keyPrefix): iterable
     {
         $matches = [];
 

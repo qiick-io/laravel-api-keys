@@ -69,9 +69,18 @@ highest-per-resource drops a sibling `read` when `write` is present.
 
 ## Evaluation order
 
-1. Parse bearer (no trim) → 2. Token format → 3. Lookup + hash_equals (dummy on miss) →
-4. Revoked/expired (after match) → 5. Actor → 6. IP allowlist → 7. Scopes →
-8. Per-key rate limit → 9. Usage record.
+`ApiKeyAuthenticator::authenticate($presentedToken, $context, $requiredScope)`:
+
+1. Parse bearer (no trim; `BearerTokenExtractor`) → 2. Token format → 3. Lookup +
+   `hash_equals` (dummy on miss) → 4. Revoked/expired (after match) → 5. Actor
+   (`KeyAuthorizer`) → 6. IP allowlist → 7. Scopes + authorizer ceiling →
+8. Per-key rate limit (`AttemptLimiter`, default bucket `api-key:{id}`) →
+9. Usage record (`UsageRecorder` throttle).
+
+Refusals are `ApiKeyRejection`: `401 invalid_token` and `403 insufficient_scope`
+carry RFC 6750 `WWW-Authenticate`; `403 ip_not_allowed` does not. Format-miss and
+hash-miss share the same body/headers. Presented tokens never appear in messages,
+`render()`, or `__debugInfo`.
 
 ## Development
 

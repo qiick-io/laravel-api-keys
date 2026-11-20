@@ -43,6 +43,14 @@ Set `API_KEYS_PRODUCT_PREFIX` (three-letter product code) before issuing tokens.
 | Scopes | Fail-closed: whitespace, wrong case, duplicates, or non-vocabulary values → empty set → `403 insufficient_scope` (never 401). |
 | Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint). |
 
+## Token shape
+
+`{product}_{live|test}_{id}{secret}` — three-letter product prefix, 8-character
+public id, 32-character secret (A–Za–z0–9, ≥160 bits via `RandomSource`). The row
+stores SHA-256 of the **full** plaintext. Issue via `TokenCodec` with injectable
+`EnvironmentResolver` and `RandomSource` (tests: `FixedEnvironment`,
+`FixedRandomSource`).
+
 ## Evaluation order
 
 1. Parse bearer (no trim) → 2. Token format → 3. Lookup + hash_equals (dummy on miss) →

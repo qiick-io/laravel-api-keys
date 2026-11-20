@@ -26,6 +26,14 @@ interface KeyAuthorizer
     ): AuthorizationDecision;
 
     /**
+     * Current ceiling the owner/creator may still grant.
+     *
+     * `$knownScopes` is the expanded offer from the key (stored atoms plus an
+     * implied `:read` when `:write` is present). Implementations MUST return
+     * every atom the principal may still hold — including implied reads when
+     * the owner retains write (or only read). Omitting a read that the owner
+     * still has prevents write→read demotion and can empty the granted set.
+     *
      * @param  list<string>  $knownScopes
      * @return list<string>
      */

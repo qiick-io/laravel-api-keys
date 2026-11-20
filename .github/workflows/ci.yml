@@ -87,13 +87,11 @@ jobs:
       - name: Pest
         run: vendor/bin/pest
 
-      # Mutation targets from the design §6. Pest keeps only the last --class, so
-      # pass one comma-separated list. Single backslashes inside single quotes.
-      - name: Pest mutate (security-critical classes)
+      # Mutation targets from the design §6. Enforce >=95% per class (a combined
+      # CSV can hide a weak class behind a high overall score).
+      - name: Pest mutate (security-critical classes, per-class min 95)
         if: matrix.php == '8.4' && matrix.laravel == '12' && matrix.dependency-version == 'stable'
-        run: >
-          vendor/bin/pest --mutate --parallel --min=95
-          --class='Qiick\ApiKeys\TokenCodec,Qiick\ApiKeys\Scope,Qiick\ApiKeys\ScopeSet,Qiick\ApiKeys\IpAllowlist,Qiick\ApiKeys\ApiKeyAuthenticator,Qiick\ApiKeys\Exceptions\ApiKeyRejection,Qiick\ApiKeys\UsageRecorder,Qiick\ApiKeys\FailedAttemptLimiter,Qiick\ApiKeys\Http\BearerTokenExtractor'
+        run: bash scripts/mutate-per-class.sh
 
   # Adapter-example smoke once Eloquent examples land; scaffold keeps the job
   # so the matrix shape matches the design (SQLite / MySQL / MariaDB / PostgreSQL).

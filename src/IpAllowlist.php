@@ -59,9 +59,11 @@ final class IpAllowlist
     }
 
     /**
-     * Unwrap IPv4-mapped addresses to dotted IPv4 only. ::1 / :: stay IPv6.
+     * Unwrap IPv4-mapped addresses (::ffff:a.b.c.d) to dotted IPv4; leave other
+     * forms as inet_ntop. Shared by {@see FailedAttemptLimiter} so mapped clients
+     * bucket with IPv4 peers instead of collapsing onto `v6:::`.
      */
-    private function expandMapped(string $ip): ?string
+    public function expandMapped(string $ip): ?string
     {
         $binary = @inet_pton($ip);
         if ($binary === false) {

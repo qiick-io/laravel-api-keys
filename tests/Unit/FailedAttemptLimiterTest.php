@@ -39,6 +39,23 @@ it('buckets IPv6 addresses by /64', function (): void {
         ->and($limiter->tooManyAttempts($otherNetwork))->toBeFalse();
 });
 
+it('unwraps IPv4-mapped IPv6 into the matching IPv4 bucket', function (): void {
+    $inner = new FakeAttemptLimiter;
+    $limiter = new FailedAttemptLimiter($inner, maxPerMinute: 1);
+
+    $mapped = '::ffff:203.0.113.10';
+    $dotted = '203.0.113.10';
+
+    expect($limiter->bucketKey($mapped))->toBe('api-key-failures:v4:203.0.113.10')
+        ->and($limiter->bucketKey($mapped))->toBe($limiter->bucketKey($dotted))
+        ->and($limiter->bucketKey($mapped))->not->toStartWith('api-key-failures:v6:');
+
+    $limiter->hit($mapped);
+    expect($limiter->tooManyAttempts($dotted))->toBeTrue()
+        ->and($inner->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(1)
+        ->and($inner->hitsFor('api-key-failures:v6:::'))->toBe(0);
+});
+
 it('skips the brake for null, empty, or unparseable client IPs', function (): void {
     $inner = new FakeAttemptLimiter;
     $limiter = new FailedAttemptLimiter($inner, maxPerMinute: 1);

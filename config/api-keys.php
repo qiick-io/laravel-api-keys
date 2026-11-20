@@ -22,10 +22,16 @@ return [
     'environment' => env('API_KEYS_ENVIRONMENT'),
 
     /*
-     * Hours the previous secret stays valid after rotation. Invalid or negative
-     * values become 0 (no grace).
+     * Hours the previous secret stays valid after rotation. Invalid, negative,
+     * or above rotation_max_grace_hours → 0 (no grace).
      */
     'rotation_grace_hours' => (int) env('API_KEYS_ROTATION_GRACE_HOURS', 24),
+
+    /*
+     * Ceiling for rotation_grace_hours (default one week). Larger values are
+     * treated as invalid → 0 by RotationService::normalizeGraceHours.
+     */
+    'rotation_max_grace_hours' => (int) env('API_KEYS_ROTATION_MAX_GRACE_HOURS', 168),
 
     'usage_throttle_seconds' => (int) env('API_KEYS_USAGE_THROTTLE_SECONDS', 60),
 

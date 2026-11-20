@@ -119,3 +119,11 @@ it('keeps write when the ceiling still allows write', function (): void {
     expect($narrowed->values())->toBe(['users:write'])
         ->and($narrowed->allows(Scope::tryFromString('users:read')))->toBeTrue();
 });
+
+it('dedupes granted scopes when write demotes onto an already-kept read', function (): void {
+    $expanded = ScopeSet::parseStoredExpanded(['users:read', 'users:write'], vocabulary());
+    $narrowed = $expanded->narrowedTo(['users:read']);
+
+    expect($narrowed->values())->toBe(['users:read'])
+        ->and($narrowed->collapsed()->values())->toBe(['users:read']);
+});

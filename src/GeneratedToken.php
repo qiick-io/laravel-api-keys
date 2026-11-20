@@ -14,9 +14,9 @@ namespace Qiick\ApiKeys;
 final readonly class GeneratedToken implements \JsonSerializable
 {
     public function __construct(
-        public string $plainText,
+        #[\SensitiveParameter] public string $plainText,
         public string $keyPrefix,
-        public string $keyHash,
+        #[\SensitiveParameter] public string $keyHash,
     ) {}
 
     /**

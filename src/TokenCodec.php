@@ -77,6 +77,42 @@ final class TokenCodec
         );
     }
 
+    /**
+     * Whether a stored key_prefix matches this codec’s canonical shape.
+     */
+    public function isCanonicalKeyPrefix(string $keyPrefix): bool
+    {
+        $product = preg_quote($this->productPrefix, '/');
+        $idLength = $this->idLength();
+
+        return preg_match('/^'.$product.'_(?:live|test)_[A-Za-z0-9]{'.$idLength.'}$/D', $keyPrefix) === 1;
+    }
+
+    /**
+     * Whether a stored key_prefix is canonical, or recognised by an accepting
+     * legacy matcher at `$now`. Matchers are asked with the prefix alone (no
+     * secret-length probes): a matcher that only accepts a full token shape
+     * will not recognise a stored prefix for rotation.
+     */
+    public function isValidKeyPrefix(string $keyPrefix, \DateTimeImmutable $now): bool
+    {
+        if ($this->isCanonicalKeyPrefix($keyPrefix)) {
+            return true;
+        }
+
+        foreach ($this->legacyMatchers as $matcher) {
+            if (! $matcher->isAccepting($now)) {
+                continue;
+            }
+
+            if ($matcher->prefixOf($keyPrefix) === $keyPrefix) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function prefixOf(#[\SensitiveParameter] string $presentedToken): ?string
     {
         if (preg_match($this->canonicalPattern(), $presentedToken, $matches) === 1) {

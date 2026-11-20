@@ -9,9 +9,11 @@ use Qiick\ApiKeys\Contracts\AttemptLimiter;
 /**
  * @api Pre-auth brake for unknown/invalid tokens (design A15).
  *
- * Buckets IPv4 by full address (/32) and IPv6 by /64. A null/empty/unparseable
- * client IP does **not** share a bucket (that would lock out everyone behind a
- * misconfigured proxy): the brake is skipped for that request.
+ * Buckets IPv4 by full address (/32) and IPv6 by /64. IPv4-mapped IPv6
+ * (::ffff:a.b.c.d) is expanded via {@see IpAllowlist::expandMapped} before
+ * bucketing so dual-stack clients share the IPv4 bucket (not a single `v6:::`).
+ * A null/empty/unparseable client IP does **not** share a bucket (that would
+ * lock out everyone behind a misconfigured proxy): the brake is skipped.
  *
  * `maxPerMinute` ≤ 0 disables. Recipes should leave the default (20) on — see
  * README for NAT / shared-egress lockout risk.
@@ -21,6 +23,7 @@ final class FailedAttemptLimiter
     public function __construct(
         private AttemptLimiter $limiter,
         private int $maxPerMinute = 20,
+        private IpAllowlist $ipAllowlist = new IpAllowlist,
     ) {}
 
     public function tooManyAttempts(?string $clientIp): bool
@@ -75,13 +78,19 @@ final class FailedAttemptLimiter
             return null;
         }
 
-        $binary = @inet_pton($clientIp);
-        if ($binary === false) {
+        $canonical = $this->ipAllowlist->expandMapped($clientIp);
+        if ($canonical === null) {
             return null;
         }
 
+        // expandMapped only returns addresses inet_pton already accepted.
+        $binary = @inet_pton($canonical);
+        if ($binary === false) { // @pest-mutate-ignore: FalseToTrue
+            return null; // @pest-mutate-ignore: RemoveEarlyReturn
+        }
+
         if (strlen($binary) === 4) {
-            return 'api-key-failures:v4:'.$clientIp;
+            return 'api-key-failures:v4:'.$canonical;
         }
 
         // IPv6 /64: keep the first 64 bits, zero the rest.

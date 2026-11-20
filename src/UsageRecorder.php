@@ -14,11 +14,11 @@ final class UsageRecorder
         ?\DateTimeImmutable $lastUsedAt,
         ?string $lastUsedIp,
         ?string $currentIp,
-        int $throttleSeconds = 60, // @pest-mutate-ignore
-        bool $bypassThrottleOnIpChange = true, // @pest-mutate-ignore
+        int $throttleSeconds = 60,
+        bool $bypassThrottleOnIpChange = true,
     ): bool {
         if ($lastUsedAt === null) {
-            return true; // @pest-mutate-ignore RemoveEarlyReturn — null would error on getTimestamp below
+            return true;
         }
 
         if (

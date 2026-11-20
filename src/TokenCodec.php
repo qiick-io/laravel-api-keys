@@ -24,9 +24,9 @@ final class TokenCodec
      * these lines is ignored; the covered {@see self::idLength()} /
      * {@see self::secretLength()} methods are the values issue/parse actually use.
      */
-    public const int ID_LENGTH = 8; // @pest-mutate-ignore
+    public const int ID_LENGTH = 8; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
 
-    public const int SECRET_LENGTH = 32; // @pest-mutate-ignore
+    public const int SECRET_LENGTH = 32; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
 
     private const string ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -38,6 +38,8 @@ final class TokenCodec
 
     /** @var list<LegacyTokenMatcher> */
     private array $legacyMatchers;
+
+    private int $dummyMatchCalls = 0;
 
     /**
      * @param  list<LegacyTokenMatcher>  $legacyMatchers
@@ -53,6 +55,14 @@ final class TokenCodec
         }
 
         $this->legacyMatchers = $legacyMatchers;
+    }
+
+    /**
+     * Observable call count for the dummy-miss path (timing equalisation spy).
+     */
+    public function dummyMatchCalls(): int
+    {
+        return $this->dummyMatchCalls;
     }
 
     public function issue(?TokenEnvironment $override = null): GeneratedToken
@@ -75,7 +85,7 @@ final class TokenCodec
         );
     }
 
-    public function prefixOf(string $presentedToken): ?string
+    public function prefixOf(#[\SensitiveParameter] string $presentedToken): ?string
     {
         if (preg_match($this->canonicalPattern(), $presentedToken, $matches) === 1) {
             return $matches['prefix'];
@@ -91,7 +101,7 @@ final class TokenCodec
         return null;
     }
 
-    public function parse(string $presentedToken): ?ParsedToken
+    public function parse(#[\SensitiveParameter] string $presentedToken): ?ParsedToken
     {
         if (preg_match($this->canonicalPattern(), $presentedToken, $matches) !== 1) {
             return null;
@@ -111,7 +121,7 @@ final class TokenCodec
         );
     }
 
-    public function hash(string $presentedToken): string
+    public function hash(#[\SensitiveParameter] string $presentedToken): string
     {
         return hash('sha256', $presentedToken);
     }
@@ -121,7 +131,7 @@ final class TokenCodec
      * so "no candidate" and "hash miss" spend comparable compare work.
      */
     public function match(
-        string $presentedToken,
+        #[\SensitiveParameter] string $presentedToken,
         string $keyHash,
         ?string $previousKeyHash,
         ?\DateTimeImmutable $previousKeyValidUntil,
@@ -143,7 +153,7 @@ final class TokenCodec
         }
 
         // Timing-only compare when both current and previous hashes missed.
-        $this->spendCompare($presentedHash); // @pest-mutate-ignore
+        $this->spendCompare($presentedHash);
 
         return TokenMatch::None;
     }
@@ -151,15 +161,16 @@ final class TokenCodec
     /**
      * Constant-ish miss helper used when the repository returns no candidates.
      */
-    public function performDummyMatch(string $presentedToken): void
+    public function performDummyMatch(#[\SensitiveParameter] string $presentedToken): void
     {
-        $this->spendCompare($this->hash($presentedToken)); // @pest-mutate-ignore
+        $this->dummyMatchCalls++;
+        $this->spendCompare($this->hash($presentedToken));
     }
 
     private function spendCompare(string $presentedHash): void
     {
         // Equalises compare work on a miss; branch bodies are intentional no-ops.
-        if (hash_equals(self::DUMMY_DIGEST, $presentedHash)) { // @pest-mutate-ignore
+        if (hash_equals(self::DUMMY_DIGEST, $presentedHash)) {
             return;
         }
     }
@@ -170,7 +181,7 @@ final class TokenCodec
         $idLength = $this->idLength();
         $secretLength = $this->secretLength();
 
-        return '/^(?<prefix>'.$product.'_(?:live|test)_[A-Za-z0-9]{'.$idLength.'})(?<secret>[A-Za-z0-9]{'.$secretLength.',})$/D';
+        return '/^(?<prefix>'.$product.'_(?:live|test)_[A-Za-z0-9]{'.$idLength.'})(?<secret>[A-Za-z0-9]{'.$secretLength.'})$/D';
     }
 
     /**

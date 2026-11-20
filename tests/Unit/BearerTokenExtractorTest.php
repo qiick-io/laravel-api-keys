@@ -20,6 +20,15 @@ it('extracts the Bearer token without trimming whitespace', function (): void {
     expect(extractor()->fromRequest($request))->toBe("secret-token\n");
 });
 
+it('accepts the Bearer scheme case-insensitively (RFC 7235)', function (): void {
+    expect(extractor()->fromRequest(Request::create('/', 'GET', server: [
+        'HTTP_AUTHORIZATION' => 'bearer lowercase-token',
+    ])))->toBe('lowercase-token')
+        ->and(extractor()->fromRequest(Request::create('/', 'GET', server: [
+            'HTTP_AUTHORIZATION' => 'BEARER UPPER',
+        ])))->toBe('UPPER');
+});
+
 it('returns null when Authorization is missing, empty Bearer, or not Bearer', function (): void {
     expect(extractor()->fromRequest(Request::create('/', 'GET')))->toBeNull()
         ->and(extractor()->fromRequest(Request::create('/', 'GET', server: [
@@ -27,8 +36,5 @@ it('returns null when Authorization is missing, empty Bearer, or not Bearer', fu
         ])))->toBeNull()
         ->and(extractor()->fromRequest(Request::create('/', 'GET', server: [
             'HTTP_AUTHORIZATION' => 'Basic abc',
-        ])))->toBeNull()
-        ->and(extractor()->fromRequest(Request::create('/', 'GET', server: [
-            'HTTP_AUTHORIZATION' => 'bearer lowercase',
         ])))->toBeNull();
 });

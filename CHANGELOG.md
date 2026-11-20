@@ -9,12 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `ApiKeyAuthenticator` with the fixed evaluation order (format → lookup +
-  `hash_equals` / dummy miss → revoked/expired → actor → IP → scopes +
-  `KeyAuthorizer` ceiling → rate limit → usage), `ApiKeyRejection` (RFC 6750
-  fleet `{message,error[,scope]}`, token redaction), `BearerTokenExtractor`
-  (no trim), `UsageRecorder`, contracts (`ApiKeyRepository`, `ApiKeyRecord`,
-  `KeyAuthorizer`, `AttemptLimiter`, `UsageSideEffect`), and test fakes.
+- `ApiKeyAuthenticator` with the fixed evaluation order (failed-attempt guard →
+  format → lookup + `hash_equals` / dummy miss → revoked/expired → actor → IP →
+  scopes narrowed by owner ceiling → rate limit → usage), `ApiKeyRejection`
+  (RFC 6750 fleet `{message,error[,scope]}`, translator hook, token redaction),
+  `FailedAttemptLimiter`, `BearerTokenExtractor` (no trim, case-insensitive
+  scheme), `UsageRecorder` (usage write failures reported, not thrown),
+  `#[SensitiveParameter]` on token/secret parameters, contracts and test fakes.
 - `IpAllowlist` (IpUtils + IPv4-mapped unwrap, mapped CIDR prefix−96, zone-id
   denied, prefix-range fail-closed) and `Http\ClientIp` (`Request::ip()` only).
 - `Scope` / `ScopeSet` with fail-closed `parseStored`, write⊇read, highest-per-resource, and `ArrayScopeVocabulary` test double.

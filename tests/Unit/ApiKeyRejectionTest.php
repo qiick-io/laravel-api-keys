@@ -123,3 +123,26 @@ it('redacts debug info to status, error, message and scope only', function (): v
         'scope' => null,
     ]);
 });
+
+it('translates messages via the translator hook but never the error code', function (): void {
+    ApiKeyRejection::setTranslator(static function (string $key, array $replace): string {
+        return match ($key) {
+            'api_keys.invalid_token' => 'Chiave non valida.',
+            'api_keys.insufficient_scope' => 'Manca lo scope :scope.',
+            default => $key,
+        };
+    });
+
+    try {
+        $invalid = ApiKeyRejection::invalidToken();
+        $scope = ApiKeyRejection::insufficientScope('items:read');
+
+        expect($invalid->getMessage())->toBe('Chiave non valida.')
+            ->and($invalid->errorCode())->toBe('invalid_token')
+            ->and($scope->getMessage())->toBe('Manca lo scope items:read.')
+            ->and($scope->errorCode())->toBe('insufficient_scope')
+            ->and($scope->render()->getData(true)['error'])->toBe('insufficient_scope');
+    } finally {
+        ApiKeyRejection::setTranslator(null);
+    }
+});

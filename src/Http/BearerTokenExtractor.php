@@ -9,8 +9,8 @@ use Illuminate\Http\Request;
 /**
  * @api Extract Authorization Bearer as presented — no trim.
  *
- * Whitespace / newline in the token must fail the later format check
- * (`invalid_token`), not be silently stripped before validation.
+ * Scheme match is case-insensitive (RFC 7235). Whitespace / newline in the
+ * token must fail the later format check (`invalid_token`), not be stripped.
  */
 final class BearerTokenExtractor
 {
@@ -18,11 +18,12 @@ final class BearerTokenExtractor
     {
         $header = $request->header('Authorization');
 
-        if (! is_string($header) || ! str_starts_with($header, 'Bearer ')) {
+        if (! is_string($header) || preg_match('/^Bearer\s/i', $header, $matches) !== 1) {
             return null;
         }
 
-        $token = substr($header, 7);
+        // Strip only the matched scheme + separator; do not trim the token.
+        $token = substr($header, strlen($matches[0]));
 
         return $token !== '' ? $token : null;
     }

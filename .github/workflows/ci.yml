@@ -86,25 +86,20 @@ jobs:
       - name: Pest
         run: vendor/bin/pest
 
-      # Mutation targets from the design §6; empty until those classes land.
+      # Mutation targets from the design §6 (honest score; no || true).
       - name: Pest mutate (security-critical classes)
         if: matrix.php == '8.4' && matrix.laravel == '12' && matrix.dependency-version == 'stable'
         run: |
-          if [ -z "$(find src -name '*.php' ! -path 'src/Laravel/*' 2>/dev/null)" ]; then
-            echo 'No mutation targets yet (scaffold only).'
-            exit 0
-          fi
-          vendor/bin/pest --mutate --parallel --min=100 \
+          vendor/bin/pest --mutate --parallel --min=95 \
             --class='Qiick\\ApiKeys\\TokenCodec' \
             --class='Qiick\\ApiKeys\\Scope' \
             --class='Qiick\\ApiKeys\\ScopeSet' \
             --class='Qiick\\ApiKeys\\IpAllowlist' \
             --class='Qiick\\ApiKeys\\ApiKeyAuthenticator' \
             --class='Qiick\\ApiKeys\\Exceptions\\ApiKeyRejection' \
-            --class='Qiick\\ApiKeys\\RotationService' \
             --class='Qiick\\ApiKeys\\UsageRecorder' \
             --class='Qiick\\ApiKeys\\FailedAttemptLimiter' \
-            || true
+            --class='Qiick\\ApiKeys\\Http\\BearerTokenExtractor'
 
   # Adapter-example smoke once Eloquent examples land; scaffold keeps the job
   # so the matrix shape matches the design (SQLite / MySQL / MariaDB / PostgreSQL).

@@ -71,16 +71,17 @@ highest-per-resource drops a sibling `read` when `write` is present.
 
 `ApiKeyAuthenticator::authenticate($presentedToken, $context, $requiredScope)`:
 
-1. Parse bearer (no trim; `BearerTokenExtractor`) → 2. Token format → 3. Lookup +
-   `hash_equals` (dummy on miss) → 4. Revoked/expired (after match) → 5. Actor
-   (`KeyAuthorizer`) → 6. IP allowlist → 7. Scopes + authorizer ceiling →
-8. Per-key rate limit (`AttemptLimiter`, default bucket `api-key:{id}`) →
-9. Usage record (`UsageRecorder` throttle).
+1. Pre-auth `FailedAttemptLimiter` (per IP; default 20/min in recipes) →
+2. Parse bearer (no trim; case-insensitive `Bearer`; `BearerTokenExtractor`) →
+3. Token format → 4. Lookup + `hash_equals` (dummy on miss) → 5. Revoked/expired →
+6. Actor (`KeyAuthorizer`) → 7. IP allowlist → 8. Scopes narrowed to owner ceiling →
+9. Per-key rate limit (`AttemptLimiter`, default bucket `api-key:{id}`) →
+10. Usage record (`UsageRecorder` throttle; write failures are reported, not thrown).
 
 Refusals are `ApiKeyRejection`: `401 invalid_token` and `403 insufficient_scope`
 carry RFC 6750 `WWW-Authenticate`; `403 ip_not_allowed` does not. Format-miss and
-hash-miss share the same body/headers. Presented tokens never appear in messages,
-`render()`, or `__debugInfo`.
+hash-miss share the same body/headers. Presented tokens are `#[SensitiveParameter]`
+and never appear in messages, `render()`, `__debugInfo`, JSON, or serialize output.
 
 ## Development
 

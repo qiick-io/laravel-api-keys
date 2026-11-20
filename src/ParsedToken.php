@@ -16,4 +16,18 @@ final readonly class ParsedToken
         public string $secret,
         public string $keyPrefix,
     ) {}
+
+    /**
+     * @return array{productPrefix: string, environment: string, publicId: string, secret: string, keyPrefix: string}
+     */
+    public function __debugInfo(): array
+    {
+        return [
+            'productPrefix' => $this->productPrefix,
+            'environment' => $this->environment->value,
+            'publicId' => $this->publicId,
+            'secret' => '[REDACTED]',
+            'keyPrefix' => $this->keyPrefix,
+        ];
+    }
 }

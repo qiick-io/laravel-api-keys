@@ -26,6 +26,11 @@ it('parses well-formed scope atoms and rejects whitespace, case and junk', funct
         ->and(Scope::tryFromString(''))->toBeNull();
 });
 
+it('rejects crafted constructor atoms that would inject into WWW-Authenticate', function (): void {
+    expect(fn () => new Scope('users', 'read", scope="evil'))
+        ->toThrow(InvalidArgumentException::class);
+});
+
 it('lets write satisfy read on the same resource only', function (): void {
     $read = Scope::tryFromString('users:read');
     $write = Scope::tryFromString('users:write');

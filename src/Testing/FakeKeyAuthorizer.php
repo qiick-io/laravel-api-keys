@@ -72,4 +72,15 @@ final class FakeKeyAuthorizer implements KeyAuthorizer
 
         return $clone;
     }
+
+    /**
+     * @param  list<string>  $creatorMayGrant
+     */
+    public function withCreatorMayGrant(array $creatorMayGrant): self
+    {
+        $clone = clone $this;
+        $clone->creatorMayGrant = $creatorMayGrant;
+
+        return $clone;
+    }
 }

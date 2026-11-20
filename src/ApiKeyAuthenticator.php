@@ -18,13 +18,16 @@ use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
  *
  * No HTTP middleware ships with this package — products call this from their own.
  *
- * Order: format → lookup + hash_equals (dummy on miss) → revoked/expired →
- * actor → IP → scopes + authorizer ceiling → rate limit → usage.
+ * Order: failed-attempt guard → format → lookup + hash_equals (dummy on miss) →
+ * revoked/expired → actor → IP → scopes + authorizer ceiling → rate limit → usage.
  *
  * Never puts `$presentedToken` in exception messages.
  */
 final class ApiKeyAuthenticator
 {
+    /**
+     * @param  (callable(\Throwable): void)|null  $exceptionReporter
+     */
     public function __construct(
         private TokenCodec $codec,
         private ApiKeyRepository $repository,
@@ -34,33 +37,55 @@ final class ApiKeyAuthenticator
         private UsageRecorder $usageRecorder,
         private Clock $clock,
         private AttemptLimiter $attemptLimiter,
+        private ?FailedAttemptLimiter $failedAttemptLimiter = null,
         private ?UsageSideEffect $usageSideEffect = null,
-        private int $usageThrottleSeconds = 60, // @pest-mutate-ignore
-        private bool $bypassThrottleOnIpChange = true, // @pest-mutate-ignore
-        private int $defaultRateLimitPerMinute = 60, // @pest-mutate-ignore
+        private int $usageThrottleSeconds = 60,
+        private bool $bypassThrottleOnIpChange = true,
+        private int $defaultRateLimitPerMinute = 60,
+        private mixed $exceptionReporter = null,
     ) {}
 
     /**
      * @throws ApiKeyRejection
      */
     public function authenticate(
-        string $presentedToken,
+        #[\SensitiveParameter] string $presentedToken,
         KeyContext $context,
         ?Scope $requiredScope = null,
     ): AuthenticationResult {
+        $clientIp = $context->ip ?? '';
+
+        if (
+            $this->failedAttemptLimiter !== null
+            && $this->failedAttemptLimiter->tooManyAttempts($clientIp)
+        ) {
+            throw ApiKeyRejection::rateLimited(
+                $this->failedAttemptLimiter->availableIn($clientIp),
+                $this->failedAttemptLimiter->maxPerMinute(),
+                remaining: 0,
+            );
+        }
+
         $keyPrefix = $this->codec->prefixOf($presentedToken);
         if ($keyPrefix === null) {
+            $this->hitFailedAttempt($clientIp);
+
             throw ApiKeyRejection::invalidToken();
         }
 
-        $candidates = [];
-        foreach ($this->repository->findCandidatesByPrefix($keyPrefix) as $candidate) {
-            $candidates[] = $candidate;
+        try {
+            $candidates = [];
+            foreach ($this->repository->findCandidatesByPrefix($keyPrefix) as $candidate) {
+                $candidates[] = $candidate;
+            }
+        } catch (\Throwable $exception) {
+            $this->hitFailedAttempt($clientIp);
+            throw $exception;
         }
 
         if ($candidates === []) {
-            // Timing equalisation; observable behaviour is the shared invalid_token body (A2b).
-            $this->codec->performDummyMatch($presentedToken); // @pest-mutate-ignore RemoveMethodCall
+            $this->codec->performDummyMatch($presentedToken);
+            $this->hitFailedAttempt($clientIp);
 
             throw ApiKeyRejection::invalidToken();
         }
@@ -86,31 +111,42 @@ final class ApiKeyAuthenticator
         }
 
         if ($matched === null) {
+            $this->hitFailedAttempt($clientIp);
+
             throw ApiKeyRejection::invalidToken();
         }
 
         if ($matched->revokedAt() !== null) {
+            $this->hitFailedAttempt($clientIp);
+
             throw ApiKeyRejection::invalidToken('The API key has been revoked.');
         }
 
         if ($matched->expiresAt() !== null && $now >= $matched->expiresAt()) {
+            $this->hitFailedAttempt($clientIp);
+
             throw ApiKeyRejection::invalidToken('The API key has expired.');
         }
 
         $actor = $this->authorizer->authorizeActor($matched, $context);
         if (! $actor->allowed) {
+            $this->hitFailedAttempt($clientIp);
+
             throw ApiKeyRejection::invalidToken(
                 $actor->denialMessage ?? 'The API key is not valid.',
             );
         }
-
-        $clientIp = $context->ip ?? ''; // @pest-mutate-ignore EmptyStringToNotEmpty
 
         if (! $this->ipAllowlist->allows($clientIp, $matched->rawIpAllowlist())) {
             throw ApiKeyRejection::ipNotAllowed();
         }
 
         $granted = ScopeSet::parseStored($matched->rawScopes(), $this->vocabulary);
+        if ($granted->isEmpty()) {
+            throw ApiKeyRejection::noUsableScopes();
+        }
+
+        $granted = $this->narrowToOwnerCeiling($matched, $granted, $context);
         if ($granted->isEmpty()) {
             throw ApiKeyRejection::noUsableScopes();
         }
@@ -144,8 +180,7 @@ final class ApiKeyAuthenticator
             $this->usageThrottleSeconds,
             $this->bypassThrottleOnIpChange,
         )) {
-            $this->repository->recordUsage($matched, $context->ip, $now);
-            $this->usageSideEffect?->afterRecorded($matched, $context->ip, $wasFirstUse);
+            $this->recordUsageQuietly($matched, $context->ip, $now, $wasFirstUse);
         }
 
         return new AuthenticationResult(
@@ -153,6 +188,64 @@ final class ApiKeyAuthenticator
             $granted,
             $matchKind === TokenMatch::Previous,
         );
+    }
+
+    private function hitFailedAttempt(string $clientIp): void
+    {
+        $this->failedAttemptLimiter?->hit($clientIp);
+    }
+
+    private function narrowToOwnerCeiling(
+        ApiKeyRecord $record,
+        ScopeSet $granted,
+        KeyContext $context,
+    ): ScopeSet {
+        $ceilingId = $record->ownerIdentifier() ?? $record->createdByIdentifier();
+        if ($ceilingId === null) {
+            return $granted;
+        }
+
+        $allowedValues = $this->authorizer->scopesCreatorMayGrant(
+            $ceilingId,
+            $granted->values(),
+            $context,
+        );
+
+        $narrowed = [];
+        foreach ($granted->scopes as $scope) {
+            if (in_array($scope->value(), $allowedValues, true)) {
+                $narrowed[] = $scope;
+            }
+        }
+
+        return new ScopeSet($narrowed);
+    }
+
+    private function recordUsageQuietly(
+        ApiKeyRecord $record,
+        ?string $ip,
+        \DateTimeImmutable $usedAt,
+        bool $wasFirstUse,
+    ): void {
+        try {
+            $this->repository->recordUsage($record, $ip, $usedAt);
+            $this->usageSideEffect?->afterRecorded($record, $ip, $wasFirstUse);
+        } catch (\Throwable $exception) {
+            $this->reportException($exception);
+        }
+    }
+
+    private function reportException(\Throwable $exception): void
+    {
+        if (is_callable($this->exceptionReporter)) {
+            ($this->exceptionReporter)($exception);
+
+            return;
+        }
+
+        if (\function_exists('report')) {
+            report($exception);
+        }
     }
 
     /**
@@ -164,6 +257,7 @@ final class ApiKeyAuthenticator
 
         if ($decision === null) {
             $limit = $record->rateLimitPerMinute() ?? $this->defaultRateLimitPerMinute;
+            // Design: 0 disables the per-key brake (config default_rate_limit_per_minute).
             if ($limit <= 0) {
                 return;
             }
@@ -171,7 +265,7 @@ final class ApiKeyAuthenticator
             $decision = new RateLimitDecision(
                 bucketKey: 'api-key:'.$record->id(),
                 maxAttempts: $limit,
-                decaySeconds: 60, // @pest-mutate-ignore
+                decaySeconds: 60,
             );
         }
 
@@ -179,7 +273,7 @@ final class ApiKeyAuthenticator
             throw ApiKeyRejection::rateLimited(
                 $this->attemptLimiter->availableIn($decision->bucketKey),
                 $decision->maxAttempts,
-                remaining: 0, // @pest-mutate-ignore
+                remaining: 0,
             );
         }
 

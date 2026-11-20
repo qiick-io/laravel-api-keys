@@ -69,6 +69,37 @@ it('redacts plaintext and hash in GeneratedToken debug output', function (): voi
         ->and($debug['keyHash'])->not->toBe($token->keyHash);
 });
 
+it('redacts plaintext via json_encode and serialize on GeneratedToken', function (): void {
+    $token = codec()->issue();
+
+    expect(json_encode($token))->not->toContain($token->plainText)
+        ->and(json_encode($token))->toContain('[REDACTED]')
+        ->and(serialize($token))->not->toContain($token->plainText)
+        ->and(serialize($token))->toContain('[REDACTED]');
+
+    expect(fn () => unserialize(serialize($token)))->toThrow(LogicException::class);
+});
+
+it('redacts the secret in ParsedToken debug output', function (): void {
+    $codec = codec();
+    $token = $codec->issue();
+    $parsed = $codec->parse($token->plainText);
+    $debug = $parsed->__debugInfo();
+
+    expect($debug['secret'])->toBe('[REDACTED]')
+        ->and($debug['secret'])->not->toBe($parsed->secret)
+        ->and($debug['keyPrefix'])->toBe($token->keyPrefix);
+});
+
+it('rejects secrets longer than exactly SECRET_LENGTH', function (): void {
+    $codec = codec();
+    $token = $codec->issue();
+    $tooLong = $token->plainText.'x';
+
+    expect($codec->prefixOf($tooLong))->toBeNull()
+        ->and($codec->parse($tooLong))->toBeNull();
+});
+
 it('prefers an explicit environment override over the resolver', function (): void {
     $token = codec(environment: TokenEnvironment::Test)->issue(TokenEnvironment::Live);
 

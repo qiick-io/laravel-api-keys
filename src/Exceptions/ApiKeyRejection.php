@@ -12,10 +12,27 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
  * @api Fleet RFC 6750 refusals as `{message, error[, scope]}`.
  *
  * HARD RULE: constructors and factories MUST NOT accept or embed the presented
- * token, Authorization header, or key hash. Messages are fixed / translated only.
+ * token, Authorization header, or key hash. Messages are fixed / translated only;
+ * error codes are never translated.
  */
 final class ApiKeyRejection extends HttpException
 {
+    /**
+     * Optional message translator. Receives a stable message key and replace map;
+     * must return the translated string (error codes stay English machine values).
+     *
+     * @var (callable(string, array<string, string>): string)|null
+     */
+    private static $translator = null;
+
+    /**
+     * @param  (callable(string, array<string, string>): string)|null  $translator
+     */
+    public static function setTranslator(?callable $translator): void
+    {
+        self::$translator = $translator;
+    }
+
     /**
      * @param  array<string, string|list<string>>  $headers
      */
@@ -29,11 +46,11 @@ final class ApiKeyRejection extends HttpException
         parent::__construct($statusCode, $message, null, $headers);
     }
 
-    public static function invalidToken(string $message = 'The API key is not valid.'): self
+    public static function invalidToken(?string $message = null): self
     {
         return new self(
             401,
-            $message,
+            $message ?? self::translate('api_keys.invalid_token', 'The API key is not valid.'),
             KeyRejectionCode::InvalidToken,
             null,
             ['WWW-Authenticate' => 'Bearer error="invalid_token"'],
@@ -44,7 +61,11 @@ final class ApiKeyRejection extends HttpException
     {
         return new self(
             403,
-            'The API key lacks the '.$scope.' scope.',
+            self::translate(
+                'api_keys.insufficient_scope',
+                'The API key lacks the :scope scope.',
+                ['scope' => $scope],
+            ),
             KeyRejectionCode::InsufficientScope,
             $scope,
             ['WWW-Authenticate' => 'Bearer error="insufficient_scope", scope="'.$scope.'"'],
@@ -55,7 +76,7 @@ final class ApiKeyRejection extends HttpException
     {
         return new self(
             403,
-            'The API key holds no scopes.',
+            self::translate('api_keys.no_usable_scopes', 'The API key holds no scopes.'),
             KeyRejectionCode::InsufficientScope,
             null,
             ['WWW-Authenticate' => 'Bearer error="insufficient_scope"'],
@@ -67,7 +88,10 @@ final class ApiKeyRejection extends HttpException
         // No WWW-Authenticate: fleet contract for ip_not_allowed.
         return new self(
             403,
-            'API key is not allowed from this IP address.',
+            self::translate(
+                'api_keys.ip_not_allowed',
+                'API key is not allowed from this IP address.',
+            ),
             KeyRejectionCode::IpNotAllowed,
         );
     }
@@ -77,19 +101,19 @@ final class ApiKeyRejection extends HttpException
      */
     public static function rateLimited(int $retryAfterSeconds, ?int $limit = null, ?int $remaining = null): self
     {
-        $headers = ['Retry-After' => (string) $retryAfterSeconds]; // @pest-mutate-ignore RemoveStringCast
+        $headers = ['Retry-After' => (string) $retryAfterSeconds]; // @pest-mutate-ignore: RemoveStringCast
 
         if ($limit !== null) {
-            $headers['X-RateLimit-Limit'] = (string) $limit; // @pest-mutate-ignore RemoveStringCast
+            $headers['X-RateLimit-Limit'] = (string) $limit; // @pest-mutate-ignore: RemoveStringCast
         }
 
         if ($remaining !== null) {
-            $headers['X-RateLimit-Remaining'] = (string) $remaining; // @pest-mutate-ignore RemoveStringCast
+            $headers['X-RateLimit-Remaining'] = (string) $remaining; // @pest-mutate-ignore: RemoveStringCast
         }
 
         return new self(
             429,
-            'Too many requests.',
+            self::translate('api_keys.rate_limit_exceeded', 'Too many requests.'),
             KeyRejectionCode::RateLimitExceeded,
             null,
             $headers,
@@ -126,5 +150,23 @@ final class ApiKeyRejection extends HttpException
             'message' => $this->getMessage(),
             'scope' => $this->requiredScope,
         ];
+    }
+
+    /**
+     * @param  array<string, string>  $replace
+     */
+    private static function translate(string $key, string $fallback, array $replace = []): string
+    {
+        $message = $fallback;
+
+        if (self::$translator !== null) {
+            $message = (self::$translator)($key, $replace);
+        }
+
+        foreach ($replace as $search => $value) {
+            $message = str_replace(':'.$search, $value, $message);
+        }
+
+        return $message;
     }
 }

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `TokenCodec` with injectable `Clock` / `EnvironmentResolver` / `RandomSource`
+  seams, `GeneratedToken` / `ParsedToken`, live|test issue/parse/hash/match
+  (full-token SHA-256 + `hash_equals`, dummy compare on miss), and Fixed*
+  test doubles. Service provider binds the production seams and fails when
+  legacy matchers are registered without `api-keys.legacy.accept_until`.
 - Package scaffold: auto-discovered `ApiKeysServiceProvider`, publishable
   `config/api-keys.php` (tag `api-keys-config`), Pest + Testbench, Pint, PHPStan
   level max, qiick standards pack pinned to app-ui `v0.11.0`, CI matrix

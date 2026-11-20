@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `IpAllowlist` (IpUtils + IPv4-mapped unwrap, mapped CIDR prefix−96, zone-id
+  denied, prefix-range fail-closed) and `Http\ClientIp` (`Request::ip()` only).
 - `Scope` / `ScopeSet` with fail-closed `parseStored`, write⊇read, highest-per-resource, and `ArrayScopeVocabulary` test double.
 - `TokenCodec` with injectable `Clock` / `EnvironmentResolver` / `RandomSource`
   seams, `GeneratedToken` / `ParsedToken`, live|test issue/parse/hash/match

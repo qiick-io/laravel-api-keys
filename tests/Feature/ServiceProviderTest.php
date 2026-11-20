@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\RotationService;
 use Qiick\ApiKeys\Tests\Support\RegexLegacyTokenMatcher;
 use Qiick\ApiKeys\TokenCodec;
@@ -48,7 +49,7 @@ it('fails boot when legacy_matchers is set without API_KEYS_LEGACY_ACCEPT_UNTIL'
         'api-keys.legacy.accept_until' => null,
     ]);
 
-    $provider = app()->getProvider(\Qiick\ApiKeys\Laravel\ApiKeysServiceProvider::class);
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
 
     expect(fn () => $provider->boot())
         ->toThrow(RuntimeException::class, 'API_KEYS_LEGACY_ACCEPT_UNTIL');
@@ -61,7 +62,7 @@ it('fails boot when API_KEYS_LEGACY_ACCEPT_UNTIL is not an absolute ISO-8601 tim
         'api-keys.legacy.accept_until' => 'not-a-date',
     ]);
 
-    $provider = app()->getProvider(\Qiick\ApiKeys\Laravel\ApiKeysServiceProvider::class);
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
 
     expect(fn () => $provider->boot())
         ->toThrow(RuntimeException::class, 'DATE_ATOM');
@@ -74,7 +75,7 @@ it('rejects relative accept_until strings at boot', function (string $relative):
         'api-keys.legacy.accept_until' => $relative,
     ]);
 
-    $provider = app()->getProvider(\Qiick\ApiKeys\Laravel\ApiKeysServiceProvider::class);
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
 
     expect(fn () => $provider->boot())
         ->toThrow(RuntimeException::class, 'DATE_ATOM');
@@ -91,7 +92,7 @@ it('rejects date-only accept_until values at boot', function (): void {
         'api-keys.legacy.accept_until' => '2027-01-01',
     ]);
 
-    $provider = app()->getProvider(\Qiick\ApiKeys\Laravel\ApiKeysServiceProvider::class);
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
 
     expect(fn () => $provider->boot())
         ->toThrow(RuntimeException::class, 'DATE_ATOM');
@@ -105,7 +106,7 @@ it('fails at application start for an invalid accept_until without resolving Tok
     ]);
 
     app()->forgetInstance(TokenCodec::class);
-    $provider = app()->getProvider(\Qiick\ApiKeys\Laravel\ApiKeysServiceProvider::class);
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
 
     expect(fn () => $provider->boot())
         ->toThrow(RuntimeException::class, 'DATE_ATOM');
@@ -118,7 +119,7 @@ it('accepts the UTC Z form in api-keys.legacy.accept_until at boot', function ()
         'api-keys.legacy.accept_until' => '2027-01-01T00:00:00Z',
     ]);
 
-    $provider = app()->getProvider(\Qiick\ApiKeys\Laravel\ApiKeysServiceProvider::class);
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
 
     expect(fn () => $provider->boot())->not->toThrow(RuntimeException::class);
 
@@ -143,7 +144,7 @@ it('boots when accept_until is an absolute DATE_ATOM timestamp', function (): vo
         'api-keys.legacy.accept_until' => '2027-01-01T00:00:00+00:00',
     ]);
 
-    $provider = app()->getProvider(\Qiick\ApiKeys\Laravel\ApiKeysServiceProvider::class);
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
 
     // Empty matchers: codec boots without requiring accept_until.
     expect(fn () => $provider->boot())->not->toThrow(RuntimeException::class);

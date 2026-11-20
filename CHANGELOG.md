@@ -7,8 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-20
+
+First pre-release. The API may still change before 1.0.0; see UPGRADING.md.
+
 ### Added
 
+- `RotationService` (bound with `api-keys.rotation_max_grace_hours`, default cap 168 h): rotates
+  from the stored `ApiKeyRecord`, refuses revoked or expired keys and unknown prefixes, keeps one
+  previous secret for the grace window (0 = immediate), and turns a legacy key into a canonical one
+  (the old legacy token stops working at once). Products lock the row and write every field.
+- `Audit::withApiKeyId()`: the `api_key_id` audit property, always the key's public UUID (lowercased,
+  nil UUID refused, a conflicting existing value throws).
+- Legacy tokens: the `LegacyTokenMatcher` contract (declared secret length, bare stored prefix for
+  rotation) with an end-of-life enforced by the package as `min(api-keys.legacy.accept_until,
+  matcher)`; `accept_until` must be an absolute ISO-8601 timestamp (offset or UTC `Z`) and is
+  validated at boot; `isAccepting()` can stop legacy tokens earlier.
+- Events `ApiKeyAuthenticated` and `LegacyTokenUsed` (fired only after successful authentication,
+  never carrying secret material); Pest helpers loaded only in development.
 - `ApiKeyAuthenticator` with the fixed evaluation order (failed-attempt guard →
   format → lookup + `hash_equals` / dummy miss → revoked/expired → actor → IP →
   scopes narrowed by owner ceiling → rate limit → usage), `ApiKeyRejection`
@@ -29,3 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   level max, qiick standards pack pinned to app-ui `v0.11.0`, CI matrix
   (PHP 8.3/8.4/8.5 × Laravel 12/13 × lowest/stable) with `composer validate
   --strict`, `composer audit`, and SHA-pinned Actions.
+
+[Unreleased]: https://github.com/qiick-io/laravel-api-keys/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/qiick-io/laravel-api-keys/releases/tag/v0.1.0

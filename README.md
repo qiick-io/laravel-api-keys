@@ -8,7 +8,7 @@
 
 # qiick/laravel-api-keys
 
-> **In development. Not released and not on Packagist yet: do not depend on it.**
+> **Pre-release (0.x).** The public API may still change before 1.0.0: pin an exact version and read UPGRADING.md when you update.
 
 Contract-only API key mechanics for qiick Laravel products: token issue/parse/verify,
 fail-closed scopes, IP allowlist, RFC 6750 refusals in the fleet error format, rotation

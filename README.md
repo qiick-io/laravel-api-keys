@@ -55,7 +55,9 @@ stores SHA-256 of the **full** plaintext. Issue via `TokenCodec` with injectable
 
 `IpAllowlist::allows($ip, $stored)`: null/empty → allow all; non-list or
 non-string entries → deny; zone-id client IPs (`fe80::1%eth0`) → deny.
-IPv4-mapped / IPv4-compatible forms are canonicalised before `IpUtils::checkIp`.
+IPv4-mapped forms (`::ffff:a.b.c.d`) expand to dotted IPv4 before
+`IpUtils::checkIp` (mapped CIDR prefixes subtract 96); `::1` / `::` stay IPv6.
+Prefix out of range (IPv4 0–32, IPv6 0–128) fails closed.
 `ClientIp::from($request)` is `Request::ip()` only (configure TrustProxies).
 
 ## Scopes

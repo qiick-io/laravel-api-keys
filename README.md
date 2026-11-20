@@ -138,9 +138,10 @@ and never appear in messages, `render()`, `__debugInfo`, JSON, or serialize outp
 
 The package ships the `LegacyTokenMatcher` contract and registration point only —
 no product-specific matcher classes. Boot **fails** when `api-keys.legacy_matchers`
-is non-empty without an **absolute** `DATE_ATOM` timestamp
-(`API_KEYS_LEGACY_ACCEPT_UNTIL` / `api-keys.legacy.accept_until`). Relative strings
-(`now`, `tomorrow`, `+10 years`) are rejected.
+is non-empty without an **absolute** ISO-8601 timestamp with offset (`DATE_ATOM`)
+or UTC `Z` (`API_KEYS_LEGACY_ACCEPT_UNTIL` / `api-keys.legacy.accept_until`), for
+example `2027-01-01T00:00:00Z` or `2027-01-01T00:00:00+00:00`. Relative strings
+(`now`, `tomorrow`, `+10 years`) and date-only values are rejected.
 
 `TokenCodec::prefixOf($token, $now)` / `legacyMatcherFor($token, $now)` require `$now`.
 A matcher is used only when `isAccepting($now) && now < min(config, acceptUntil())`
@@ -160,8 +161,8 @@ final class EkLegacyTokenMatcher implements LegacyTokenMatcher { /* ... */ }
 // config/api-keys.php
 'legacy_matchers' => [EkLegacyTokenMatcher::class],
 'legacy' => [
-    // Absolute ISO-8601 with offset only (DATE_ATOM) — not "tomorrow" / "+10 years"
-    'accept_until' => env('API_KEYS_LEGACY_ACCEPT_UNTIL'), // e.g. 2027-01-01T00:00:00+00:00
+    // Absolute ISO-8601 with offset (DATE_ATOM) or UTC Z — not "tomorrow" / "+10 years"
+    'accept_until' => env('API_KEYS_LEGACY_ACCEPT_UNTIL'), // e.g. 2027-01-01T00:00:00Z
 ],
 
 $result = $authenticator->authenticate($presented, $context);

@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset=".github/assets/header-light.svg">
+    <img alt="laravel-api-keys: API keys for Laravel: tokens, scopes, RFC 6750" src=".github/assets/header-light.svg" width="100%">
+  </picture>
+</p>
+
 # qiick/laravel-api-keys
 
 > **In development. Not released and not on Packagist yet: do not depend on it.**

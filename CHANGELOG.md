@@ -1,0 +1,16 @@
+# Changelog
+
+All notable changes to **laravel-api-keys** (`qiick/laravel-api-keys`) are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- Package scaffold: auto-discovered `ApiKeysServiceProvider`, publishable
+  `config/api-keys.php` (tag `api-keys-config`), Pest + Testbench, Pint, PHPStan
+  level max, qiick standards pack pinned to app-ui `v0.11.0`, CI matrix
+  (PHP 8.3/8.4/8.5 × Laravel 12/13 × lowest/stable) with `composer validate
+  --strict`, `composer audit`, and SHA-pinned Actions.

@@ -15,19 +15,38 @@ use Illuminate\Support\Str;
  */
 final class Audit
 {
+    private const string NIL_UUID = '00000000-0000-0000-0000-000000000000';
+
     /**
      * @param  array<string, mixed>  $properties
      * @return array<string, mixed>
      */
     public static function withApiKeyId(array $properties, string $apiKeyPublicId): array
     {
-        if (! Str::isUuid($apiKeyPublicId)) {
+        $normalized = strtolower($apiKeyPublicId);
+
+        if ($normalized === self::NIL_UUID) {
+            throw new \InvalidArgumentException(
+                'api_key_id must not be the nil UUID.',
+            );
+        }
+
+        if (! Str::isUuid($normalized)) {
             throw new \InvalidArgumentException(
                 'api_key_id must be the key public UUID; numeric and non-UUID ids are rejected.',
             );
         }
 
-        $properties['api_key_id'] = $apiKeyPublicId;
+        if (array_key_exists('api_key_id', $properties)) {
+            $existing = $properties['api_key_id'];
+            if (! is_string($existing) || strtolower($existing) !== $normalized) {
+                throw new \InvalidArgumentException(
+                    'properties already contain a different api_key_id.',
+                );
+            }
+        }
+
+        $properties['api_key_id'] = $normalized;
 
         return $properties;
     }

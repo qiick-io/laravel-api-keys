@@ -77,6 +77,30 @@ final class TokenCodec
         );
     }
 
+    /**
+     * Whether a stored key_prefix is canonical for this codec, or recognised by
+     * a registered legacy matcher (probed with a filler secret).
+     */
+    public function isValidKeyPrefix(string $keyPrefix): bool
+    {
+        $product = preg_quote($this->productPrefix, '/');
+        $idLength = $this->idLength();
+        if (preg_match('/^'.$product.'_(?:live|test)_[A-Za-z0-9]{'.$idLength.'}$/D', $keyPrefix) === 1) {
+            return true;
+        }
+
+        foreach ($this->legacyMatchers as $matcher) {
+            foreach ([$this->secretLength(), 31, 32] as $secretLength) {
+                $probe = $keyPrefix.str_repeat('A', $secretLength);
+                if ($matcher->prefixOf($probe) === $keyPrefix) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     public function prefixOf(#[\SensitiveParameter] string $presentedToken): ?string
     {
         if (preg_match($this->canonicalPattern(), $presentedToken, $matches) === 1) {

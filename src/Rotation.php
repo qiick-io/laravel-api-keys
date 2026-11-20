@@ -13,9 +13,9 @@ namespace Qiick\ApiKeys;
 final readonly class Rotation implements \JsonSerializable
 {
     public function __construct(
-        public string $newPlainText,
-        public string $newKeyHash,
-        public ?string $previousKeyHash,
+        #[\SensitiveParameter] public string $newPlainText,
+        #[\SensitiveParameter] public string $newKeyHash,
+        #[\SensitiveParameter] public ?string $previousKeyHash,
         public ?\DateTimeImmutable $previousKeyValidUntil,
     ) {}
 

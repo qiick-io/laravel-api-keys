@@ -7,6 +7,7 @@ it('merges the package defaults into the api-keys config', function (): void {
         'product_prefix' => 'tst',
         'environment' => null,
         'rotation_grace_hours' => 24,
+        'rotation_max_grace_hours' => 168,
         'usage_throttle_seconds' => 60,
         'usage_bypass_throttle_on_ip_change' => true,
         'default_rate_limit_per_minute' => 60,

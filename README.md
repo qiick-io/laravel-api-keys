@@ -42,8 +42,8 @@ Set `API_KEYS_PRODUCT_PREFIX` (three-letter product code) before issuing tokens.
 | Failed-attempt brake | Buckets IPv4 by `/32` and IPv6 by `/64`. IPv4-mapped (`::ffff:a.b.c.d`) expands to dotted IPv4 before bucketing (same path as `IpAllowlist`). Null/empty/unparseable client IPs **skip** the brake (never share one bucket — that would lock out everyone behind a misconfigured proxy). Repository/infra exceptions are **not** counted. Shared egress / NAT: many clients behind one public IP share one bucket and can lock each other out; keep the recipe default **on** (20/min) and raise only with a clear threat model. Wire after `TrustProxies` so `KeyContext::ip` is the real client, not the LB. |
 | Redaction | Presented tokens / Bearer values MUST NEVER appear in exception messages, JSON bodies, logs, telemetry, activity properties, or `__debugInfo`. |
 | Scopes | Fail-closed: whitespace, wrong case, duplicates, or non-vocabulary values → empty set → `403 insufficient_scope` (never 401). |
-| Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint; rejects non-UUID). |
-| Rotation | `RotationService::rotate` reissues behind the same `key_prefix`; invalid/negative grace → 0 (no previous secret). A second rotate replaces the previous grace secret. |
+| Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint; lowercase UUID; rejects non-UUID, nil UUID, and a conflicting existing `api_key_id`). |
+| Rotation | `RotationService::rotate(ApiKeyRecord, TokenCodec, Clock, graceHours)` refuses revoked/expired keys and unknown prefixes; invalid/negative/above-max grace → 0 (max default 168h). Products **must** `lockForUpdate` in a transaction and write `key_hash`, `previous_key_hash`, `previous_key_valid_until` unconditionally (including nulls). |
 
 ## Token shape
 
@@ -52,6 +52,25 @@ public id, 32-character secret (A–Za–z0–9, ≥160 bits via `RandomSource`)
 stores SHA-256 of the **full** plaintext. Issue via `TokenCodec` with injectable
 `EnvironmentResolver` and `RandomSource` (tests: `FixedEnvironment`,
 `FixedRandomSource`).
+
+## Rotation (product persistence)
+
+```php
+DB::transaction(function () use ($key, $codec, $clock) {
+    $locked = ApiKey::query()->whereKey($key->id)->lockForUpdate()->firstOrFail();
+    $rotation = $rotationService->rotate($locked, $codec, $clock, config('api-keys.rotation_grace_hours'));
+
+    // Write all three columns unconditionally (nulls when grace is 0).
+    $locked->forceFill([
+        'key_hash' => $rotation->newKeyHash,
+        'previous_key_hash' => $rotation->previousKeyHash,
+        'previous_key_valid_until' => $rotation->previousKeyValidUntil,
+    ])->save();
+
+    return $rotation; // show newPlainText once
+});
+```
+
 
 ## IP allowlist
 

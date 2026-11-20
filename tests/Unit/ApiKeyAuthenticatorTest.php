@@ -728,6 +728,27 @@ it('narrows grantedScopes to the owner ceiling before highest-per-resource (A6)'
         ->and($result->grantedScopes->allows(Scope::tryFromString('items:write')))->toBeFalse();
 });
 
+it('dedupes grantedScopes when stored read+write both demote to read', function (): void {
+    $fixture = authenticator(['defaultRate' => 0]);
+    $record = new InMemoryApiKeyRecord(
+        id: '42',
+        keyPrefix: $fixture['prefix'],
+        keyHash: $fixture['hash'],
+        scopes: ['items:read', 'items:write'],
+    );
+
+    $auth = authenticator([
+        'repository' => new FakeApiKeyRepository([$record]),
+        'authorizer' => (new FakeKeyAuthorizer)->withCreatorMayGrant(['items:read']),
+        'token' => $fixture['token'],
+        'defaultRate' => 0,
+    ]);
+
+    $result = $auth['auth']->authenticate($fixture['token'], keyContext());
+
+    expect($result->grantedScopes->values())->toBe(['items:read']);
+});
+
 it('fail-closes when the key has no owner and no creator', function (): void {
     $fixture = authenticator(['defaultRate' => 0]);
     $record = (new InMemoryApiKeyRecord(

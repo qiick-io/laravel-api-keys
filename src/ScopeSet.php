@@ -121,16 +121,19 @@ final readonly class ScopeSet
 
     /**
      * Keep atoms the ceiling still allows; demote write→read when only read remains.
+     * Results are unique by value (no duplicated `items:read` after demotion).
      *
      * @param  list<string>  $allowedValues
      */
     public function narrowedTo(array $allowedValues): self
     {
         $kept = [];
+        /** @var list<string> $seen */
+        $seen = [];
 
         foreach ($this->scopes as $scope) {
             if (in_array($scope->value(), $allowedValues, true)) {
-                $kept[] = $scope;
+                $this->appendUnique($kept, $seen, $scope);
 
                 continue;
             }
@@ -140,7 +143,7 @@ final readonly class ScopeSet
                 if (in_array($impliedRead, $allowedValues, true)) {
                     $read = Scope::tryFromString($impliedRead);
                     if ($read !== null) {
-                        $kept[] = $read;
+                        $this->appendUnique($kept, $seen, $read);
                     }
                 }
             }
@@ -152,6 +155,21 @@ final readonly class ScopeSet
     public function collapsed(): self
     {
         return new self(self::highestPerResource($this->scopes));
+    }
+
+    /**
+     * @param  list<Scope>  $kept
+     * @param  list<string>  $seen
+     */
+    private function appendUnique(array &$kept, array &$seen, Scope $scope): void
+    {
+        $value = $scope->value();
+        if (in_array($value, $seen, true)) {
+            return;
+        }
+
+        $seen[] = $value;
+        $kept[] = $scope;
     }
 
     /**

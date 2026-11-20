@@ -129,33 +129,47 @@ and never appear in messages, `render()`, `__debugInfo`, JSON, or serialize outp
 
 The package ships the `LegacyTokenMatcher` contract and registration point only —
 no product-specific matcher classes. Boot **fails** when `api-keys.legacy_matchers`
-is non-empty without `API_KEYS_LEGACY_ACCEPT_UNTIL` / `api-keys.legacy.accept_until`.
+is non-empty without a parseable `API_KEYS_LEGACY_ACCEPT_UNTIL` /
+`api-keys.legacy.accept_until` (invalid date → fail).
 
-`TokenCodec::prefixOf($token, $now)` and `legacyMatcherFor($token, $now)` skip
-matchers whose `acceptUntil` has passed. Products dispatch `Events\LegacyTokenUsed`
-(never include the plaintext) when a legacy match succeeds:
+`TokenCodec::prefixOf($token, $now)` / `legacyMatcherFor($token, $now)` require `$now`
+and reject a matcher when `now >= min(config cut-off, matcher->acceptUntil())`
+(exactly-at boundary is rejected), regardless of `isAccepting()`. Matcher output must
+be a strict prefix leaving ≥ `SECRET_LENGTH` characters. `legacyMatcherFor` returns
+null for canonical tokens.
+
+Dispatch `Events\LegacyTokenUsed` only after **successful** authentication, using
+`AuthenticationResult::$legacyMatcherClass`:
 
 ```php
 // Product-owned matcher (example shape only — not shipped by this package):
-// ek_ + 9 alnum public id + 31 alnum secret
+// ek_ + 9 alnum public id + 32 alnum secret
 final class EkLegacyTokenMatcher implements LegacyTokenMatcher { /* ... */ }
 
 // config/api-keys.php
 'legacy_matchers' => [EkLegacyTokenMatcher::class],
-'legacy' => ['accept_until' => env('API_KEYS_LEGACY_ACCEPT_UNTIL')], // required
+'legacy' => ['accept_until' => env('API_KEYS_LEGACY_ACCEPT_UNTIL')], // required + parseable
 
-$matcher = $codec->legacyMatcherFor($presented, $now);
-if ($matcher !== null) {
+$result = $authenticator->authenticate($presented, $context);
+if ($result->legacyMatcherClass !== null) {
     event(new LegacyTokenUsed(
-        $matcher->prefixOf($presented),
-        $matcher::class,
-        $matcher->acceptUntil(),
+        $result->record->keyPrefix(),
+        $result->legacyMatcherClass,
+        /* matcher acceptUntil from your registry */,
     ));
 }
+event(new ApiKeyAuthenticated(
+    $result->record->id(),
+    $result->record->keyPrefix(),
+    $result->usedPreviousSecret,
+    $context->ip,
+));
 ```
 
-Pest helpers: `Qiick\ApiKeys\Testing\assertTokenAbsentFrom`, `assertInvalidToken`,
-`assertInsufficientScope`, `assertIpNotAllowed`, `assertLegacyTokenUsed`.
+Pest helpers (`assertTokenAbsentFrom`, `assertInvalidToken`, `assertInsufficientScope`,
+`assertIpNotAllowed`, `assertLegacyTokenUsed`) ship under `Qiick\ApiKeys\Testing\` via
+**autoload-dev** only. Consumer apps should `require` `vendor/qiick/laravel-api-keys/src/Testing/functions.php`
+from their `Pest.php` (do not put them on production `autoload.files`).
 
 ## Development
 

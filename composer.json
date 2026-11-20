@@ -48,15 +48,15 @@
     "autoload": {
         "psr-4": {
             "Qiick\\ApiKeys\\": "src/"
-        },
-        "files": [
-            "src/Testing/functions.php"
-        ]
+        }
     },
     "autoload-dev": {
         "psr-4": {
             "Qiick\\ApiKeys\\Tests\\": "tests/"
-        }
+        },
+        "files": [
+            "src/Testing/functions.php"
+        ]
     },
     "scripts": {
         "test": "pest",

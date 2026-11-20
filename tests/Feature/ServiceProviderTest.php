@@ -53,3 +53,16 @@ it('fails boot when legacy_matchers is set without API_KEYS_LEGACY_ACCEPT_UNTIL'
     expect(fn () => app(TokenCodec::class))
         ->toThrow(RuntimeException::class, 'API_KEYS_LEGACY_ACCEPT_UNTIL');
 });
+
+it('fails boot when API_KEYS_LEGACY_ACCEPT_UNTIL is not a parseable date', function (): void {
+    config([
+        'api-keys.product_prefix' => 'tst',
+        'api-keys.legacy_matchers' => [RegexLegacyTokenMatcher::class],
+        'api-keys.legacy.accept_until' => 'not-a-date',
+    ]);
+
+    app()->forgetInstance(TokenCodec::class);
+
+    expect(fn () => app(TokenCodec::class))
+        ->toThrow(RuntimeException::class, 'valid date/time');
+});

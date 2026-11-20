@@ -64,11 +64,22 @@ final class ApiKeysServiceProvider extends ServiceProvider
                 $legacyMatchers = [];
             }
 
+            $legacyAcceptUntil = null;
             if ($legacyMatchers !== []) {
                 $acceptUntil = $this->config($app)->get('api-keys.legacy.accept_until');
                 if (! is_string($acceptUntil) || $acceptUntil === '') {
                     throw new \RuntimeException(
                         'api-keys.legacy.accept_until (API_KEYS_LEGACY_ACCEPT_UNTIL) is required when legacy_matchers is non-empty.'
+                    );
+                }
+
+                try {
+                    $legacyAcceptUntil = new \DateTimeImmutable($acceptUntil);
+                } catch (\Exception $e) {
+                    throw new \RuntimeException(
+                        'api-keys.legacy.accept_until (API_KEYS_LEGACY_ACCEPT_UNTIL) must be a valid date/time string.',
+                        0,
+                        $e,
                     );
                 }
             }
@@ -78,6 +89,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
                 environment: $app->make(EnvironmentResolver::class),
                 random: $app->make(RandomSource::class),
                 legacyMatchers: $this->resolveLegacyMatchers($app, $legacyMatchers),
+                legacyAcceptUntil: $legacyAcceptUntil,
             );
         });
 

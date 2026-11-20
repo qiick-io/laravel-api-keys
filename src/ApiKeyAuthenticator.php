@@ -181,10 +181,13 @@ final class ApiKeyAuthenticator
             $this->recordUsageQuietly($matched, $context->ip, $now, $wasFirstUse);
         }
 
+        $legacyMatcher = $this->codec->legacyMatcherFor($presentedToken, $now);
+
         return new AuthenticationResult(
             $matched,
             $granted,
             $matchKind === TokenMatch::Previous,
+            $legacyMatcher === null ? null : $legacyMatcher::class,
         );
     }
 

@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace Qiick\ApiKeys\Events;
 
-use Qiick\ApiKeys\TokenCodec;
+use Qiick\ApiKeys\AuthenticationResult;
 
 /**
- * @api Fired by products when a legacy matcher accepted a presented token.
+ * @api Fired by products after successful authentication of a legacy token.
  *
- * Payload never includes the plaintext token. Products typically dispatch this
- * after {@see TokenCodec::legacyMatcherFor} returns a matcher.
+ * Payload never includes the plaintext token. Dispatch only when
+ * {@see AuthenticationResult::$legacyMatcherClass} is non-null —
+ * never on format/hash miss.
  */
 final class LegacyTokenUsed
 {

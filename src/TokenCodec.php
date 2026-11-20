@@ -42,6 +42,10 @@ final class TokenCodec
     /**
      * @param  list<LegacyTokenMatcher>  $legacyMatchers
      * @param  null|callable(): void  $onDummyMatch  test seam only
+     * @param  \DateTimeImmutable|null  $legacyAcceptUntil  Package cut-off from
+     *                                                      `api-keys.legacy.accept_until`. When set, a matcher is rejected at
+     *                                                      `now >= min(config, matcher->acceptUntil())` regardless of
+     *                                                      {@see LegacyTokenMatcher::isAccepting()}.
      */
     public function __construct(
         private string $productPrefix,
@@ -49,6 +53,7 @@ final class TokenCodec
         private RandomSource $random,
         array $legacyMatchers = [],
         private mixed $onDummyMatch = null,
+        private ?\DateTimeImmutable $legacyAcceptUntil = null,
     ) {
         if (preg_match('/^[a-z]{3}$/D', $this->productPrefix) !== 1) {
             throw new \InvalidArgumentException('API key product prefix must be exactly three lowercase letters.');
@@ -101,7 +106,7 @@ final class TokenCodec
         }
 
         foreach ($this->legacyMatchers as $matcher) {
-            if (! $matcher->isAccepting($now)) {
+            if (! $this->legacyStillAccepted($matcher, $now)) {
                 continue;
             }
 
@@ -114,24 +119,24 @@ final class TokenCodec
     }
 
     /**
-     * @param  \DateTimeImmutable|null  $now  When set, legacy matchers past
-     *                                        {@see LegacyTokenMatcher::acceptUntil} are skipped (A13).
+     * Resolve the stored key_prefix for a presented token. `$now` is required so
+     * the package cut-off is never skipped (A13).
      */
     public function prefixOf(
         #[\SensitiveParameter] string $presentedToken,
-        ?\DateTimeImmutable $now = null,
+        \DateTimeImmutable $now,
     ): ?string {
         if (preg_match($this->canonicalPattern(), $presentedToken, $matches) === 1) {
             return $matches['prefix'];
         }
 
         foreach ($this->legacyMatchers as $matcher) {
-            if ($now !== null && ! $matcher->isAccepting($now)) {
+            if (! $this->legacyStillAccepted($matcher, $now)) {
                 continue;
             }
 
             $prefix = $matcher->prefixOf($presentedToken);
-            if ($prefix !== null) {
+            if ($prefix !== null && $this->isUsableMatcherPrefix($presentedToken, $prefix)) {
                 return $prefix;
             }
         }
@@ -141,24 +146,59 @@ final class TokenCodec
 
     /**
      * First legacy matcher still accepting that recognises the token (A13).
-     * Products use this to dispatch {@see Events\LegacyTokenUsed}.
-     * When `$now` is null, EOL is not enforced.
+     * Returns null for canonical tokens — products dispatch
+     * {@see Events\LegacyTokenUsed} only after successful authentication when
+     * {@see AuthenticationResult::$legacyMatcherClass} is non-null.
      */
     public function legacyMatcherFor(
         #[\SensitiveParameter] string $presentedToken,
-        ?\DateTimeImmutable $now = null,
+        \DateTimeImmutable $now,
     ): ?LegacyTokenMatcher {
+        if (preg_match($this->canonicalPattern(), $presentedToken) === 1) {
+            return null;
+        }
+
         foreach ($this->legacyMatchers as $matcher) {
-            if ($now !== null && ! $matcher->isAccepting($now)) {
+            if (! $this->legacyStillAccepted($matcher, $now)) {
                 continue;
             }
 
-            if ($matcher->prefixOf($presentedToken) !== null) {
+            $prefix = $matcher->prefixOf($presentedToken);
+            if ($prefix !== null && $this->isUsableMatcherPrefix($presentedToken, $prefix)) {
                 return $matcher;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Reject when `$now >= min(config cut-off, matcher->acceptUntil())`.
+     * Ignores {@see LegacyTokenMatcher::isAccepting()} so a buggy matcher cannot
+     * outlive the package config.
+     */
+    private function legacyStillAccepted(LegacyTokenMatcher $matcher, \DateTimeImmutable $now): bool
+    {
+        $matcherUntil = $matcher->acceptUntil();
+        // min(config, matcher): equality is equivalent either side; ignore ≤ vs <.
+        $until = $this->legacyAcceptUntil === null || $matcherUntil < $this->legacyAcceptUntil // @pest-mutate-ignore: SmallerToSmallerOrEqual
+            ? $matcherUntil
+            : $this->legacyAcceptUntil;
+
+        return $now < $until;
+    }
+
+    /**
+     * Matcher output must be a strict prefix of the token, leaving at least
+     * {@see secretLength()} characters so secret material cannot become key_prefix.
+     */
+    private function isUsableMatcherPrefix(string $token, string $prefix): bool
+    {
+        if ($prefix === '' || $prefix === $token || ! str_starts_with($token, $prefix)) {
+            return false;
+        }
+
+        return (strlen($token) - strlen($prefix)) >= $this->secretLength();
     }
 
     public function parse(#[\SensitiveParameter] string $presentedToken): ?ParsedToken

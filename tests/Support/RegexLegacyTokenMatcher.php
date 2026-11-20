@@ -10,7 +10,8 @@ use Qiick\ApiKeys\LegacyTokenMatcher;
 /**
  * Test/README fixture for a product-owned legacy matcher (not shipped in src/).
  *
- * Example shape used in docs: Externa-style `ek_` + 9 alnum + 31 alnum secret.
+ * Example shape used in docs: Externa-style `ek_` + 9 alnum + 32 alnum secret
+ * (remainder must be ≥ TokenCodec::SECRET_LENGTH so secret material cannot become key_prefix).
  * Products implement their own class when adopting the package.
  */
 final class RegexLegacyTokenMatcher implements LegacyTokenMatcher
@@ -25,7 +26,7 @@ final class RegexLegacyTokenMatcher implements LegacyTokenMatcher
 
     public static function externaEkStyle(DateTimeImmutable $acceptUntil): self
     {
-        return new self('/^(?<prefix>ek_[A-Za-z0-9]{9})[A-Za-z0-9]{31}$/D', $acceptUntil);
+        return new self('/^(?<prefix>ek_[A-Za-z0-9]{9})[A-Za-z0-9]{32}$/D', $acceptUntil);
     }
 
     public function prefixOf(#[\SensitiveParameter] string $token): ?string

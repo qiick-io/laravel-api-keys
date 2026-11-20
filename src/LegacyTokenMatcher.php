@@ -9,7 +9,7 @@ namespace Qiick\ApiKeys;
  */
 interface LegacyTokenMatcher
 {
-    public function prefixOf(string $token): ?string;
+    public function prefixOf(#[\SensitiveParameter] string $token): ?string;
 
     public function isAccepting(\DateTimeImmutable $now): bool;
 

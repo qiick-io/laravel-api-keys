@@ -1,0 +1,34 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Qiick\ApiKeys;
+
+/**
+ * @api Decides whether last_used_* should be written for this request.
+ */
+final class UsageRecorder
+{
+    public function shouldRecord(
+        \DateTimeImmutable $now,
+        ?\DateTimeImmutable $lastUsedAt,
+        ?string $lastUsedIp,
+        ?string $currentIp,
+        int $throttleSeconds = 60,
+        bool $bypassThrottleOnIpChange = true,
+    ): bool {
+        if ($lastUsedAt === null) {
+            return true;
+        }
+
+        if (
+            $bypassThrottleOnIpChange
+            && $currentIp !== null
+            && $currentIp !== $lastUsedIp
+        ) {
+            return true;
+        }
+
+        return ($now->getTimestamp() - $lastUsedAt->getTimestamp()) >= $throttleSeconds;
+    }
+}

@@ -14,6 +14,9 @@ use Qiick\ApiKeys\Contracts\ScopeVocabulary;
  * any duplicate value; any leading/trailing/internal whitespace;
  * any case variant (e.g. Users:Read). No silent trim/lower.
  * Highest-per-resource after successful parse (write drops sibling read).
+ *
+ * {@see parseStoredExpanded} skips the collapse so callers can narrow against
+ * an owner ceiling first (write may demote to read) then {@see collapsed()}.
  */
 final readonly class ScopeSet
 {
@@ -23,6 +26,14 @@ final readonly class ScopeSet
     public function __construct(public array $scopes) {}
 
     public static function parseStored(mixed $stored, ScopeVocabulary $vocabulary): self
+    {
+        return self::parseStoredExpanded($stored, $vocabulary)->collapsed();
+    }
+
+    /**
+     * Same fail-closed validation as {@see parseStored}, without highest-per-resource.
+     */
+    public static function parseStoredExpanded(mixed $stored, ScopeVocabulary $vocabulary): self
     {
         if (! is_array($stored) || $stored === [] || ! array_is_list($stored)) {
             return new self([]);
@@ -54,7 +65,7 @@ final readonly class ScopeSet
             $parsed[] = $scope;
         }
 
-        return new self(self::highestPerResource($parsed));
+        return new self($parsed);
     }
 
     public function allows(Scope $required): bool
@@ -82,6 +93,65 @@ final readonly class ScopeSet
             static fn (Scope $scope): string => $scope->value(),
             $this->scopes,
         );
+    }
+
+    /**
+     * Values offered to {@see Contracts\KeyAuthorizer::scopesCreatorMayGrant}:
+     * every stored atom plus an implied `:read` when `:write` is present.
+     *
+     * @return list<string>
+     */
+    public function valuesOfferedToAuthorizer(): array
+    {
+        $offered = $this->values();
+
+        foreach ($this->scopes as $scope) {
+            if ($scope->action !== 'write') {
+                continue;
+            }
+
+            $impliedRead = $scope->resource.':read';
+            if (! in_array($impliedRead, $offered, true)) {
+                $offered[] = $impliedRead;
+            }
+        }
+
+        return $offered;
+    }
+
+    /**
+     * Keep atoms the ceiling still allows; demote write→read when only read remains.
+     *
+     * @param  list<string>  $allowedValues
+     */
+    public function narrowedTo(array $allowedValues): self
+    {
+        $kept = [];
+
+        foreach ($this->scopes as $scope) {
+            if (in_array($scope->value(), $allowedValues, true)) {
+                $kept[] = $scope;
+
+                continue;
+            }
+
+            if ($scope->action === 'write') {
+                $impliedRead = $scope->resource.':read';
+                if (in_array($impliedRead, $allowedValues, true)) {
+                    $read = Scope::tryFromString($impliedRead);
+                    if ($read !== null) {
+                        $kept[] = $read;
+                    }
+                }
+            }
+        }
+
+        return new self($kept);
+    }
+
+    public function collapsed(): self
+    {
+        return new self(self::highestPerResource($this->scopes));
     }
 
     /**

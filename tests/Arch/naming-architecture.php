@@ -22,6 +22,15 @@ return [
             'Qiick\ApiKeys\Contracts\EnvironmentResolver',
             'Qiick\ApiKeys\Contracts\RandomSource',
             'Qiick\ApiKeys\Contracts\ScopeVocabulary',
+            'Qiick\ApiKeys\Contracts\ApiKeyRecord',
+            'Qiick\ApiKeys\Contracts\ApiKeyRepository',
+            'Qiick\ApiKeys\Contracts\KeyAuthorizer',
+            'Qiick\ApiKeys\Contracts\UsageSideEffect',
+            'Qiick\ApiKeys\Contracts\AttemptLimiter',
+        ],
+        'Exceptions' => [
+            // Design §3.3: ApiKeyRejection (not *Exception).
+            'Qiick\ApiKeys\Exceptions\ApiKeyRejection',
         ],
     ],
 

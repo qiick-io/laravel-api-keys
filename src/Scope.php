@@ -8,6 +8,7 @@ namespace Qiick\ApiKeys;
  * @api Strict scope atom.
  *
  * PATTERN rejects any whitespace, uppercase, or non-exact match (no silent trim/lower).
+ * The constructor re-validates so a crafted atom cannot inject into WWW-Authenticate.
  */
 final readonly class Scope
 {
@@ -16,7 +17,11 @@ final readonly class Scope
     public function __construct(
         public string $resource,
         public string $action,
-    ) {}
+    ) {
+        if (preg_match(self::PATTERN, $this->value()) !== 1) {
+            throw new \InvalidArgumentException('Scope atom must match '.self::PATTERN);
+        }
+    }
 
     public static function tryFromString(string $value): ?self
     {
@@ -50,6 +55,6 @@ final readonly class Scope
 
         // Only write may stand in for read (same resource already checked).
         // After the guards above, AND→OR on this line is behaviourally equivalent.
-        return $this->action === 'write' && $required->action === 'read'; // @pest-mutate-ignore BooleanAndToBooleanOr
+        return $this->action === 'write' && $required->action === 'read'; // @pest-mutate-ignore: BooleanAndToBooleanOr
     }
 }

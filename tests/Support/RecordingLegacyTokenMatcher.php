@@ -19,7 +19,7 @@ final class RecordingLegacyTokenMatcher implements LegacyTokenMatcher
         private DateTimeImmutable $acceptUntil,
     ) {}
 
-    public function prefixOf(string $token): ?string
+    public function prefixOf(#[\SensitiveParameter] string $token): ?string
     {
         $this->prefixOfCalls++;
 

@@ -42,7 +42,8 @@ Set `API_KEYS_PRODUCT_PREFIX` (three-letter product code) before issuing tokens.
 | Failed-attempt brake | Buckets IPv4 by `/32` and IPv6 by `/64`. Null/empty/unparseable client IPs **skip** the brake (never share one bucket — that would lock out everyone behind a misconfigured proxy). Repository/infra exceptions are **not** counted. Shared egress / NAT: many clients behind one public IP share one bucket and can lock each other out; keep the recipe default **on** (20/min) and raise only with a clear threat model. Wire after `TrustProxies` so `KeyContext::ip` is the real client, not the LB. |
 | Redaction | Presented tokens / Bearer values MUST NEVER appear in exception messages, JSON bodies, logs, telemetry, activity properties, or `__debugInfo`. |
 | Scopes | Fail-closed: whitespace, wrong case, duplicates, or non-vocabulary values → empty set → `403 insufficient_scope` (never 401). |
-| Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint). |
+| Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint; rejects non-UUID). |
+| Rotation | `RotationService::rotate` reissues behind the same `key_prefix`; invalid/negative grace → 0 (no previous secret). A second rotate replaces the previous grace secret. |
 
 ## Token shape
 

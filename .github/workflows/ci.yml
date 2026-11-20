@@ -93,7 +93,7 @@ jobs:
         if: matrix.php == '8.4' && matrix.laravel == '12' && matrix.dependency-version == 'stable'
         run: >
           vendor/bin/pest --mutate --parallel --min=95
-          --class='Qiick\ApiKeys\TokenCodec,Qiick\ApiKeys\Scope,Qiick\ApiKeys\ScopeSet,Qiick\ApiKeys\IpAllowlist,Qiick\ApiKeys\ApiKeyAuthenticator,Qiick\ApiKeys\Exceptions\ApiKeyRejection,Qiick\ApiKeys\UsageRecorder,Qiick\ApiKeys\FailedAttemptLimiter,Qiick\ApiKeys\Http\BearerTokenExtractor'
+          --class='Qiick\ApiKeys\TokenCodec,Qiick\ApiKeys\Scope,Qiick\ApiKeys\ScopeSet,Qiick\ApiKeys\IpAllowlist,Qiick\ApiKeys\ApiKeyAuthenticator,Qiick\ApiKeys\Exceptions\ApiKeyRejection,Qiick\ApiKeys\UsageRecorder,Qiick\ApiKeys\FailedAttemptLimiter,Qiick\ApiKeys\RotationService,Qiick\ApiKeys\Audit,Qiick\ApiKeys\Http\BearerTokenExtractor'
 
   # Adapter-example smoke once Eloquent examples land; scaffold keeps the job
   # so the matrix shape matches the design (SQLite / MySQL / MariaDB / PostgreSQL).

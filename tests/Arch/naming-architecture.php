@@ -17,10 +17,11 @@ return [
 
     'ignoring' => [
         'Contracts' => [
-            // Design §3.1: Clock, EnvironmentResolver, RandomSource (no Contract suffix).
+            // Design §3.1: public contract names without Contract suffix.
             'Qiick\ApiKeys\Contracts\Clock',
             'Qiick\ApiKeys\Contracts\EnvironmentResolver',
             'Qiick\ApiKeys\Contracts\RandomSource',
+            'Qiick\ApiKeys\Contracts\ScopeVocabulary',
         ],
     ],
 

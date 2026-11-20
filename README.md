@@ -51,6 +51,13 @@ stores SHA-256 of the **full** plaintext. Issue via `TokenCodec` with injectable
 `EnvironmentResolver` and `RandomSource` (tests: `FixedEnvironment`,
 `FixedRandomSource`).
 
+## Scopes
+
+Atoms match `^[a-z][a-z0-9-]*:(read|write)$` exactly (no trim/case-fold).
+`ScopeSet::parseStored` is fail-closed: unknown, duplicate, whitespace, or
+non-list input → empty set. `write` satisfies `read` on the same resource;
+highest-per-resource drops a sibling `read` when `write` is present.
+
 ## Evaluation order
 
 1. Parse bearer (no trim) → 2. Token format → 3. Lookup + hash_equals (dummy on miss) →

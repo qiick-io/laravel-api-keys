@@ -6,6 +6,10 @@ namespace Qiick\ApiKeys;
 
 /**
  * @api Plaintext returned once; never stored; redacted in debug / JSON / serialize.
+ *
+ * Note: `(array) $token` and `var_export($token)` still expose public properties
+ * (PHP has no hook for those). Prefer `__debugInfo` / `json_encode` / `serialize`,
+ * or never pass a GeneratedToken into loggers that cast to array.
  */
 final readonly class GeneratedToken implements \JsonSerializable
 {

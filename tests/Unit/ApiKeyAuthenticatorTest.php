@@ -14,6 +14,7 @@ use Qiick\ApiKeys\KeyContext;
 use Qiick\ApiKeys\RateLimitDecision;
 use Qiick\ApiKeys\Scope;
 use Qiick\ApiKeys\Testing\ArrayScopeVocabulary;
+use Qiick\ApiKeys\Testing\DummyMatchProbe;
 use Qiick\ApiKeys\Testing\FakeApiKeyRepository;
 use Qiick\ApiKeys\Testing\FakeAttemptLimiter;
 use Qiick\ApiKeys\Testing\FakeKeyAuthorizer;
@@ -24,17 +25,17 @@ use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\TokenCodec;
 use Qiick\ApiKeys\TokenEnvironment;
 use Qiick\ApiKeys\UsageRecorder;
-use SensitiveParameterValue;
 
 mutates(ApiKeyAuthenticator::class);
 mutates(AuthorizationDecision::class);
 
-function makeCodec(): TokenCodec
+function makeCodec(?DummyMatchProbe $probe = null): TokenCodec
 {
     return new TokenCodec(
         productPrefix: 'tst',
         environment: new FixedEnvironment(TokenEnvironment::Test),
         random: new FixedRandomSource('fixed-seed-for-deterministic-api-key-tests!!'),
+        onDummyMatch: $probe !== null ? $probe->record(...) : null,
     );
 }
 
@@ -51,6 +52,7 @@ function makeCodec(): TokenCodec
  *     record?: InMemoryApiKeyRecord,
  *     token?: string,
  *     exceptionReporter?: callable(Throwable): void,
+ *     probe?: DummyMatchProbe,
  * }  $overrides
  * @return array{
  *     auth: ApiKeyAuthenticator,
@@ -64,11 +66,13 @@ function makeCodec(): TokenCodec
  *     limiter: FakeAttemptLimiter,
  *     clock: FixedClock,
  *     now: DateTimeImmutable,
+ *     probe: DummyMatchProbe|null,
  * }
  */
 function authenticator(array $overrides = []): array
 {
-    $codec = makeCodec();
+    $probe = $overrides['probe'] ?? null;
+    $codec = makeCodec($probe);
     $issued = $codec->issue();
     $now = new DateTimeImmutable('2026-01-15 12:00:00');
 
@@ -84,21 +88,31 @@ function authenticator(array $overrides = []): array
     $limiter = $overrides['limiter'] ?? new FakeAttemptLimiter;
     $clock = $overrides['clock'] ?? new FixedClock($now);
 
-    $auth = new ApiKeyAuthenticator(
-        codec: $codec,
-        repository: $repository,
-        authorizer: $authorizer,
-        vocabulary: new ArrayScopeVocabulary(['items:read', 'items:write', 'files:read']),
-        ipAllowlist: new IpAllowlist,
-        usageRecorder: new UsageRecorder,
-        clock: $clock,
-        attemptLimiter: $limiter,
-        failedAttemptLimiter: $overrides['failedLimiter'] ?? null,
-        usageThrottleSeconds: $overrides['throttle'] ?? 60,
-        bypassThrottleOnIpChange: $overrides['bypassIp'] ?? true,
-        defaultRateLimitPerMinute: $overrides['defaultRate'] ?? 60,
-        exceptionReporter: $overrides['exceptionReporter'] ?? null,
-    );
+    // Omit throttle / bypass / defaultRate unless overridden so constructor
+    // defaults stay load-bearing for mutation coverage.
+    $params = [
+        'codec' => $codec,
+        'repository' => $repository,
+        'authorizer' => $authorizer,
+        'vocabulary' => new ArrayScopeVocabulary(['items:read', 'items:write', 'files:read']),
+        'ipAllowlist' => new IpAllowlist,
+        'usageRecorder' => new UsageRecorder,
+        'clock' => $clock,
+        'attemptLimiter' => $limiter,
+        'failedAttemptLimiter' => $overrides['failedLimiter'] ?? null,
+        'exceptionReporter' => $overrides['exceptionReporter'] ?? null,
+    ];
+    if (array_key_exists('throttle', $overrides)) {
+        $params['usageThrottleSeconds'] = $overrides['throttle'];
+    }
+    if (array_key_exists('bypassIp', $overrides)) {
+        $params['bypassThrottleOnIpChange'] = $overrides['bypassIp'];
+    }
+    if (array_key_exists('defaultRate', $overrides)) {
+        $params['defaultRateLimitPerMinute'] = $overrides['defaultRate'];
+    }
+
+    $auth = new ApiKeyAuthenticator(...$params);
 
     return [
         'auth' => $auth,
@@ -112,6 +126,7 @@ function authenticator(array $overrides = []): array
         'limiter' => $limiter,
         'clock' => $clock,
         'now' => $now,
+        'probe' => $probe,
     ];
 }
 
@@ -671,28 +686,32 @@ it('records usage after the throttle window elapses', function (): void {
 });
 
 it('runs performDummyMatch when no candidates match the prefix', function (): void {
+    $probe = new DummyMatchProbe;
     $fixture = authenticator([
         'repository' => new FakeApiKeyRepository([]),
         'defaultRate' => 0,
+        'probe' => $probe,
     ]);
 
-    expect($fixture['codec']->dummyMatchCalls())->toBe(0);
+    expect($probe->calls)->toBe(0);
 
     try {
         $fixture['auth']->authenticate($fixture['token'], keyContext());
         $this->fail('expected rejection');
     } catch (ApiKeyRejection) {
-        expect($fixture['codec']->dummyMatchCalls())->toBe(1);
+        expect($probe->calls)->toBe(1);
     }
 });
 
-it('narrows grantedScopes to the owner ceiling (A6)', function (): void {
+it('narrows grantedScopes to the owner ceiling before highest-per-resource (A6)', function (): void {
     $fixture = authenticator(['defaultRate' => 0]);
+
+    // Key stores only write; owner demoted to read — must keep items:read, not 403.
     $record = new InMemoryApiKeyRecord(
         id: '42',
         keyPrefix: $fixture['prefix'],
         keyHash: $fixture['hash'],
-        scopes: ['items:read', 'files:read'],
+        scopes: ['items:write'],
     );
 
     $auth = authenticator([
@@ -705,7 +724,31 @@ it('narrows grantedScopes to the owner ceiling (A6)', function (): void {
     $result = $auth['auth']->authenticate($fixture['token'], keyContext());
 
     expect($result->grantedScopes->values())->toBe(['items:read'])
-        ->and($result->grantedScopes->allows(Scope::tryFromString('files:read')))->toBeFalse();
+        ->and($result->grantedScopes->allows(Scope::tryFromString('items:read')))->toBeTrue()
+        ->and($result->grantedScopes->allows(Scope::tryFromString('items:write')))->toBeFalse();
+});
+
+it('fail-closes when the key has no owner and no creator', function (): void {
+    $fixture = authenticator(['defaultRate' => 0]);
+    $record = (new InMemoryApiKeyRecord(
+        id: '42',
+        keyPrefix: $fixture['prefix'],
+        keyHash: $fixture['hash'],
+        scopes: ['items:read'],
+    ))->withOwnerIdentifier(null)->withCreatedByIdentifier(null);
+
+    $auth = authenticator([
+        'repository' => new FakeApiKeyRepository([$record]),
+        'token' => $fixture['token'],
+        'defaultRate' => 0,
+    ]);
+
+    try {
+        $auth['auth']->authenticate($fixture['token'], keyContext());
+        $this->fail('expected rejection');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->errorCode())->toBe('insufficient_scope');
+    }
 });
 
 it('keeps authentication when recordUsage throws (audit stamp must not 500)', function (): void {
@@ -820,7 +863,7 @@ it('applies the pre-auth failed-attempt limiter on 401 paths (A15)', function ()
     } catch (ApiKeyRejection) {
     }
 
-    expect($limiter->hitsFor('api-key-failures:203.0.113.10'))->toBe(2);
+    expect($limiter->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(2);
 
     try {
         $fixture['auth']->authenticate($fixture['token'], keyContext('203.0.113.10'));
@@ -828,5 +871,356 @@ it('applies the pre-auth failed-attempt limiter on 401 paths (A15)', function ()
     } catch (ApiKeyRejection $rejection) {
         expect($rejection->errorCode())->toBe('rate_limit_exceeded')
             ->and($rejection->getStatusCode())->toBe(429);
+    }
+});
+
+it('hits the failed-attempt brake on every 401 path', function (): void {
+    $bucket = 'api-key-failures:v4:203.0.113.10';
+    $now = new DateTimeImmutable('2026-01-15 12:00:00');
+
+    $assertHit = function (callable $build) use ($bucket): void {
+        $limiter = new FakeAttemptLimiter;
+        $build($limiter);
+        expect($limiter->hitsFor($bucket))->toBe(1);
+    };
+
+    $assertHit(function (FakeAttemptLimiter $limiter) use ($now): void {
+        $auth = authenticator([
+            'failedLimiter' => new FailedAttemptLimiter($limiter, 20),
+            'defaultRate' => 0,
+            'clock' => new FixedClock($now),
+        ]);
+        try {
+            $auth['auth']->authenticate('not-a-token', keyContext());
+        } catch (ApiKeyRejection) {
+        }
+    });
+
+    $assertHit(function (FakeAttemptLimiter $limiter) use ($now): void {
+        $auth = authenticator([
+            'failedLimiter' => new FailedAttemptLimiter($limiter, 20),
+            'defaultRate' => 0,
+            'clock' => new FixedClock($now),
+        ]);
+        try {
+            $auth['auth']->authenticate($auth['prefix'].str_repeat('x', 32), keyContext());
+        } catch (ApiKeyRejection) {
+        }
+    });
+
+    $assertHit(function (FakeAttemptLimiter $limiter) use ($now): void {
+        $base = authenticator(['defaultRate' => 0, 'clock' => new FixedClock($now)]);
+        $auth = authenticator([
+            'repository' => new FakeApiKeyRepository([
+                (new InMemoryApiKeyRecord(
+                    id: '42',
+                    keyPrefix: $base['prefix'],
+                    keyHash: $base['hash'],
+                    scopes: ['items:read'],
+                ))->withRevokedAt($now->modify('-1 minute')),
+            ]),
+            'token' => $base['token'],
+            'failedLimiter' => new FailedAttemptLimiter($limiter, 20),
+            'defaultRate' => 0,
+            'clock' => new FixedClock($now),
+        ]);
+        try {
+            $auth['auth']->authenticate($base['token'], keyContext());
+        } catch (ApiKeyRejection) {
+        }
+    });
+
+    $assertHit(function (FakeAttemptLimiter $limiter) use ($now): void {
+        $base = authenticator(['defaultRate' => 0, 'clock' => new FixedClock($now)]);
+        $auth = authenticator([
+            'repository' => new FakeApiKeyRepository([
+                (new InMemoryApiKeyRecord(
+                    id: '42',
+                    keyPrefix: $base['prefix'],
+                    keyHash: $base['hash'],
+                    scopes: ['items:read'],
+                ))->withExpiresAt($now->modify('-1 second')),
+            ]),
+            'token' => $base['token'],
+            'failedLimiter' => new FailedAttemptLimiter($limiter, 20),
+            'defaultRate' => 0,
+            'clock' => new FixedClock($now),
+        ]);
+        try {
+            $auth['auth']->authenticate($base['token'], keyContext());
+        } catch (ApiKeyRejection) {
+        }
+    });
+
+    $assertHit(function (FakeAttemptLimiter $limiter) use ($now): void {
+        $auth = authenticator([
+            'authorizer' => (new FakeKeyAuthorizer)->denyActor('gone'),
+            'failedLimiter' => new FailedAttemptLimiter($limiter, 20),
+            'defaultRate' => 0,
+            'clock' => new FixedClock($now),
+        ]);
+        try {
+            $auth['auth']->authenticate($auth['token'], keyContext());
+        } catch (ApiKeyRejection) {
+        }
+    });
+
+    $assertHit(function (FakeAttemptLimiter $limiter) use ($now): void {
+        $auth = authenticator([
+            'repository' => new FakeApiKeyRepository([]),
+            'failedLimiter' => new FailedAttemptLimiter($limiter, 20),
+            'defaultRate' => 0,
+            'clock' => new FixedClock($now),
+        ]);
+        try {
+            $auth['auth']->authenticate($auth['token'], keyContext());
+        } catch (ApiKeyRejection) {
+        }
+    });
+});
+
+it('pins constructor defaults for throttle, IP bypass, and rate limit', function (): void {
+    $now = new DateTimeImmutable('2026-01-15 12:00:00');
+    $codec = makeCodec();
+    $issued = $codec->issue();
+    $limiter = new FakeAttemptLimiter;
+
+    $record = (new InMemoryApiKeyRecord(
+        id: '42',
+        keyPrefix: $issued->keyPrefix,
+        keyHash: $issued->keyHash,
+        scopes: ['items:read'],
+    ))->withLastUsed($now->modify('-59 seconds'), '203.0.113.10');
+
+    $repository = new FakeApiKeyRepository([$record]);
+    $auth = new ApiKeyAuthenticator(
+        codec: $codec,
+        repository: $repository,
+        authorizer: new FakeKeyAuthorizer,
+        vocabulary: new ArrayScopeVocabulary(['items:read', 'items:write', 'files:read']),
+        ipAllowlist: new IpAllowlist,
+        usageRecorder: new UsageRecorder,
+        clock: new FixedClock($now),
+        attemptLimiter: $limiter,
+    );
+
+    // Default throttle 60: 59s elapsed, same IP → no usage write (kills Decrement 60→59).
+    $auth->authenticate($issued->plainText, keyContext('203.0.113.10'));
+    expect($repository->recordedUsages)->toHaveCount(0)
+        ->and($limiter->lastDecaySeconds['api-key:42'])->toBe(60);
+
+    // Exactly 60s elapsed must record under default 60 (kills Increment 60→61).
+    $boundaryRecord = (new InMemoryApiKeyRecord(
+        id: '42',
+        keyPrefix: $issued->keyPrefix,
+        keyHash: $issued->keyHash,
+        scopes: ['items:read'],
+    ))->withLastUsed($now->modify('-60 seconds'), '203.0.113.10');
+    $boundaryRepo = new FakeApiKeyRepository([$boundaryRecord]);
+    $atBoundary = new ApiKeyAuthenticator(
+        codec: $codec,
+        repository: $boundaryRepo,
+        authorizer: new FakeKeyAuthorizer,
+        vocabulary: new ArrayScopeVocabulary(['items:read', 'items:write', 'files:read']),
+        ipAllowlist: new IpAllowlist,
+        usageRecorder: new UsageRecorder,
+        clock: new FixedClock($now),
+        attemptLimiter: new FakeAttemptLimiter,
+    );
+    $atBoundary->authenticate($issued->plainText, keyContext('203.0.113.10'));
+    expect($boundaryRepo->recordedUsages)->toHaveCount(1);
+
+    // Default bypassThrottleOnIpChange true: IP change records inside the window.
+    $auth->authenticate($issued->plainText, keyContext('198.51.100.1'));
+    expect($repository->recordedUsages)->toHaveCount(1);
+
+    // Fresh limiter for the default rate=60 ceiling (tooMany when hits >= 60).
+    $rateLimiter = new FakeAttemptLimiter;
+    $rateAuth = new ApiKeyAuthenticator(
+        codec: $codec,
+        repository: $repository,
+        authorizer: new FakeKeyAuthorizer,
+        vocabulary: new ArrayScopeVocabulary(['items:read', 'items:write', 'files:read']),
+        ipAllowlist: new IpAllowlist,
+        usageRecorder: new UsageRecorder,
+        clock: new FixedClock($now),
+        attemptLimiter: $rateLimiter,
+    );
+
+    for ($i = 0; $i < 60; $i++) {
+        $rateAuth->authenticate($issued->plainText, keyContext('198.51.100.1'));
+    }
+    expect($rateLimiter->hitsFor('api-key:42'))->toBe(60);
+
+    try {
+        $rateAuth->authenticate($issued->plainText, keyContext('198.51.100.1'));
+        $this->fail('expected rate limit');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->getStatusCode())->toBe(429)
+            ->and($rejection->render()->headers->get('X-RateLimit-Remaining'))->toBe('0');
+    }
+});
+
+it('falls back to createdBy when owner is null for the ceiling', function (): void {
+    $fixture = authenticator(['defaultRate' => 0]);
+    $record = (new InMemoryApiKeyRecord(
+        id: '42',
+        keyPrefix: $fixture['prefix'],
+        keyHash: $fixture['hash'],
+        scopes: ['items:write', 'files:read'],
+    ))->withOwnerIdentifier(null)->withCreatedByIdentifier(99);
+
+    $auth = authenticator([
+        'repository' => new FakeApiKeyRepository([$record]),
+        'authorizer' => (new FakeKeyAuthorizer)->withCreatorMayGrant(['items:read']),
+        'token' => $fixture['token'],
+        'defaultRate' => 0,
+    ]);
+
+    $result = $auth['auth']->authenticate($fixture['token'], keyContext());
+
+    expect($result->grantedScopes->values())->toBe(['items:read']);
+});
+
+it('prefers owner over createdBy when both are set (coalesce left is load-bearing)', function (): void {
+    $fixture = authenticator(['defaultRate' => 0]);
+    $record = (new InMemoryApiKeyRecord(
+        id: '42',
+        keyPrefix: $fixture['prefix'],
+        keyHash: $fixture['hash'],
+        scopes: ['items:write', 'files:read'],
+    ))->withOwnerIdentifier(1)->withCreatedByIdentifier(99);
+
+    $auth = authenticator([
+        'repository' => new FakeApiKeyRepository([$record]),
+        'authorizer' => (new FakeKeyAuthorizer)->withCreatorMayGrantById([
+            1 => ['items:read'],
+            99 => ['items:write', 'items:read', 'files:read'],
+        ]),
+        'token' => $fixture['token'],
+        'defaultRate' => 0,
+    ]);
+
+    $result = $auth['auth']->authenticate($fixture['token'], keyContext());
+
+    // Owner ceiling wins → demote to items:read; createdBy alone would keep write+files.
+    expect($result->grantedScopes->values())->toBe(['items:read']);
+});
+
+it('passes the real client IP into the allowlist (null coalesce is load-bearing)', function (): void {
+    $fixture = authenticator(['defaultRate' => 0]);
+    $record = new InMemoryApiKeyRecord(
+        id: '42',
+        keyPrefix: $fixture['prefix'],
+        keyHash: $fixture['hash'],
+        scopes: ['items:read'],
+        ipAllowlist: ['203.0.113.10'],
+    );
+
+    $auth = authenticator([
+        'repository' => new FakeApiKeyRepository([$record]),
+        'token' => $fixture['token'],
+        'defaultRate' => 0,
+    ]);
+
+    $result = $auth['auth']->authenticate($fixture['token'], keyContext('203.0.113.10'));
+    expect($result->record->id())->toBe('42');
+
+    try {
+        $auth['auth']->authenticate($fixture['token'], keyContext('198.51.100.1'));
+        $this->fail('expected IP denial');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->errorCode())->toBe('ip_not_allowed');
+    }
+});
+
+it('does not invoke the exception reporter when usageSideEffect is null', function (): void {
+    $reported = [];
+    $fixture = authenticator([
+        'defaultRate' => 0,
+        'exceptionReporter' => function (Throwable $exception) use (&$reported): void {
+            $reported[] = $exception;
+        },
+    ]);
+
+    $fixture['auth']->authenticate($fixture['token'], keyContext());
+
+    expect($reported)->toBe([]);
+});
+
+it('reports usage failures via the Laravel report() helper when no reporter is wired', function (): void {
+    $fixture = authenticator(['defaultRate' => 0]);
+
+    $matching = authenticator([
+        'repository' => new class($fixture['hash'], $fixture['prefix']) implements ApiKeyRepository
+        {
+            public function __construct(private string $hash, private string $prefix) {}
+
+            public function findCandidatesByPrefix(string $keyPrefix): iterable
+            {
+                return [new InMemoryApiKeyRecord(
+                    id: '42',
+                    keyPrefix: $this->prefix,
+                    keyHash: $this->hash,
+                    scopes: ['items:read'],
+                )];
+            }
+
+            public function recordUsage(ApiKeyRecord $record, ?string $ip, DateTimeImmutable $usedAt): void
+            {
+                throw new RuntimeException('usage write failed');
+            }
+        },
+        'token' => $fixture['token'],
+        'defaultRate' => 0,
+    ]);
+
+    // No exceptionReporter — exercise the function_exists('report') fallback.
+    $result = $matching['auth']->authenticate($fixture['token'], keyContext());
+    expect($result->record->id())->toBe('42');
+});
+
+it('asserts remaining=0 on the pre-auth failed-attempt 429', function (): void {
+    $limiter = new FakeAttemptLimiter;
+    $failed = new FailedAttemptLimiter($limiter, maxPerMinute: 1);
+    $fixture = authenticator([
+        'failedLimiter' => $failed,
+        'defaultRate' => 0,
+    ]);
+
+    try {
+        $fixture['auth']->authenticate('bad', keyContext('203.0.113.10'));
+    } catch (ApiKeyRejection) {
+    }
+
+    try {
+        $fixture['auth']->authenticate($fixture['token'], keyContext('203.0.113.10'));
+        $this->fail('expected rate limit');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->render()->headers->get('X-RateLimit-Remaining'))->toBe('0');
+    }
+});
+
+it('does not count repository exceptions as failed attempts', function (): void {
+    $limiter = new FakeAttemptLimiter;
+    $fixture = authenticator([
+        'repository' => new class implements ApiKeyRepository
+        {
+            public function findCandidatesByPrefix(string $keyPrefix): iterable
+            {
+                throw new RuntimeException('db down');
+            }
+
+            public function recordUsage(ApiKeyRecord $record, ?string $ip, DateTimeImmutable $usedAt): void {}
+        },
+        'failedLimiter' => new FailedAttemptLimiter($limiter, 20),
+        'defaultRate' => 0,
+    ]);
+
+    try {
+        $fixture['auth']->authenticate($fixture['token'], keyContext());
+        $this->fail('expected repository boom');
+    } catch (RuntimeException) {
+        expect($limiter->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(0);
     }
 });

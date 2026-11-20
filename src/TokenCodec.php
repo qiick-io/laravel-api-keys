@@ -39,30 +39,22 @@ final class TokenCodec
     /** @var list<LegacyTokenMatcher> */
     private array $legacyMatchers;
 
-    private int $dummyMatchCalls = 0;
-
     /**
      * @param  list<LegacyTokenMatcher>  $legacyMatchers
+     * @param  null|callable(): void  $onDummyMatch  test seam only
      */
     public function __construct(
         private string $productPrefix,
         private EnvironmentResolver $environment,
         private RandomSource $random,
         array $legacyMatchers = [],
+        private mixed $onDummyMatch = null,
     ) {
         if (preg_match('/^[a-z]{3}$/D', $this->productPrefix) !== 1) {
             throw new \InvalidArgumentException('API key product prefix must be exactly three lowercase letters.');
         }
 
         $this->legacyMatchers = $legacyMatchers;
-    }
-
-    /**
-     * Observable call count for the dummy-miss path (timing equalisation spy).
-     */
-    public function dummyMatchCalls(): int
-    {
-        return $this->dummyMatchCalls;
     }
 
     public function issue(?TokenEnvironment $override = null): GeneratedToken
@@ -163,7 +155,10 @@ final class TokenCodec
      */
     public function performDummyMatch(#[\SensitiveParameter] string $presentedToken): void
     {
-        $this->dummyMatchCalls++;
+        if (is_callable($this->onDummyMatch)) {
+            ($this->onDummyMatch)();
+        }
+
         $this->spendCompare($this->hash($presentedToken));
     }
 

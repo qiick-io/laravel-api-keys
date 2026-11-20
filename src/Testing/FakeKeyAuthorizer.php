@@ -23,6 +23,8 @@ final class FakeKeyAuthorizer implements KeyAuthorizer
         private ?RateLimitDecision $rateLimit = null,
         /** @var list<string> */
         private array $creatorMayGrant = [],
+        /** @var array<string|int, list<string>> */
+        private array $creatorMayGrantById = [],
     ) {}
 
     public function authorizeActor(ApiKeyRecord $record, KeyContext $context): AuthorizationDecision
@@ -41,6 +43,10 @@ final class FakeKeyAuthorizer implements KeyAuthorizer
 
     public function scopesCreatorMayGrant(string|int $creatorId, array $knownScopes, KeyContext $context): array
     {
+        if ($this->creatorMayGrantById !== [] && array_key_exists($creatorId, $this->creatorMayGrantById)) {
+            return $this->creatorMayGrantById[$creatorId];
+        }
+
         return $this->creatorMayGrant !== [] ? $this->creatorMayGrant : $knownScopes;
     }
 
@@ -80,6 +86,17 @@ final class FakeKeyAuthorizer implements KeyAuthorizer
     {
         $clone = clone $this;
         $clone->creatorMayGrant = $creatorMayGrant;
+
+        return $clone;
+    }
+
+    /**
+     * @param  array<string|int, list<string>>  $creatorMayGrantById
+     */
+    public function withCreatorMayGrantById(array $creatorMayGrantById): self
+    {
+        $clone = clone $this;
+        $clone->creatorMayGrantById = $creatorMayGrantById;
 
         return $clone;
     }

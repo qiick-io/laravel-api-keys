@@ -176,4 +176,20 @@ final class InMemoryApiKeyRecord implements ApiKeyRecord
 
         return $clone;
     }
+
+    public function withOwnerIdentifier(string|int|null $ownerIdentifier): self
+    {
+        $clone = clone $this;
+        $clone->ownerIdentifier = $ownerIdentifier;
+
+        return $clone;
+    }
+
+    public function withCreatedByIdentifier(string|int|null $createdByIdentifier): self
+    {
+        $clone = clone $this;
+        $clone->createdByIdentifier = $createdByIdentifier;
+
+        return $clone;
+    }
 }

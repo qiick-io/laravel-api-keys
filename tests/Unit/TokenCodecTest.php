@@ -80,7 +80,7 @@ it('redacts plaintext via json_encode and serialize on GeneratedToken', function
     expect(fn () => unserialize(serialize($token)))->toThrow(LogicException::class);
 });
 
-it('redacts the secret in ParsedToken debug output', function (): void {
+it('redacts the secret in ParsedToken debug, JSON, and serialize output', function (): void {
     $codec = codec();
     $token = $codec->issue();
     $parsed = $codec->parse($token->plainText);
@@ -88,7 +88,13 @@ it('redacts the secret in ParsedToken debug output', function (): void {
 
     expect($debug['secret'])->toBe('[REDACTED]')
         ->and($debug['secret'])->not->toBe($parsed->secret)
-        ->and($debug['keyPrefix'])->toBe($token->keyPrefix);
+        ->and($debug['keyPrefix'])->toBe($token->keyPrefix)
+        ->and(json_encode($parsed))->not->toContain($parsed->secret)
+        ->and(json_encode($parsed))->toContain('[REDACTED]')
+        ->and(serialize($parsed))->not->toContain($parsed->secret)
+        ->and(serialize($parsed))->toContain('[REDACTED]');
+
+    expect(fn () => unserialize(serialize($parsed)))->toThrow(LogicException::class);
 });
 
 it('rejects secrets longer than exactly SECRET_LENGTH', function (): void {

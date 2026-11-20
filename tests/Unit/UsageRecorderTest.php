@@ -41,5 +41,14 @@ it('uses the default throttle of 60 seconds and bypass-on-IP-change true', funct
 
     // Defaults: throttle 60, bypass true — elapsed boundary records even without IP change.
     expect(recorder()->shouldRecord($now, $last, '203.0.113.10', '203.0.113.10'))->toBeTrue()
+        ->and(recorder()->shouldRecord($now, $now->modify('-59 seconds'), '203.0.113.10', '203.0.113.10'))->toBeFalse()
         ->and(recorder()->shouldRecord($now, $now->modify('-1 second'), 'a', 'b'))->toBeTrue();
+});
+
+it('records on first use even when current IP is null (early return is load-bearing)', function (): void {
+    $now = new DateTimeImmutable('2026-01-15 12:00:00');
+
+    // Without the lastUsedAt===null early return, null IP skips bypass and then
+    // dereferences null lastUsedAt — this assertion kills RemoveEarlyReturn.
+    expect(recorder()->shouldRecord($now, null, null, null))->toBeTrue();
 });

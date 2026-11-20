@@ -53,7 +53,7 @@ final class ApiKeyAuthenticator
         KeyContext $context,
         ?Scope $requiredScope = null,
     ): AuthenticationResult {
-        $clientIp = $context->ip ?? '';
+        $clientIp = $context->ip;
 
         if (
             $this->failedAttemptLimiter !== null
@@ -73,14 +73,10 @@ final class ApiKeyAuthenticator
             throw ApiKeyRejection::invalidToken();
         }
 
-        try {
-            $candidates = [];
-            foreach ($this->repository->findCandidatesByPrefix($keyPrefix) as $candidate) {
-                $candidates[] = $candidate;
-            }
-        } catch (\Throwable $exception) {
-            $this->hitFailedAttempt($clientIp);
-            throw $exception;
+        // Repository failures are infrastructure errors, not auth attempts — do not hit the brake.
+        $candidates = [];
+        foreach ($this->repository->findCandidatesByPrefix($keyPrefix) as $candidate) {
+            $candidates[] = $candidate;
         }
 
         if ($candidates === []) {
@@ -137,16 +133,17 @@ final class ApiKeyAuthenticator
             );
         }
 
-        if (! $this->ipAllowlist->allows($clientIp, $matched->rawIpAllowlist())) {
+        // Cast keeps a strict string for IpAllowlist; empty fallback is for null IP only.
+        if (! $this->ipAllowlist->allows((string) ($clientIp ?? ''), $matched->rawIpAllowlist())) { // @pest-mutate-ignore: RemoveStringCast,EmptyStringToNotEmpty
             throw ApiKeyRejection::ipNotAllowed();
         }
 
-        $granted = ScopeSet::parseStored($matched->rawScopes(), $this->vocabulary);
-        if ($granted->isEmpty()) {
+        $expanded = ScopeSet::parseStoredExpanded($matched->rawScopes(), $this->vocabulary);
+        if ($expanded->isEmpty()) {
             throw ApiKeyRejection::noUsableScopes();
         }
 
-        $granted = $this->narrowToOwnerCeiling($matched, $granted, $context);
+        $granted = $this->narrowToOwnerCeiling($matched, $expanded, $context);
         if ($granted->isEmpty()) {
             throw ApiKeyRejection::noUsableScopes();
         }
@@ -190,35 +187,32 @@ final class ApiKeyAuthenticator
         );
     }
 
-    private function hitFailedAttempt(string $clientIp): void
+    private function hitFailedAttempt(?string $clientIp): void
     {
         $this->failedAttemptLimiter?->hit($clientIp);
     }
 
+    /**
+     * Fail closed with no owner/creator. Narrow against the expanded offer
+     * (writes imply reads) before collapsing highest-per-resource.
+     */
     private function narrowToOwnerCeiling(
         ApiKeyRecord $record,
-        ScopeSet $granted,
+        ScopeSet $expanded,
         KeyContext $context,
     ): ScopeSet {
         $ceilingId = $record->ownerIdentifier() ?? $record->createdByIdentifier();
         if ($ceilingId === null) {
-            return $granted;
+            return new ScopeSet([]);
         }
 
         $allowedValues = $this->authorizer->scopesCreatorMayGrant(
             $ceilingId,
-            $granted->values(),
+            $expanded->valuesOfferedToAuthorizer(),
             $context,
         );
 
-        $narrowed = [];
-        foreach ($granted->scopes as $scope) {
-            if (in_array($scope->value(), $allowedValues, true)) {
-                $narrowed[] = $scope;
-            }
-        }
-
-        return new ScopeSet($narrowed);
+        return $expanded->narrowedTo($allowedValues)->collapsed();
     }
 
     private function recordUsageQuietly(
@@ -243,8 +237,9 @@ final class ApiKeyAuthenticator
             return;
         }
 
-        if (\function_exists('report')) {
-            report($exception);
+        // Laravel helper when present; host apps without it still authenticate.
+        if (\function_exists('report')) { // @pest-mutate-ignore: IfNegated
+            report($exception); // @pest-mutate-ignore: RemoveFunctionCall
         }
     }
 

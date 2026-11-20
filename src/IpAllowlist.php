@@ -98,7 +98,7 @@ final class IpAllowlist
         }
 
         $address = $parts[0];
-        $prefixLength = (int) $parts[1]; // @pest-mutate-ignore: RemoveIntegerCast — ctype_digit already; cast is for typed arithmetic
+        $prefixLength = (int) $parts[1]; // @pest-mutate-ignore: RemoveIntegerCast
         $wasMapped = $this->isIpv4Mapped($address);
         $expanded = $this->expandMapped($address);
         if ($expanded === null) {

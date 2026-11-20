@@ -39,6 +39,7 @@ Set `API_KEYS_PRODUCT_PREFIX` (three-letter product code) before issuing tokens.
 | --- | --- |
 | Proxies | `KeyContext::ip` / `ClientIp::from` MUST use `Request::ip()` only after `TrustProxies` is configured correctly. Never pass raw `X-Forwarded-For` / `X-Real-IP` from untrusted clients. |
 | Enumeration | Format-miss and hash-miss return the **same** `401 invalid_token` body/headers. A dummy `hash_equals` runs when no candidates match. Pre-auth `FailedAttemptLimiter` is default-on in recipes. The public `key_prefix` is non-secret by design. |
+| Failed-attempt brake | Buckets IPv4 by `/32` and IPv6 by `/64`. Null/empty/unparseable client IPs **skip** the brake (never share one bucket — that would lock out everyone behind a misconfigured proxy). Repository/infra exceptions are **not** counted. Shared egress / NAT: many clients behind one public IP share one bucket and can lock each other out; keep the recipe default **on** (20/min) and raise only with a clear threat model. Wire after `TrustProxies` so `KeyContext::ip` is the real client, not the LB. |
 | Redaction | Presented tokens / Bearer values MUST NEVER appear in exception messages, JSON bodies, logs, telemetry, activity properties, or `__debugInfo`. |
 | Scopes | Fail-closed: whitespace, wrong case, duplicates, or non-vocabulary values → empty set → `403 insufficient_scope` (never 401). |
 | Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint). |
@@ -71,12 +72,31 @@ highest-per-resource drops a sibling `read` when `write` is present.
 
 `ApiKeyAuthenticator::authenticate($presentedToken, $context, $requiredScope)`:
 
-1. Pre-auth `FailedAttemptLimiter` (per IP; default 20/min in recipes) →
+1. Pre-auth `FailedAttemptLimiter` (IPv4 `/32`, IPv6 `/64`; default 20/min in recipes) →
 2. Parse bearer (no trim; case-insensitive `Bearer`; `BearerTokenExtractor`) →
 3. Token format → 4. Lookup + `hash_equals` (dummy on miss) → 5. Revoked/expired →
-6. Actor (`KeyAuthorizer`) → 7. IP allowlist → 8. Scopes narrowed to owner ceiling →
+6. Actor (`KeyAuthorizer`) → 7. IP allowlist → 8. Scopes: expand → owner ceiling
+   (fail-closed if no owner/creator; write may demote to read) → collapse highest-per-resource →
 9. Per-key rate limit (`AttemptLimiter`, default bucket `api-key:{id}`) →
 10. Usage record (`UsageRecorder` throttle; write failures are reported, not thrown).
+
+### Wiring the failed-attempt brake (recipe default ON)
+
+```php
+$failedAttempts = new FailedAttemptLimiter(
+    limiter: $attemptLimiter, // your RateLimiter adapter
+    maxPerMinute: 20,         // ≤0 disables; leave ON unless you have a reason
+);
+
+$auth = new ApiKeyAuthenticator(
+    // ...
+    failedAttemptLimiter: $failedAttempts,
+);
+```
+
+Pass `KeyContext::ip` from `ClientIp::from($request)` only after `TrustProxies` is correct.
+Clients behind CGNAT / shared office egress share one IPv4 bucket — tune `maxPerMinute`
+up only if false lockouts outweigh credential-stuffing risk.
 
 Refusals are `ApiKeyRejection`: `401 invalid_token` and `403 insufficient_scope`
 carry RFC 6750 `WWW-Authenticate`; `403 ip_not_allowed` does not. Format-miss and

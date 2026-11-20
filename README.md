@@ -43,7 +43,7 @@ Set `API_KEYS_PRODUCT_PREFIX` (three-letter product code) before issuing tokens.
 | Redaction | Presented tokens / Bearer values MUST NEVER appear in exception messages, JSON bodies, logs, telemetry, activity properties, or `__debugInfo`. |
 | Scopes | Fail-closed: whitespace, wrong case, duplicates, or non-vocabulary values → empty set → `403 insufficient_scope` (never 401). |
 | Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint; lowercase UUID; rejects non-UUID, nil UUID, and a conflicting existing `api_key_id`). |
-| Rotation | `RotationService::rotate(ApiKeyRecord, TokenCodec, Clock, graceHours)` refuses revoked/expired keys and unknown prefixes (legacy only while the matcher still accepts `$now`); invalid/negative/above-max grace → 0 (max default 168h, bound from `rotation_max_grace_hours`). Legacy prefixes migrate to a **fresh canonical** token. Products **must** `lockForUpdate` in a transaction and write `key_prefix`, `key_hash`, `previous_key_hash`, `previous_key_valid_until` unconditionally (including nulls). |
+| Rotation | `RotationService::rotate(ApiKeyRecord, TokenCodec, Clock, graceHours)` refuses revoked/expired keys and unknown prefixes (legacy only while the matcher still accepts `$now`); invalid/negative/above-max grace → 0 (max default 168h, bound from `rotation_max_grace_hours`). Legacy prefixes migrate to a **fresh canonical** token with **no grace across formats** (old `ek_` plaintext dies as soon as `key_prefix` is updated). Matchers must recognise a bare stored prefix. Products **must** `lockForUpdate` and write `key_prefix` / `key_hash` / `previous_key_hash` / `previous_key_valid_until` unconditionally. |
 
 ## Token shape
 
@@ -61,7 +61,8 @@ DB::transaction(function () use ($key, $codec, $clock) {
     $rotation = $rotationService->rotate($locked, $codec, $clock, config('api-keys.rotation_grace_hours'));
 
     // Write all four columns unconditionally (nulls when grace is 0;
-    // key_prefix changes when migrating a legacy ek_ row onto canonical).
+    // key_prefix changes when migrating a legacy ek_ row onto canonical —
+    // that cut-over is immediate: no grace across formats).
     $locked->forceFill([
         'key_prefix' => $rotation->newKeyPrefix,
         'key_hash' => $rotation->newKeyHash,
@@ -125,6 +126,57 @@ carry RFC 6750 `WWW-Authenticate`; `403 ip_not_allowed` does not. Format-miss an
 hash-miss share the same body/headers. Presented tokens are `#[SensitiveParameter]`
 and never appear in messages, `render()`, `__debugInfo`, JSON, or serialize output.
 
+## Legacy matchers (product-owned)
+
+The package ships the `LegacyTokenMatcher` contract and registration point only —
+no product-specific matcher classes. Boot **fails** when `api-keys.legacy_matchers`
+is non-empty without an **absolute** `DATE_ATOM` timestamp
+(`API_KEYS_LEGACY_ACCEPT_UNTIL` / `api-keys.legacy.accept_until`). Relative strings
+(`now`, `tomorrow`, `+10 years`) are rejected.
+
+`TokenCodec::prefixOf($token, $now)` / `legacyMatcherFor($token, $now)` require `$now`.
+A matcher is used only when `isAccepting($now) && now < min(config, acceptUntil())`
+(exactly-at = rejected). Matcher output must be a **strict** prefix leaving at least
+`max(20, matcher->secretLength())` characters (Externa `ek_` secret = **31**).
+`prefixOf` must also recognise the bare stored `key_prefix` so rotation can migrate
+the row. `legacyMatcherFor` returns null for canonical tokens.
+
+Dispatch `Events\LegacyTokenUsed` only after **successful** authentication, using
+`AuthenticationResult::$legacyMatcherClass`:
+
+```php
+// Product-owned matcher (example shape only — not shipped by this package):
+// ek_ + 9 alnum public id + 31 alnum secret (real Externa format)
+final class EkLegacyTokenMatcher implements LegacyTokenMatcher { /* ... */ }
+
+// config/api-keys.php
+'legacy_matchers' => [EkLegacyTokenMatcher::class],
+'legacy' => [
+    // Absolute ISO-8601 with offset only (DATE_ATOM) — not "tomorrow" / "+10 years"
+    'accept_until' => env('API_KEYS_LEGACY_ACCEPT_UNTIL'), // e.g. 2027-01-01T00:00:00+00:00
+],
+
+$result = $authenticator->authenticate($presented, $context);
+if ($result->legacyMatcherClass !== null) {
+    event(new LegacyTokenUsed(
+        $result->record->keyPrefix(),
+        $result->legacyMatcherClass,
+        /* matcher acceptUntil from your registry */,
+    ));
+}
+event(new ApiKeyAuthenticated(
+    $result->record->id(),
+    $result->record->keyPrefix(),
+    $result->usedPreviousSecret,
+    $context->ip,
+));
+```
+
+Pest helpers (`assertTokenAbsentFrom`, `assertInvalidToken`, `assertInsufficientScope`,
+`assertIpNotAllowed`, `assertLegacyTokenUsed`) ship under `Qiick\ApiKeys\Testing\` via
+**autoload-dev** only. Consumer apps should `require` `vendor/qiick/laravel-api-keys/src/Testing/functions.php`
+from their `Pest.php` (do not put them on production `autoload.files`).
+
 ## Development
 
 ```bash
@@ -133,6 +185,7 @@ composer test      # Pest
 composer lint      # Pint
 composer analyse   # PHPStan level max
 ```
+
 
 No `composer.lock` is committed (library). CI resolves with `--prefer-lowest` and stable
 across PHP 8.3/8.4/8.5 × Laravel 12/13.

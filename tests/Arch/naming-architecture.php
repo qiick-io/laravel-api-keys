@@ -32,6 +32,11 @@ return [
             // Design §3.3: ApiKeyRejection (not *Exception).
             'Qiick\ApiKeys\Exceptions\ApiKeyRejection',
         ],
+        'Events' => [
+            // Design §3.4: LegacyTokenUsed / ApiKeyAuthenticated (not *Event).
+            'Qiick\ApiKeys\Events\LegacyTokenUsed',
+            'Qiick\ApiKeys\Events\ApiKeyAuthenticated',
+        ],
     ],
 
     'suffixes' => [

@@ -66,7 +66,9 @@ final class ApiKeyAuthenticator
             );
         }
 
-        $keyPrefix = $this->codec->prefixOf($presentedToken);
+        $now = $this->clock->now();
+        // Pass $now so legacy matchers respect accept_until (A13).
+        $keyPrefix = $this->codec->prefixOf($presentedToken, $now);
         if ($keyPrefix === null) {
             $this->hitFailedAttempt($clientIp);
 
@@ -86,7 +88,6 @@ final class ApiKeyAuthenticator
             throw ApiKeyRejection::invalidToken();
         }
 
-        $now = $this->clock->now();
         $matched = null;
         $matchKind = TokenMatch::None;
 
@@ -180,10 +181,13 @@ final class ApiKeyAuthenticator
             $this->recordUsageQuietly($matched, $context->ip, $now, $wasFirstUse);
         }
 
+        $legacyMatcher = $this->codec->legacyMatcherFor($presentedToken, $now);
+
         return new AuthenticationResult(
             $matched,
             $granted,
             $matchKind === TokenMatch::Previous,
+            $legacyMatcher === null ? null : $legacyMatcher::class,
         );
     }
 

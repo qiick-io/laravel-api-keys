@@ -17,7 +17,11 @@ use Qiick\ApiKeys\Contracts\Clock;
  * Refuses revoked or expired keys. Validates `key_prefix` against the codec’s
  * canonical shape (or an accepting legacy matcher at `$now`) so a typo cannot
  * brick a row. A legacy prefix is migrated to a **fresh canonical** token
- * (`issue()`), not reissued behind `ek_…`.
+ * (`issue()`), not reissued behind `ek_…`. That cut-over is immediate: there is
+ * **no grace across formats** — the old legacy plaintext stops matching as soon
+ * as the product persists the new `key_prefix` (even if `$graceHours` > 0).
+ * Matchers must recognise a bare stored prefix via `prefixOf($keyPrefix)` for
+ * rotation to accept the row.
  *
  * **Product obligation:** call `rotate` inside a DB transaction with
  * `lockForUpdate` on the key row, then write `key_prefix`, `key_hash`,
@@ -60,12 +64,11 @@ final class RotationService
         }
 
         $graceHours = self::normalizeGraceHours($graceHours, $this->maxGraceHours);
-        // Legacy → canonical migration: never reissue behind an ek_-shaped prefix.
-        $issued = $codec->isCanonicalKeyPrefix($keyPrefix)
-            ? $codec->reissueForPrefix($keyPrefix)
-            : $codec->issue();
+        $canonical = $codec->isCanonicalKeyPrefix($keyPrefix);
+        // Legacy → canonical: never reissue behind ek_; no grace across formats.
+        $issued = $canonical ? $codec->reissueForPrefix($keyPrefix) : $codec->issue();
 
-        if ($graceHours <= 0) {
+        if (! $canonical || $graceHours <= 0) {
             return new Rotation(
                 newPlainText: $issued->plainText,
                 newKeyPrefix: $issued->keyPrefix,

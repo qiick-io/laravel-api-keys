@@ -17,6 +17,8 @@ final class RecordingLegacyTokenMatcher implements LegacyTokenMatcher
     public function __construct(
         private ?string $prefix,
         private DateTimeImmutable $acceptUntil,
+        private int $secretLength = 31,
+        private bool $forceAccepting = true,
     ) {}
 
     public function prefixOf(#[\SensitiveParameter] string $token): ?string
@@ -32,11 +34,28 @@ final class RecordingLegacyTokenMatcher implements LegacyTokenMatcher
 
     public function isAccepting(DateTimeImmutable $now): bool
     {
+        if (! $this->forceAccepting) {
+            return false;
+        }
+
         return $now < $this->acceptUntil;
     }
 
     public function acceptUntil(): DateTimeImmutable
     {
         return $this->acceptUntil;
+    }
+
+    public function secretLength(): int
+    {
+        return $this->secretLength;
+    }
+
+    /**
+     * Product early-stop: isAccepting false while acceptUntil is still in the future.
+     */
+    public function withoutAccepting(): self
+    {
+        return new self($this->prefix, $this->acceptUntil, $this->secretLength, forceAccepting: false);
     }
 }

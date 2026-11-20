@@ -57,8 +57,9 @@ return [
 
     'legacy' => [
         /*
-         * Absolute ISO-8601 with offset (DATE_ATOM), e.g. 2027-01-01T00:00:00+00:00.
-         * Required when legacy_matchers is non-empty. Relative strings are rejected.
+         * Absolute ISO-8601 with offset (DATE_ATOM) or UTC Z, e.g. 2027-01-01T00:00:00Z
+         * or 2027-01-01T00:00:00+00:00. Required when legacy_matchers is non-empty.
+         * Relative strings and date-only values are rejected.
          */
         'accept_until' => env('API_KEYS_LEGACY_ACCEPT_UNTIL'),
     ],

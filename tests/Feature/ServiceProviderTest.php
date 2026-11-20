@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\RotationService;
 use Qiick\ApiKeys\Tests\Support\RegexLegacyTokenMatcher;
 use Qiick\ApiKeys\TokenCodec;
@@ -48,22 +49,22 @@ it('fails boot when legacy_matchers is set without API_KEYS_LEGACY_ACCEPT_UNTIL'
         'api-keys.legacy.accept_until' => null,
     ]);
 
-    app()->forgetInstance(TokenCodec::class);
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
 
-    expect(fn () => app(TokenCodec::class))
+    expect(fn () => $provider->boot())
         ->toThrow(RuntimeException::class, 'API_KEYS_LEGACY_ACCEPT_UNTIL');
 });
 
-it('fails boot when API_KEYS_LEGACY_ACCEPT_UNTIL is not an absolute DATE_ATOM timestamp', function (): void {
+it('fails boot when API_KEYS_LEGACY_ACCEPT_UNTIL is not an absolute ISO-8601 timestamp', function (): void {
     config([
         'api-keys.product_prefix' => 'tst',
         'api-keys.legacy_matchers' => [RegexLegacyTokenMatcher::class],
         'api-keys.legacy.accept_until' => 'not-a-date',
     ]);
 
-    app()->forgetInstance(TokenCodec::class);
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
 
-    expect(fn () => app(TokenCodec::class))
+    expect(fn () => $provider->boot())
         ->toThrow(RuntimeException::class, 'DATE_ATOM');
 });
 
@@ -74,15 +75,67 @@ it('rejects relative accept_until strings at boot', function (string $relative):
         'api-keys.legacy.accept_until' => $relative,
     ]);
 
-    app()->forgetInstance(TokenCodec::class);
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
 
-    expect(fn () => app(TokenCodec::class))
+    expect(fn () => $provider->boot())
         ->toThrow(RuntimeException::class, 'DATE_ATOM');
 })->with([
     'now',
     'tomorrow',
     '+10 years',
 ]);
+
+it('rejects date-only accept_until values at boot', function (): void {
+    config([
+        'api-keys.product_prefix' => 'tst',
+        'api-keys.legacy_matchers' => [RegexLegacyTokenMatcher::class],
+        'api-keys.legacy.accept_until' => '2027-01-01',
+    ]);
+
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
+
+    expect(fn () => $provider->boot())
+        ->toThrow(RuntimeException::class, 'DATE_ATOM');
+});
+
+it('fails at application start for an invalid accept_until without resolving TokenCodec', function (): void {
+    config([
+        'api-keys.product_prefix' => 'tst',
+        'api-keys.legacy_matchers' => [RegexLegacyTokenMatcher::class],
+        'api-keys.legacy.accept_until' => '2027-01-01T00:00:00',
+    ]);
+
+    app()->forgetInstance(TokenCodec::class);
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
+
+    expect(fn () => $provider->boot())
+        ->toThrow(RuntimeException::class, 'DATE_ATOM');
+});
+
+it('accepts the UTC Z form in api-keys.legacy.accept_until at boot', function (): void {
+    config([
+        'api-keys.product_prefix' => 'tst',
+        'api-keys.legacy_matchers' => [],
+        'api-keys.legacy.accept_until' => '2027-01-01T00:00:00Z',
+    ]);
+
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
+
+    expect(fn () => $provider->boot())->not->toThrow(RuntimeException::class);
+
+    config([
+        'api-keys.legacy_matchers' => [RegexLegacyTokenMatcher::class],
+        'api-keys.legacy.accept_until' => '2027-01-01T00:00:00Z',
+    ]);
+
+    app()->forgetInstance(TokenCodec::class);
+    app()->bind(RegexLegacyTokenMatcher::class, fn () => RegexLegacyTokenMatcher::externaEkStyle(
+        new DateTimeImmutable('2027-01-01T00:00:00Z'),
+    ));
+
+    expect(fn () => $provider->boot())->not->toThrow(RuntimeException::class)
+        ->and(app(TokenCodec::class))->toBeInstanceOf(TokenCodec::class);
+});
 
 it('boots when accept_until is an absolute DATE_ATOM timestamp', function (): void {
     config([
@@ -91,7 +144,10 @@ it('boots when accept_until is an absolute DATE_ATOM timestamp', function (): vo
         'api-keys.legacy.accept_until' => '2027-01-01T00:00:00+00:00',
     ]);
 
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
+
     // Empty matchers: codec boots without requiring accept_until.
+    expect(fn () => $provider->boot())->not->toThrow(RuntimeException::class);
     app()->forgetInstance(TokenCodec::class);
     expect(app(TokenCodec::class))->toBeInstanceOf(TokenCodec::class);
 
@@ -106,5 +162,6 @@ it('boots when accept_until is an absolute DATE_ATOM timestamp', function (): vo
         new DateTimeImmutable('2027-01-01T00:00:00+00:00'),
     ));
 
-    expect(app(TokenCodec::class))->toBeInstanceOf(TokenCodec::class);
+    expect(fn () => $provider->boot())->not->toThrow(RuntimeException::class)
+        ->and(app(TokenCodec::class))->toBeInstanceOf(TokenCodec::class);
 });

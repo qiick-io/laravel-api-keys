@@ -64,17 +64,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
                 $legacyMatchers = [];
             }
 
-            $legacyAcceptUntil = null;
-            if ($legacyMatchers !== []) {
-                $acceptUntil = $this->config($app)->get('api-keys.legacy.accept_until');
-                if (! is_string($acceptUntil) || $acceptUntil === '') {
-                    throw new \RuntimeException(
-                        'api-keys.legacy.accept_until (API_KEYS_LEGACY_ACCEPT_UNTIL) is required when legacy_matchers is non-empty.'
-                    );
-                }
-
-                $legacyAcceptUntil = $this->parseAbsoluteAcceptUntil($acceptUntil);
-            }
+            $legacyAcceptUntil = $this->validatedLegacyAcceptUntil($app);
 
             return new TokenCodec(
                 productPrefix: $productPrefix,
@@ -99,6 +89,8 @@ final class ApiKeysServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        $this->validatedLegacyAcceptUntil();
+
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__.'/../../config/api-keys.php' => config_path('api-keys.php'),
@@ -112,23 +104,78 @@ final class ApiKeysServiceProvider extends ServiceProvider
     }
 
     /**
-     * Absolute ISO-8601 with offset only ({@see \DateTimeInterface::ATOM}).
-     * Relative strings (`now`, `tomorrow`, `+10 years`) are rejected at boot.
+     * Validate the legacy accept-until configuration at application start.
+     *
+     * A bad value fails during boot rather than lazily on first TokenCodec resolve.
+     */
+    private function validatedLegacyAcceptUntil(?Application $app = null): ?\DateTimeImmutable
+    {
+        $application = $app ?? $this->app;
+        $legacyMatchers = $this->config($application)->get('api-keys.legacy_matchers', []);
+        if (! is_array($legacyMatchers)) {
+            $legacyMatchers = [];
+        }
+
+        $acceptUntil = $this->config($application)->get('api-keys.legacy.accept_until');
+
+        if ($acceptUntil === null || $acceptUntil === '') {
+            if ($legacyMatchers !== []) {
+                throw new \RuntimeException(
+                    'api-keys.legacy.accept_until (API_KEYS_LEGACY_ACCEPT_UNTIL) is required when legacy_matchers is non-empty.'
+                );
+            }
+
+            return null;
+        }
+
+        if (! is_string($acceptUntil)) {
+            throw $this->invalidLegacyAcceptUntilException();
+        }
+
+        return $this->parseAbsoluteAcceptUntil($acceptUntil);
+    }
+
+    /**
+     * Absolute ISO-8601 with offset ({@see \DateTimeInterface::ATOM}) or UTC "Z".
+     * Relative strings (`now`, `tomorrow`, `+10 years`) and date-only values are rejected.
      */
     private function parseAbsoluteAcceptUntil(string $acceptUntil): \DateTimeImmutable
     {
-        $parsed = \DateTimeImmutable::createFromFormat(\DateTimeInterface::ATOM, $acceptUntil);
+        $parsed = $this->parseAbsoluteAcceptUntilFormat($acceptUntil, \DateTimeInterface::ATOM);
+        if ($parsed instanceof \DateTimeImmutable) {
+            return $parsed;
+        }
+
+        if (str_ends_with($acceptUntil, 'Z')) {
+            $normalized = substr($acceptUntil, 0, -1).'+00:00';
+            $parsedZulu = $this->parseAbsoluteAcceptUntilFormat($normalized, \DateTimeInterface::ATOM);
+            if ($parsedZulu instanceof \DateTimeImmutable) {
+                return $parsedZulu;
+            }
+        }
+
+        throw $this->invalidLegacyAcceptUntilException();
+    }
+
+    private function parseAbsoluteAcceptUntilFormat(string $acceptUntil, string $format): ?\DateTimeImmutable
+    {
+        $parsed = \DateTimeImmutable::createFromFormat($format, $acceptUntil);
         $errors = \DateTimeImmutable::getLastErrors();
         $hasErrors = is_array($errors)
             && (($errors['warning_count'] ?? 0) > 0 || ($errors['error_count'] ?? 0) > 0);
 
-        if ($parsed === false || $hasErrors || $parsed->format(\DateTimeInterface::ATOM) !== $acceptUntil) {
-            throw new \RuntimeException(
-                'api-keys.legacy.accept_until (API_KEYS_LEGACY_ACCEPT_UNTIL) must be an absolute ISO-8601 timestamp with offset (DATE_ATOM), e.g. 2027-01-01T00:00:00+00:00.',
-            );
+        if ($parsed === false || $hasErrors || $parsed->format($format) !== $acceptUntil) {
+            return null;
         }
 
         return $parsed;
+    }
+
+    private function invalidLegacyAcceptUntilException(): \RuntimeException
+    {
+        return new \RuntimeException(
+            'api-keys.legacy.accept_until (API_KEYS_LEGACY_ACCEPT_UNTIL) must be an absolute ISO-8601 timestamp with offset (DATE_ATOM) or UTC Z, e.g. 2027-01-01T00:00:00Z or 2027-01-01T00:00:00+00:00.',
+        );
     }
 
     /**

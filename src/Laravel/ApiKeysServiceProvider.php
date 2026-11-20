@@ -13,6 +13,7 @@ use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\RandomSource;
 use Qiick\ApiKeys\LegacyTokenMatcher;
 use Qiick\ApiKeys\RandomBytesSource;
+use Qiick\ApiKeys\RotationService;
 use Qiick\ApiKeys\SystemClock;
 use Qiick\ApiKeys\TokenCodec;
 use Qiick\ApiKeys\TokenEnvironment;
@@ -77,6 +78,17 @@ final class ApiKeysServiceProvider extends ServiceProvider
                 environment: $app->make(EnvironmentResolver::class),
                 random: $app->make(RandomSource::class),
                 legacyMatchers: $this->resolveLegacyMatchers($app, $legacyMatchers),
+            );
+        });
+
+        $this->app->singleton(RotationService::class, function (Application $app): RotationService {
+            $max = $this->config($app)->get(
+                'api-keys.rotation_max_grace_hours',
+                RotationService::DEFAULT_MAX_GRACE_HOURS,
+            );
+
+            return new RotationService(
+                is_int($max) ? $max : RotationService::DEFAULT_MAX_GRACE_HOURS,
             );
         });
     }

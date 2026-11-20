@@ -78,23 +78,35 @@ final class TokenCodec
     }
 
     /**
-     * Whether a stored key_prefix is canonical for this codec, or recognised by
-     * a registered legacy matcher (probed with a filler secret).
+     * Whether a stored key_prefix matches this codec’s canonical shape.
      */
-    public function isValidKeyPrefix(string $keyPrefix): bool
+    public function isCanonicalKeyPrefix(string $keyPrefix): bool
     {
         $product = preg_quote($this->productPrefix, '/');
         $idLength = $this->idLength();
-        if (preg_match('/^'.$product.'_(?:live|test)_[A-Za-z0-9]{'.$idLength.'}$/D', $keyPrefix) === 1) {
+
+        return preg_match('/^'.$product.'_(?:live|test)_[A-Za-z0-9]{'.$idLength.'}$/D', $keyPrefix) === 1;
+    }
+
+    /**
+     * Whether a stored key_prefix is canonical, or recognised by an accepting
+     * legacy matcher at `$now`. Matchers are asked with the prefix alone (no
+     * secret-length probes): a matcher that only accepts a full token shape
+     * will not recognise a stored prefix for rotation.
+     */
+    public function isValidKeyPrefix(string $keyPrefix, \DateTimeImmutable $now): bool
+    {
+        if ($this->isCanonicalKeyPrefix($keyPrefix)) {
             return true;
         }
 
         foreach ($this->legacyMatchers as $matcher) {
-            foreach ([$this->secretLength(), 31, 32] as $secretLength) {
-                $probe = $keyPrefix.str_repeat('A', $secretLength);
-                if ($matcher->prefixOf($probe) === $keyPrefix) {
-                    return true;
-                }
+            if (! $matcher->isAccepting($now)) {
+                continue;
+            }
+
+            if ($matcher->prefixOf($keyPrefix) === $keyPrefix) {
+                return true;
             }
         }
 

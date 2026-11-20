@@ -194,7 +194,7 @@ it('throws when the key prefix is not canonical and not recognised by a legacy m
         ->toThrow(InvalidArgumentException::class, 'prefix');
 });
 
-it('accepts a legacy-shaped prefix when a registered matcher recognises it', function (): void {
+it('migrates a legacy-shaped prefix to a fresh canonical token on rotate', function (): void {
     $acceptUntil = new DateTimeImmutable('2099-01-01T00:00:00Z');
     $matcher = new RecordingLegacyTokenMatcher('ek_ABCDEFGHI', $acceptUntil);
     $codec = rotationCodec([$matcher]);
@@ -208,7 +208,24 @@ it('accepts a legacy-shaped prefix when a registered matcher recognises it', fun
     $rotation = (new RotationService)->rotate($legacy, $codec, $clock, 0);
 
     expect($rotation->previousKeyHash)->toBeNull()
-        ->and(str_starts_with($rotation->newPlainText, 'ek_ABCDEFGHI'))->toBeTrue();
+        ->and($rotation->newKeyPrefix)->not->toBe('ek_ABCDEFGHI')
+        ->and($codec->isCanonicalKeyPrefix($rotation->newKeyPrefix))->toBeTrue()
+        ->and(str_starts_with($rotation->newPlainText, $rotation->newKeyPrefix))->toBeTrue();
+});
+
+it('refuses to rotate a legacy prefix once the matcher cut-off has passed', function (): void {
+    $acceptUntil = new DateTimeImmutable('2020-01-01T00:00:00Z');
+    $matcher = new RecordingLegacyTokenMatcher('ek_ABCDEFGHI', $acceptUntil);
+    $codec = rotationCodec([$matcher]);
+    $clock = new FixedClock(new DateTimeImmutable('2026-01-15 12:00:00'));
+    $legacy = new InMemoryApiKeyRecord(
+        id: 'ek',
+        keyPrefix: 'ek_ABCDEFGHI',
+        keyHash: hash('sha256', 'ek_ABCDEFGHI'.str_repeat('y', 31)),
+    );
+
+    expect(fn () => (new RotationService)->rotate($legacy, $codec, $clock, 0))
+        ->toThrow(InvalidArgumentException::class, 'prefix');
 });
 
 it('redacts plaintext and hashes in Rotation debug, JSON, and serialize output', function (): void {

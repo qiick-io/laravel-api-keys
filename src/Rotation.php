@@ -14,17 +14,19 @@ final readonly class Rotation implements \JsonSerializable
 {
     public function __construct(
         #[\SensitiveParameter] public string $newPlainText,
+        public string $newKeyPrefix,
         #[\SensitiveParameter] public string $newKeyHash,
         #[\SensitiveParameter] public ?string $previousKeyHash,
         public ?\DateTimeImmutable $previousKeyValidUntil,
     ) {}
 
     /**
-     * @return array{newKeyHash: string, previousKeyHash: string|null, previousKeyValidUntil: string|null, newPlainText: string}
+     * @return array{newKeyPrefix: string, newKeyHash: string, previousKeyHash: string|null, previousKeyValidUntil: string|null, newPlainText: string}
      */
     public function __debugInfo(): array
     {
         return [
+            'newKeyPrefix' => $this->newKeyPrefix,
             'newKeyHash' => '[REDACTED]',
             'previousKeyHash' => $this->previousKeyHash === null ? null : '[REDACTED]',
             'previousKeyValidUntil' => $this->previousKeyValidUntil?->format(\DateTimeInterface::ATOM),
@@ -33,7 +35,7 @@ final readonly class Rotation implements \JsonSerializable
     }
 
     /**
-     * @return array{newKeyHash: string, previousKeyHash: string|null, previousKeyValidUntil: string|null, newPlainText: string}
+     * @return array{newKeyPrefix: string, newKeyHash: string, previousKeyHash: string|null, previousKeyValidUntil: string|null, newPlainText: string}
      */
     public function jsonSerialize(): array
     {
@@ -41,7 +43,7 @@ final readonly class Rotation implements \JsonSerializable
     }
 
     /**
-     * @return array{newKeyHash: string, previousKeyHash: string|null, previousKeyValidUntil: string|null, newPlainText: string}
+     * @return array{newKeyPrefix: string, newKeyHash: string, previousKeyHash: string|null, previousKeyValidUntil: string|null, newPlainText: string}
      */
     public function __serialize(): array
     {

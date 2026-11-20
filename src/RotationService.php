@@ -15,12 +15,15 @@ use Qiick\ApiKeys\Contracts\Clock;
  * by the latest rotate stays valid until `previousKeyValidUntil`.
  *
  * Refuses revoked or expired keys. Validates `key_prefix` against the codec’s
- * canonical shape (or a registered legacy matcher) so a typo cannot brick a row.
+ * canonical shape (or an accepting legacy matcher at `$now`) so a typo cannot
+ * brick a row. A legacy prefix is migrated to a **fresh canonical** token
+ * (`issue()`), not reissued behind `ek_…`.
  *
  * **Product obligation:** call `rotate` inside a DB transaction with
- * `lockForUpdate` on the key row, then write `key_hash`, `previous_key_hash`,
- * and `previous_key_valid_until` **unconditionally** (including nulls when
- * grace is 0). The package does not persist.
+ * `lockForUpdate` on the key row, then write `key_prefix`, `key_hash`,
+ * `previous_key_hash`, and `previous_key_valid_until` **unconditionally**
+ * (including nulls when grace is 0; including the new canonical prefix when
+ * migrating off legacy). The package does not persist.
  */
 final class RotationService
 {
@@ -50,18 +53,22 @@ final class RotationService
         }
 
         $keyPrefix = $record->keyPrefix();
-        if (! $codec->isValidKeyPrefix($keyPrefix)) {
+        if (! $codec->isValidKeyPrefix($keyPrefix, $now)) {
             throw new \InvalidArgumentException(
                 'API key prefix is not recognised by the codec (canonical or legacy).',
             );
         }
 
         $graceHours = self::normalizeGraceHours($graceHours, $this->maxGraceHours);
-        $issued = $codec->reissueForPrefix($keyPrefix);
+        // Legacy → canonical migration: never reissue behind an ek_-shaped prefix.
+        $issued = $codec->isCanonicalKeyPrefix($keyPrefix)
+            ? $codec->reissueForPrefix($keyPrefix)
+            : $codec->issue();
 
         if ($graceHours <= 0) {
             return new Rotation(
                 newPlainText: $issued->plainText,
+                newKeyPrefix: $issued->keyPrefix,
                 newKeyHash: $issued->keyHash,
                 previousKeyHash: null,
                 previousKeyValidUntil: null,
@@ -70,6 +77,7 @@ final class RotationService
 
         return new Rotation(
             newPlainText: $issued->plainText,
+            newKeyPrefix: $issued->keyPrefix,
             newKeyHash: $issued->keyHash,
             previousKeyHash: $record->keyHash(),
             previousKeyValidUntil: $now->add(new \DateInterval('PT'.$graceHours.'H')),
@@ -80,13 +88,12 @@ final class RotationService
      * Config grace as a whole number of hours in `[0, $maxGraceHours]`.
      * Non-integers, negatives, or values above the max → 0 (fail closed: never
      * extend the old secret on a misconfiguration; avoids DateInterval overflow).
+     * A negative ceiling also fails closed (`$parsed > $maxGraceHours`).
      */
     public static function normalizeGraceHours(
         mixed $configValue,
         int $maxGraceHours = self::DEFAULT_MAX_GRACE_HOURS,
     ): int {
-        $maxGraceHours = max(0, $maxGraceHours);
-
         if (is_bool($configValue)) {
             return 0;
         }

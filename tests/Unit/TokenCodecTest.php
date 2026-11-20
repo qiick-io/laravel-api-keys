@@ -208,6 +208,29 @@ it('returns null from prefixOf when every legacy matcher misses', function (): v
         ->and($miss->prefixOfCalls)->toBe(1);
 });
 
+it('recognises canonical and accepting legacy prefixes without secret-length probes', function (): void {
+    $acceptUntil = new DateTimeImmutable('2099-01-01T00:00:00Z');
+    $matcher = new RecordingLegacyTokenMatcher('ek_ABCDEFGHI', $acceptUntil);
+    $codec = codec(legacyMatchers: [$matcher]);
+    $now = new DateTimeImmutable('2026-01-15T12:00:00Z');
+
+    expect($codec->isCanonicalKeyPrefix('tst_test_ABCDEFGH'))->toBeTrue()
+        ->and($codec->isValidKeyPrefix('tst_test_ABCDEFGH', $now))->toBeTrue()
+        ->and($codec->isCanonicalKeyPrefix('ek_ABCDEFGHI'))->toBeFalse()
+        ->and($codec->isValidKeyPrefix('ek_ABCDEFGHI', $now))->toBeTrue()
+        ->and($matcher->prefixOfCalls)->toBe(1)
+        ->and($codec->isValidKeyPrefix('not-a-prefix', $now))->toBeFalse();
+});
+
+it('rejects legacy prefixes once the matcher cut-off has passed', function (): void {
+    $matcher = new RecordingLegacyTokenMatcher('ek_ABCDEFGHI', new DateTimeImmutable('2020-01-01T00:00:00Z'));
+    $codec = codec(legacyMatchers: [$matcher]);
+
+    expect($codec->isValidKeyPrefix('ek_ABCDEFGHI', new DateTimeImmutable('2026-01-15T12:00:00Z')))
+        ->toBeFalse()
+        ->and($matcher->prefixOfCalls)->toBe(0);
+});
+
 it('is deterministic for the same FixedEnvironment and FixedRandomSource seed', function (): void {
     $seed = 'same-seed-bytes-aaaaaaaaaaaaaaaaaaaa';
     $first = codec(seed: $seed)->issue();

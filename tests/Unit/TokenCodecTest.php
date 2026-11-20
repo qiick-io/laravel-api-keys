@@ -182,6 +182,47 @@ it('is deterministic for the same FixedEnvironment and FixedRandomSource seed', 
         ->and(strlen($first->plainText) - strlen($first->keyPrefix))->toBe(32);
 });
 
+it('rejects bytes 248..255 when mapping onto the alphabet (no modulo bias)', function (): void {
+    // Each randomAlphabet round draws a 32-byte chunk. For the id: eight
+    // rejected bytes, eight usable \x01 → 'B', then sixteen surplus \x02 → 'C'
+    // that must NOT be consumed (break at exact length). Secret chunk: 32×\x00 → 'A'.
+    $idChunk = "\xF8\xF9\xFA\xFB\xFC\xFD\xFE\xFF"
+        .str_repeat("\x01", 8)
+        .str_repeat("\x02", 16);
+    $secretChunk = str_repeat("\x00", 32);
+    $token = codec(seed: $idChunk.$secretChunk)->issue();
+
+    expect(strlen($token->keyPrefix))->toBe(17)
+        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(32)
+        ->and(substr($token->keyPrefix, -8))->toBe('BBBBBBBB')
+        ->and(substr($token->plainText, -32))->toBe(str_repeat('A', 32));
+});
+
+it('keeps byte 247 and skips byte 248 at the rejection threshold', function (): void {
+    // 247 % 62 = 61 → '9'; if the check were `>` instead of `>=`, 248 would
+    // become alphabet[0] = 'A' and this id would start with A.
+    // Chunk of 32 for id, then 32 for secret.
+    $idChunk = "\xF8\xF7".str_repeat("\x00", 30);
+    $secretChunk = str_repeat("\x00", 32);
+    $token = codec(seed: $idChunk.$secretChunk)->issue();
+
+    expect(substr($token->keyPrefix, -8))->toStartWith('9')
+        ->and(strlen(substr($token->keyPrefix, -8)))->toBe(8)
+        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(32);
+});
+
+it('refills after a whole chunk of rejected bytes', function (): void {
+    // Exhausts the for-loop bound (`$index < $count`) on a 32-byte rejected
+    // chunk; `$index <= $count` would read past the end (ord of '').
+    $rejectedChunk = str_repeat("\xFF", 32);
+    $idChunk = str_repeat("\x01", 32);
+    $secretChunk = str_repeat("\x00", 32);
+    $token = codec(seed: $rejectedChunk.$idChunk.$secretChunk)->issue();
+
+    expect(substr($token->keyPrefix, -8))->toBe('BBBBBBBB')
+        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(32);
+});
+
 it('runs a dummy compare when asked and when match returns none', function (): void {
     $codec = codec();
     $codec->performDummyMatch('tst_test_ABCDEFGH'.str_repeat('z', 32));

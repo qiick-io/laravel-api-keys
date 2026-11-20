@@ -189,14 +189,35 @@ final class TokenCodec
         return 32;
     }
 
+    /**
+     * Maps CSPRNG bytes onto the base62 alphabet without modulo bias.
+     *
+     * Rejection sampling: only bytes in 0..(62*4 - 1) = 0..247 are kept
+     * (248..255 discarded and refilled), so each alphabet index is equally likely.
+     * Draws a fixed chunk each round so a mid-chunk `break` at the exact length
+     * is load-bearing (surplus bytes in the chunk must not be consumed).
+     */
     private function randomAlphabet(int $length): string
     {
-        $bytes = $this->random->bytes($length);
         $alphabetLength = strlen(self::ALPHABET);
+        // 62 * 4 = 248: largest multiple of the alphabet size that fits in a byte.
+        $unbiasedLimit = 248;
         $output = '';
 
-        for ($index = 0; $index < $length; $index++) {
-            $output .= self::ALPHABET[ord($bytes[$index]) % $alphabetLength];
+        while (strlen($output) < $length) {
+            $bytes = $this->random->bytes(32);
+
+            for ($index = 0, $count = strlen($bytes); $index < $count; $index++) {
+                $value = ord($bytes[$index]);
+                if ($value >= $unbiasedLimit) {
+                    continue;
+                }
+
+                $output .= self::ALPHABET[$value % $alphabetLength];
+                if (strlen($output) === $length) {
+                    break;
+                }
+            }
         }
 
         return $output;

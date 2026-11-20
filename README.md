@@ -125,6 +125,38 @@ carry RFC 6750 `WWW-Authenticate`; `403 ip_not_allowed` does not. Format-miss an
 hash-miss share the same body/headers. Presented tokens are `#[SensitiveParameter]`
 and never appear in messages, `render()`, `__debugInfo`, JSON, or serialize output.
 
+## Legacy matchers (product-owned)
+
+The package ships the `LegacyTokenMatcher` contract and registration point only —
+no product-specific matcher classes. Boot **fails** when `api-keys.legacy_matchers`
+is non-empty without `API_KEYS_LEGACY_ACCEPT_UNTIL` / `api-keys.legacy.accept_until`.
+
+`TokenCodec::prefixOf($token, $now)` and `legacyMatcherFor($token, $now)` skip
+matchers whose `acceptUntil` has passed. Products dispatch `Events\LegacyTokenUsed`
+(never include the plaintext) when a legacy match succeeds:
+
+```php
+// Product-owned matcher (example shape only — not shipped by this package):
+// ek_ + 9 alnum public id + 31 alnum secret
+final class EkLegacyTokenMatcher implements LegacyTokenMatcher { /* ... */ }
+
+// config/api-keys.php
+'legacy_matchers' => [EkLegacyTokenMatcher::class],
+'legacy' => ['accept_until' => env('API_KEYS_LEGACY_ACCEPT_UNTIL')], // required
+
+$matcher = $codec->legacyMatcherFor($presented, $now);
+if ($matcher !== null) {
+    event(new LegacyTokenUsed(
+        $matcher->prefixOf($presented),
+        $matcher::class,
+        $matcher->acceptUntil(),
+    ));
+}
+```
+
+Pest helpers: `Qiick\ApiKeys\Testing\assertTokenAbsentFrom`, `assertInvalidToken`,
+`assertInsufficientScope`, `assertIpNotAllowed`, `assertLegacyTokenUsed`.
+
 ## Development
 
 ```bash
@@ -133,6 +165,7 @@ composer test      # Pest
 composer lint      # Pint
 composer analyse   # PHPStan level max
 ```
+
 
 No `composer.lock` is committed (library). CI resolves with `--prefer-lowest` and stable
 across PHP 8.3/8.4/8.5 × Laravel 12/13.

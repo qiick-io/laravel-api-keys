@@ -113,16 +113,48 @@ final class TokenCodec
         return false;
     }
 
-    public function prefixOf(#[\SensitiveParameter] string $presentedToken): ?string
-    {
+    /**
+     * @param  \DateTimeImmutable|null  $now  When set, legacy matchers past
+     *                                        {@see LegacyTokenMatcher::acceptUntil} are skipped (A13).
+     */
+    public function prefixOf(
+        #[\SensitiveParameter] string $presentedToken,
+        ?\DateTimeImmutable $now = null,
+    ): ?string {
         if (preg_match($this->canonicalPattern(), $presentedToken, $matches) === 1) {
             return $matches['prefix'];
         }
 
         foreach ($this->legacyMatchers as $matcher) {
+            if ($now !== null && ! $matcher->isAccepting($now)) {
+                continue;
+            }
+
             $prefix = $matcher->prefixOf($presentedToken);
             if ($prefix !== null) {
                 return $prefix;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * First legacy matcher still accepting that recognises the token (A13).
+     * Products use this to dispatch {@see Events\LegacyTokenUsed}.
+     * When `$now` is null, EOL is not enforced.
+     */
+    public function legacyMatcherFor(
+        #[\SensitiveParameter] string $presentedToken,
+        ?\DateTimeImmutable $now = null,
+    ): ?LegacyTokenMatcher {
+        foreach ($this->legacyMatchers as $matcher) {
+            if ($now !== null && ! $matcher->isAccepting($now)) {
+                continue;
+            }
+
+            if ($matcher->prefixOf($presentedToken) !== null) {
+                return $matcher;
             }
         }
 

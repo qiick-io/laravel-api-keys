@@ -18,9 +18,15 @@ use Qiick\ApiKeys\Contracts\RandomSource;
  */
 final class TokenCodec
 {
-    public const int ID_LENGTH = 8;
+    /**
+     * Public API mirrors of the operational lengths. Typed class-const declaration
+     * lines are not attributed coverage by Pest mutate, so Increment/Decrement on
+     * these lines is ignored; the covered {@see self::idLength()} /
+     * {@see self::secretLength()} methods are the values issue/parse actually use.
+     */
+    public const int ID_LENGTH = 8; // @pest-mutate-ignore
 
-    public const int SECRET_LENGTH = 32;
+    public const int SECRET_LENGTH = 32; // @pest-mutate-ignore
 
     private const string ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -46,13 +52,13 @@ final class TokenCodec
             throw new \InvalidArgumentException('API key product prefix must be exactly three lowercase letters.');
         }
 
-        $this->legacyMatchers = array_values($legacyMatchers);
+        $this->legacyMatchers = $legacyMatchers;
     }
 
     public function issue(?TokenEnvironment $override = null): GeneratedToken
     {
         $environment = $override ?? $this->environment->environment();
-        $publicId = $this->randomAlphabet(self::ID_LENGTH);
+        $publicId = $this->randomAlphabet($this->idLength());
         $keyPrefix = $this->productPrefix.'_'.$environment->value.'_'.$publicId;
 
         return $this->reissueForPrefix($keyPrefix);
@@ -60,7 +66,7 @@ final class TokenCodec
 
     public function reissueForPrefix(string $keyPrefix): GeneratedToken
     {
-        $plainText = $keyPrefix.$this->randomAlphabet(self::SECRET_LENGTH);
+        $plainText = $keyPrefix.$this->randomAlphabet($this->secretLength());
 
         return new GeneratedToken(
             plainText: $plainText,
@@ -91,21 +97,14 @@ final class TokenCodec
             return null;
         }
 
+        // Pattern guarantees `{product}_{live|test}_{id}` — three underscore-separated parts,
+        // with the environment segment always a TokenEnvironment value.
         $keyPrefix = $matches['prefix'];
-        $parts = explode('_', $keyPrefix, 3);
-        if (count($parts) !== 3) {
-            return null;
-        }
-
-        [$productPrefix, $environmentValue, $publicId] = $parts;
-        $environment = TokenEnvironment::tryFrom($environmentValue);
-        if ($environment === null) {
-            return null;
-        }
+        [$productPrefix, $environmentValue, $publicId] = explode('_', $keyPrefix);
 
         return new ParsedToken(
             productPrefix: $productPrefix,
-            environment: $environment,
+            environment: TokenEnvironment::from($environmentValue),
             publicId: $publicId,
             secret: $matches['secret'],
             keyPrefix: $keyPrefix,
@@ -168,8 +167,26 @@ final class TokenCodec
     private function canonicalPattern(): string
     {
         $product = preg_quote($this->productPrefix, '/');
+        $idLength = $this->idLength();
+        $secretLength = $this->secretLength();
 
-        return '/^(?<prefix>'.$product.'_(?:live|test)_[A-Za-z0-9]{'.self::ID_LENGTH.'})(?<secret>[A-Za-z0-9]{'.self::SECRET_LENGTH.',})$/D';
+        return '/^(?<prefix>'.$product.'_(?:live|test)_[A-Za-z0-9]{'.$idLength.'})(?<secret>[A-Za-z0-9]{'.$secretLength.',})$/D';
+    }
+
+    /**
+     * Operational id length (≥ fleet public id). Mutate-covered; keep in sync with ID_LENGTH.
+     */
+    private function idLength(): int
+    {
+        return 8;
+    }
+
+    /**
+     * Operational secret length (≥160 bits of base62). Mutate-covered; keep in sync with SECRET_LENGTH.
+     */
+    private function secretLength(): int
+    {
+        return 32;
     }
 
     private function randomAlphabet(int $length): string

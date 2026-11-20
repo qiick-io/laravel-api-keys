@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Qiick\ApiKeys\GeneratedToken;
 use Qiick\ApiKeys\Testing\FixedEnvironment;
 use Qiick\ApiKeys\Testing\FixedRandomSource;
+use Qiick\ApiKeys\Tests\Support\RecordingLegacyTokenMatcher;
 use Qiick\ApiKeys\TokenCodec;
 use Qiick\ApiKeys\TokenEnvironment;
 use Qiick\ApiKeys\TokenMatch;
@@ -16,19 +17,37 @@ function codec(
     string $product = 'tst',
     TokenEnvironment $environment = TokenEnvironment::Test,
     string $seed = 'fixed-seed-for-deterministic-api-key-tests!!',
+    array $legacyMatchers = [],
 ): TokenCodec {
     return new TokenCodec(
         productPrefix: $product,
         environment: new FixedEnvironment($environment),
         random: new FixedRandomSource($seed),
+        legacyMatchers: $legacyMatchers,
     );
 }
+
+it('pins ID_LENGTH and SECRET_LENGTH to the fleet sizes (A1)', function (): void {
+    // Public consts are the @api names; operational lengths live in private
+    // methods (typed class-const lines are not coverage-attributed by Pest mutate).
+    expect(TokenCodec::ID_LENGTH)->toBe(8)
+        ->and(TokenCodec::SECRET_LENGTH)->toBe(32);
+
+    $token = codec()->issue();
+    $id = substr($token->keyPrefix, -8);
+
+    expect(strlen($id))->toBe(8)
+        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(32)
+        // Consts stay aligned with the operational methods used at issue time.
+        ->and(strlen($id))->toBe(TokenCodec::ID_LENGTH)
+        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(TokenCodec::SECRET_LENGTH);
+});
 
 it('issues a token with the fleet shape and hashes the full plaintext', function (): void {
     $codec = codec();
     $token = $codec->issue();
 
-    // Hardcoded lengths kill SECRET_LENGTH / ID_LENGTH shrink mutations (A1).
+    // Hardcoded lengths also kill shrink/grow of the lengths used at issue time.
     expect($token->keyPrefix)->toMatch('/^tst_test_[A-Za-z0-9]{8}$/D')
         ->and($token->plainText)->toStartWith($token->keyPrefix)
         ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(32)
@@ -42,10 +61,12 @@ it('redacts plaintext and hash in GeneratedToken debug output', function (): voi
     $token = codec()->issue();
     $debug = $token->__debugInfo();
 
-    expect($debug['keyPrefix'])->toBe($token->keyPrefix)
+    expect($debug)->toHaveKeys(['keyPrefix', 'keyHash', 'plainText'])
+        ->and($debug['keyPrefix'])->toBe($token->keyPrefix)
         ->and($debug['keyHash'])->toBe('[REDACTED]')
         ->and($debug['plainText'])->toBe('[REDACTED]')
-        ->and($debug['plainText'])->not->toBe($token->plainText);
+        ->and($debug['plainText'])->not->toBe($token->plainText)
+        ->and($debug['keyHash'])->not->toBe($token->keyHash);
 });
 
 it('prefers an explicit environment override over the resolver', function (): void {
@@ -123,6 +144,31 @@ it('rejects non-canonical shapes from prefixOf and parse', function (): void {
         ->and($codec->prefixOf('ek_ABCDEFGHIx'.str_repeat('y', 31)))->toBeNull()
         ->and($codec->prefixOf('tst_test_SHORT'.str_repeat('z', 32)))->toBeNull()
         ->and($codec->prefixOf('tst_test_ABCDEFGH'.str_repeat('z', 32)."\n"))->toBeNull();
+});
+
+it('uses legacy matchers only when the canonical shape misses', function (): void {
+    $acceptUntil = new DateTimeImmutable('2099-01-01T00:00:00Z');
+    $hit = new RecordingLegacyTokenMatcher('ek_ABCDEFGHI', $acceptUntil);
+    $miss = new RecordingLegacyTokenMatcher('ek_OTHERPREF', $acceptUntil);
+    $codec = codec(legacyMatchers: [$miss, $hit]);
+
+    $legacyToken = 'ek_ABCDEFGHI'.str_repeat('y', 31);
+
+    expect($codec->prefixOf($legacyToken))->toBe('ek_ABCDEFGHI')
+        ->and($miss->prefixOfCalls)->toBe(1)
+        ->and($hit->prefixOfCalls)->toBe(1)
+        // Canonical hit must not consult legacy matchers.
+        ->and($codec->prefixOf('tst_test_ABCDEFGH'.str_repeat('z', 32)))->toBe('tst_test_ABCDEFGH')
+        ->and($miss->prefixOfCalls)->toBe(1)
+        ->and($hit->prefixOfCalls)->toBe(1);
+});
+
+it('returns null from prefixOf when every legacy matcher misses', function (): void {
+    $miss = new RecordingLegacyTokenMatcher(null, new DateTimeImmutable('2099-01-01T00:00:00Z'));
+    $codec = codec(legacyMatchers: [$miss]);
+
+    expect($codec->prefixOf('ek_ABCDEFGHI'.str_repeat('y', 31)))->toBeNull()
+        ->and($miss->prefixOfCalls)->toBe(1);
 });
 
 it('is deterministic for the same FixedEnvironment and FixedRandomSource seed', function (): void {

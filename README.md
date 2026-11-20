@@ -51,6 +51,13 @@ stores SHA-256 of the **full** plaintext. Issue via `TokenCodec` with injectable
 `EnvironmentResolver` and `RandomSource` (tests: `FixedEnvironment`,
 `FixedRandomSource`).
 
+## IP allowlist
+
+`IpAllowlist::allows($ip, $stored)`: null/empty → allow all; non-list or
+non-string entries → deny; zone-id client IPs (`fe80::1%eth0`) → deny.
+IPv4-mapped / IPv4-compatible forms are canonicalised before `IpUtils::checkIp`.
+`ClientIp::from($request)` is `Request::ip()` only (configure TrustProxies).
+
 ## Scopes
 
 Atoms match `^[a-z][a-z0-9-]*:(read|write)$` exactly (no trim/case-fold).

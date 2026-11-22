@@ -144,6 +144,7 @@ it('authenticates a valid current secret and records usage', function (): void {
         public function afterRecorded(
             ApiKeyRecord $record,
             ?string $ip,
+            ?string $userAgent,
             bool $wasFirstUse,
         ): void {
             $this->wasFirstUse = $wasFirstUse;
@@ -830,7 +831,19 @@ it('keeps authentication when recordUsage throws (audit stamp must not 500)', fu
                 )];
             }
 
-            public function recordUsage(ApiKeyRecord $record, ?string $ip, DateTimeImmutable $usedAt): void
+            public function findByPublicId(string $publicId): ?ApiKeyRecord
+            {
+                return null;
+            }
+
+            public function expiringUnnotified(DateTimeImmutable $until): iterable
+            {
+                return [];
+            }
+
+            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+
+            public function recordUsage(ApiKeyRecord $record, ?string $ip, ?string $userAgent, DateTimeImmutable $usedAt): void
             {
                 throw new RuntimeException('usage write failed');
             }
@@ -892,7 +905,19 @@ it('never leaks the presented token via SensitiveParameter in traces (A14)', fun
                 throw new RuntimeException('repository boom');
             }
 
-            public function recordUsage(ApiKeyRecord $record, ?string $ip, DateTimeImmutable $usedAt): void {}
+            public function findByPublicId(string $publicId): ?ApiKeyRecord
+            {
+                return null;
+            }
+
+            public function expiringUnnotified(DateTimeImmutable $until): iterable
+            {
+                return [];
+            }
+
+            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+
+            public function recordUsage(ApiKeyRecord $record, ?string $ip, ?string $userAgent, DateTimeImmutable $usedAt): void {}
         },
         'token' => $token,
         'defaultRate' => 0,
@@ -1226,7 +1251,19 @@ it('reports usage failures via the Laravel report() helper when no reporter is w
                 )];
             }
 
-            public function recordUsage(ApiKeyRecord $record, ?string $ip, DateTimeImmutable $usedAt): void
+            public function findByPublicId(string $publicId): ?ApiKeyRecord
+            {
+                return null;
+            }
+
+            public function expiringUnnotified(DateTimeImmutable $until): iterable
+            {
+                return [];
+            }
+
+            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+
+            public function recordUsage(ApiKeyRecord $record, ?string $ip, ?string $userAgent, DateTimeImmutable $usedAt): void
             {
                 throw new RuntimeException('usage write failed');
             }
@@ -1271,7 +1308,19 @@ it('does not count repository exceptions as failed attempts', function (): void 
                 throw new RuntimeException('db down');
             }
 
-            public function recordUsage(ApiKeyRecord $record, ?string $ip, DateTimeImmutable $usedAt): void {}
+            public function findByPublicId(string $publicId): ?ApiKeyRecord
+            {
+                return null;
+            }
+
+            public function expiringUnnotified(DateTimeImmutable $until): iterable
+            {
+                return [];
+            }
+
+            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+
+            public function recordUsage(ApiKeyRecord $record, ?string $ip, ?string $userAgent, DateTimeImmutable $usedAt): void {}
         },
         'failedLimiter' => new FailedAttemptLimiter($limiter, 20),
         'defaultRate' => 0,

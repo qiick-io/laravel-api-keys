@@ -9,6 +9,9 @@ namespace Qiick\ApiKeys;
  *
  * Note: `(array)` / `var_export` still expose public properties; prefer
  * `__debugInfo` / `json_encode` / `serialize`.
+ *
+ * Products must persist `previous_key_prefix` when set so the old token (incl.
+ * a legacy prefix) stays findable during the grace window.
  */
 final readonly class Rotation implements \JsonSerializable
 {
@@ -18,10 +21,13 @@ final readonly class Rotation implements \JsonSerializable
         #[\SensitiveParameter] public string $newKeyHash,
         #[\SensitiveParameter] public ?string $previousKeyHash,
         public ?\DateTimeImmutable $previousKeyValidUntil,
+        public \DateTimeImmutable $lastRotatedAt,
+        public int $tokenVersion = TokenCodec::DEFAULT_TOKEN_VERSION,
+        public ?string $previousKeyPrefix = null,
     ) {}
 
     /**
-     * @return array{newKeyPrefix: string, newKeyHash: string, previousKeyHash: string|null, previousKeyValidUntil: string|null, newPlainText: string}
+     * @return array{newKeyPrefix: string, newKeyHash: string, previousKeyHash: string|null, previousKeyValidUntil: string|null, previousKeyPrefix: string|null, lastRotatedAt: string, tokenVersion: int, newPlainText: string}
      */
     public function __debugInfo(): array
     {
@@ -30,12 +36,15 @@ final readonly class Rotation implements \JsonSerializable
             'newKeyHash' => '[REDACTED]',
             'previousKeyHash' => $this->previousKeyHash === null ? null : '[REDACTED]',
             'previousKeyValidUntil' => $this->previousKeyValidUntil?->format(\DateTimeInterface::ATOM),
+            'previousKeyPrefix' => $this->previousKeyPrefix,
+            'lastRotatedAt' => $this->lastRotatedAt->format(\DateTimeInterface::ATOM),
+            'tokenVersion' => $this->tokenVersion,
             'newPlainText' => '[REDACTED]',
         ];
     }
 
     /**
-     * @return array{newKeyPrefix: string, newKeyHash: string, previousKeyHash: string|null, previousKeyValidUntil: string|null, newPlainText: string}
+     * @return array{newKeyPrefix: string, newKeyHash: string, previousKeyHash: string|null, previousKeyValidUntil: string|null, previousKeyPrefix: string|null, lastRotatedAt: string, tokenVersion: int, newPlainText: string}
      */
     public function jsonSerialize(): array
     {
@@ -43,7 +52,7 @@ final readonly class Rotation implements \JsonSerializable
     }
 
     /**
-     * @return array{newKeyPrefix: string, newKeyHash: string, previousKeyHash: string|null, previousKeyValidUntil: string|null, newPlainText: string}
+     * @return array{newKeyPrefix: string, newKeyHash: string, previousKeyHash: string|null, previousKeyValidUntil: string|null, previousKeyPrefix: string|null, lastRotatedAt: string, tokenVersion: int, newPlainText: string}
      */
     public function __serialize(): array
     {

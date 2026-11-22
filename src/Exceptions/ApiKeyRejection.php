@@ -96,11 +96,30 @@ final class ApiKeyRejection extends HttpException
         );
     }
 
+    public static function requestNotAllowed(): self
+    {
+        // No WWW-Authenticate: same shape as ip_not_allowed (Luca, 2026-11-22).
+        return new self(
+            403,
+            self::translate(
+                'api_keys.request_not_allowed',
+                'API key is not allowed for this request.',
+            ),
+            KeyRejectionCode::RequestNotAllowed,
+        );
+    }
+
     /**
      * 429 with Retry-After and optional X-RateLimit-* headers.
+     *
+     * `$resetAfterSeconds` populates `X-RateLimit-Reset` when provided (L8).
      */
-    public static function rateLimited(int $retryAfterSeconds, ?int $limit = null, ?int $remaining = null): self
-    {
+    public static function rateLimited(
+        int $retryAfterSeconds,
+        ?int $limit = null,
+        ?int $remaining = null,
+        ?int $resetAfterSeconds = null,
+    ): self {
         $headers = ['Retry-After' => (string) $retryAfterSeconds]; // @pest-mutate-ignore: RemoveStringCast
 
         if ($limit !== null) {
@@ -109,6 +128,10 @@ final class ApiKeyRejection extends HttpException
 
         if ($remaining !== null) {
             $headers['X-RateLimit-Remaining'] = (string) $remaining; // @pest-mutate-ignore: RemoveStringCast
+        }
+
+        if ($resetAfterSeconds !== null) {
+            $headers['X-RateLimit-Reset'] = (string) $resetAfterSeconds; // @pest-mutate-ignore: RemoveStringCast
         }
 
         return new self(

@@ -27,15 +27,24 @@ return [
             'Qiick\ApiKeys\Contracts\KeyAuthorizer',
             'Qiick\ApiKeys\Contracts\UsageSideEffect',
             'Qiick\ApiKeys\Contracts\AttemptLimiter',
+            'Qiick\ApiKeys\Contracts\ExpiryRecipientResolver',
+            'Qiick\ApiKeys\Contracts\LifetimePolicy',
+            'Qiick\ApiKeys\Contracts\CompromisedKeyRevoker',
         ],
         'Exceptions' => [
             // Design §3.3: ApiKeyRejection (not *Exception).
             'Qiick\ApiKeys\Exceptions\ApiKeyRejection',
         ],
         'Events' => [
-            // Design §3.4: LegacyTokenUsed / ApiKeyAuthenticated (not *Event).
+            // Design §3.4: event names without Event suffix.
             'Qiick\ApiKeys\Events\LegacyTokenUsed',
             'Qiick\ApiKeys\Events\ApiKeyAuthenticated',
+            'Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSent',
+            'Qiick\ApiKeys\Events\ApiKeyExposed',
+        ],
+        'Notifications' => [
+            // Fleet notification name matches config key / externa command.
+            'Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification',
         ],
     ],
 

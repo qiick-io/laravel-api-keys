@@ -21,6 +21,21 @@ pre-1.0 additions versus the 0.1.0 sketch:
 - No `owner_kind` or `oauth_grant_uuid` column (principal kind; grant id is
   `uuid`).
 
-Contract and behaviour breaks (record methods, token v2 default, restrictions,
-rate-limit list return, expiry command, and so on) land in follow-up 0.x PRs
-and are listed here as each ships.
+### Contract breaks
+
+- `ApiKeyRecord`: add `publicId()`, version/hash/credential/restrictions/quota
+  and attribution methods (see interface).
+- `ApiKeyRepository::recordUsage(..., ?string $userAgent, ...)`; add
+  `findByPublicId`, `expiringUnnotified`, `markExpiryNotified`;
+  `findCandidatesByPrefix` also matches `previous_key_prefix` in grace.
+- `KeyAuthorizer::scopesCreatorMayGrant(ApiKeyRecord, ...)` (was creator id);
+  `rateLimit()` returns `list<RateLimitDecision>`; add `authorizeResources`.
+- `UsageSideEffect::afterRecorded` gains `$userAgent`.
+- `ApiKeyAuthenticated::$apiKeyId` is `string` (UUID only).
+- `TokenCodec::issue()` defaults to token version 2; `match()` takes
+  `$hashAlgorithm`.
+- `Rotation` gains `previousKeyPrefix`, `lastRotatedAt`, `tokenVersion`.
+  Legacy → canonical rotations with grace keep `previous_key_prefix`.
+- New denial: `ApiKeyRejection::requestNotAllowed()` → `403 request_not_allowed`.
+- Runtime deps: `illuminate/console`, `illuminate/notifications`.
+- New Artisan command: `api-keys:notify-expiring` (bind `ExpiryRecipientResolver`).

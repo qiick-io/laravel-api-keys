@@ -58,8 +58,10 @@ jobs:
         run: |
           composer require --dev --no-interaction --no-update "orchestra/testbench:^${{ matrix.testbench }}.0"
           composer require --no-interaction --no-update \
+            "illuminate/console:^${{ matrix.laravel }}.0" \
             "illuminate/contracts:^${{ matrix.laravel }}.0" \
             "illuminate/http:^${{ matrix.laravel }}.0" \
+            "illuminate/notifications:^${{ matrix.laravel }}.0" \
             "illuminate/support:^${{ matrix.laravel }}.0"
           if [ "${{ matrix.dependency-version }}" = "lowest" ]; then
             composer update --no-interaction --prefer-dist --prefer-lowest --with-all-dependencies

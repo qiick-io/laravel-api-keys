@@ -8,6 +8,8 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use Qiick\ApiKeys\AppEnvironmentResolver;
+use Qiick\ApiKeys\Console\Commands\NotifyExpiringApiKeysCommand;
+use Qiick\ApiKeys\Contracts;
 use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\RandomSource;
@@ -22,8 +24,9 @@ use Qiick\ApiKeys\TokenEnvironment;
  * Registers the package in a Laravel app. Auto-discovered through
  * `extra.laravel.providers` in composer.json.
  *
- * Products bind ApiKeyRepository, KeyAuthorizer and ScopeVocabulary themselves.
- * No HTTP middleware or Artisan commands ship with this package.
+ * Products bind ApiKeyRepository, KeyAuthorizer, ScopeVocabulary and
+ * ExpiryRecipientResolver themselves. No HTTP middleware ships; the expiry
+ * command is registered here.
  */
 final class ApiKeysServiceProvider extends ServiceProvider
 {
@@ -65,6 +68,12 @@ final class ApiKeysServiceProvider extends ServiceProvider
             }
 
             $legacyAcceptUntil = $this->validatedLegacyAcceptUntil($app);
+            $tokenVersion = $this->config($app)->get('api-keys.token_version', TokenCodec::DEFAULT_TOKEN_VERSION);
+            if (! is_int($tokenVersion) || ($tokenVersion !== 1 && $tokenVersion !== 2)) {
+                throw new \InvalidArgumentException(
+                    'api-keys.token_version must be 1 or 2.'
+                );
+            }
 
             return new TokenCodec(
                 productPrefix: $productPrefix,
@@ -72,6 +81,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
                 random: $app->make(RandomSource::class),
                 legacyMatchers: $this->resolveLegacyMatchers($app, $legacyMatchers),
                 legacyAcceptUntil: $legacyAcceptUntil,
+                defaultTokenVersion: $tokenVersion,
             );
         });
 
@@ -81,8 +91,13 @@ final class ApiKeysServiceProvider extends ServiceProvider
                 RotationService::DEFAULT_MAX_GRACE_HOURS,
             );
 
+            $lifetimePolicy = $app->bound(Contracts\LifetimePolicy::class)
+                ? $app->make(Contracts\LifetimePolicy::class)
+                : null;
+
             return new RotationService(
                 is_int($max) ? $max : RotationService::DEFAULT_MAX_GRACE_HOURS,
+                $lifetimePolicy,
             );
         });
     }
@@ -95,6 +110,10 @@ final class ApiKeysServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__.'/../../config/api-keys.php' => config_path('api-keys.php'),
             ], 'api-keys-config');
+
+            $this->commands([
+                NotifyExpiringApiKeysCommand::class,
+            ]);
         }
     }
 

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/reference-schema.md` is the full 1.0 reference products adopt: unique
+  `key_prefix`, version/hash columns, restrictions JSON, quotas, revocation
+  attribution, OAuth grant marking, usage and exposure fields, and the scanner
+  regex. Products still own migrations.
+
 ## [0.1.0] - 2026-11-20
 
 First pre-release. The API may still change before 1.0.0; see UPGRADING.md.

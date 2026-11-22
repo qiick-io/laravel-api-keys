@@ -53,6 +53,7 @@ Set `API_KEYS_PRODUCT_PREFIX` (three-letter product code) before issuing tokens.
 | Scopes | Fail-closed: whitespace, wrong case, duplicates, or non-vocabulary values → empty set → `403 insufficient_scope` (never 401). |
 | Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint; lowercase UUID; rejects non-UUID, nil UUID, and a conflicting existing `api_key_id`). |
 | Rotation | `RotationService::rotate` refuses revoked/expired keys, `oauth_grant` rows, and unknown prefixes; invalid/negative/above-max grace → 0 (max default 168h). Legacy prefixes migrate to a **fresh canonical** token; with grace > 0, `previous_key_prefix` keeps the old token findable through the normal window. Products **must** `lockForUpdate` and write every returned field unconditionally (including `previous_key_prefix`, `last_rotated_at`, `token_version`). |
+| Expiry claim lease | `api-keys:notify-expiring` claims with `expiry_notice_claimed_at` (app/worker clock, not DB `NOW()`), then stamps `expiry_notified_at` after send. Default lease is **900** s (`API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS`). Keep worker clocks on shared NTP UTC — skew can reclaim a live claim early. Keep the lease above worst-case send latency — an in-flight send longer than the lease can be reclaimed and produce a **double notice**. |
 
 ## Token shape
 
@@ -76,6 +77,21 @@ See [docs/reference-schema.md](./docs/reference-schema.md) for the full column l
 enforced as **rolling windows** through Laravel's `RateLimiter` (decay 60 s /
 86_400 s / 2_592_000 s). They are not calendar day or calendar month buckets.
 Durable calendar quotas are LATER (standards review L4).
+
+## Expiry notices (claim lease)
+
+`api-keys:notify-expiring` takes a CAS lease on `expiry_notice_claimed_at`
+before sending, then stamps `expiry_notified_at` only after a successful send
+(see `ExpiryNoticeClaimSql`). The lease cutoff is computed from the worker's
+`Clock` (`$now`), not the database server clock.
+
+Two operational risks (accepted as documented nits after #18):
+
+1. **Clock skew.** Workers whose clocks disagree can reclaim a claim that is
+   still live on another host. Run every notify worker on NTP-synced UTC.
+2. **Send longer than the lease.** If delivery (mail, queue, webhook) exceeds
+   `api-keys.expiry.claim_lease_seconds` (default **900**), another worker can
+   win the CAS and send a second notice. Raise the lease, or keep sends short.
 
 ## Rotation (product persistence)
 

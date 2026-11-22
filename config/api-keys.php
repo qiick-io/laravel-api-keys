@@ -71,9 +71,13 @@ return [
         'notice_days' => (int) env('API_KEYS_EXPIRY_NOTICE_DAYS', 7),
 
         /*
-         * Claim lease for api-keys:notify-expiring. A worker that dies after
-         * claimExpiryNotice but before send is reclaimable once this many
-         * seconds have passed (expiry_notice_claimed_at).
+         * Claim lease for api-keys:notify-expiring (app/worker clock, not DB
+         * NOW()). A worker that dies after claimExpiryNotice but before send
+         * is reclaimable once this many seconds have passed
+         * (expiry_notice_claimed_at). Keep this above worst-case send latency:
+         * an in-flight send longer than the lease can be reclaimed by another
+         * worker and produce a second notice. Workers must share NTP-synced
+         * UTC; skew can reclaim a live claim early.
          */
         'claim_lease_seconds' => (int) env('API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 900),
 

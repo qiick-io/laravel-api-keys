@@ -37,7 +37,7 @@ divergence: there `id` is the public id.
 | `metadata` | json | yes | null | — | Labels under `metadata.labels`; never secrets |
 | `expires_at` | **dateTime** | yes | null | index | Future-dated; index serves the expiry command |
 | `expiry_notified_at` | timestamp | yes | null | — | Final success stamp for expiry notices |
-| `expiry_notice_claimed_at` | timestamp | yes | null | — | In-flight claim lease; reclaimable after `api-keys.expiry.claim_lease_seconds` |
+| `expiry_notice_claimed_at` | timestamp | yes | null | — | In-flight claim lease (app clock); reclaimable after `api-keys.expiry.claim_lease_seconds` (keep above send latency; NTP-sync workers) |
 | `last_used_at` | timestamp | yes | null | — | Written via `saveQuietly` |
 | `last_used_ip` | string(45) | yes | null | — | |
 | `last_used_user_agent` | string(512) | yes | null | — | Package truncates to 512 |

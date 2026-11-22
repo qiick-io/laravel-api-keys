@@ -33,7 +33,12 @@ pre-1.0 additions versus the 0.1.0 sketch:
   matches `previous_key_prefix` in grace. Products implement claim via
   {@see \Qiick\ApiKeys\ExpiryNoticeClaimSql} (set
   `expiry_notice_claimed_at` when unsent and unclaimed or lease-expired;
-  stamp `expiry_notified_at` only after a successful send).
+  stamp `expiry_notified_at` only after a successful send). The lease uses
+  **app/worker time** (bound `$now` / cutoff), not DB `NOW()`: clock skew
+  across workers can reclaim a live claim early. Keep
+  `api-keys.expiry.claim_lease_seconds` (default 900) above worst-case
+  notification send latency, or an in-flight send can be reclaimed and
+  produce a double notice.
 - `KeyAuthorizer::scopesCreatorMayGrant(ApiKeyRecord, ...)` (was creator id);
   `rateLimit()` returns `list<RateLimitDecision>`; add `authorizeResources`.
 - `UsageSideEffect::afterRecorded` gains `$userAgent`.

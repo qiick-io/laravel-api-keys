@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Document expiry-notice claim lease risks: app-clock skew can reclaim early;
+  a send longer than `claim_lease_seconds` (default 900) can double-notify.
 - `docs/reference-schema.md` is the full 1.0 reference products adopt: unique
   `key_prefix`, version/hash columns, restrictions JSON, quotas, revocation
   attribution, OAuth grant marking, usage and exposure fields, and the scanner

@@ -22,9 +22,11 @@ use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
  *
  * Expiry: non-revoked `api_key` rows with `expires_at` within
  * `api-keys.expiry.notice_days` and null `expiry_notified_at`.
- * Claim takes a lease on `expiry_notice_claimed_at`; success stamps
- * `expiry_notified_at`. A dead worker after claim is reclaimable once the
- * lease (`api-keys.expiry.claim_lease_seconds`) expires.
+ * Claim takes a lease on `expiry_notice_claimed_at` (app clock, not DB
+ * `NOW()`); success stamps `expiry_notified_at`. A dead worker after claim
+ * is reclaimable once `api-keys.expiry.claim_lease_seconds` elapses. Keep
+ * that lease above worst-case send latency, and keep worker clocks on
+ * shared NTP UTC — skew or a send longer than the lease can double-notify.
  *
  * N2: when `now` is within `api-keys.legacy.warn_days_before` of
  * `accept_until`, warns owners of active `token_version` 0 rows once per

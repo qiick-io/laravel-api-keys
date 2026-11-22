@@ -13,6 +13,8 @@ use Qiick\ApiKeys\RevocationReason;
  */
 final class InMemoryApiKeyRecord implements ApiKeyRecord
 {
+    use EnsuresTestingEnvironmentTrait;
+
     /**
      * @param  list<string>|mixed  $scopes
      * @param  list<string>|null|mixed  $ipAllowlist
@@ -56,7 +58,9 @@ final class InMemoryApiKeyRecord implements ApiKeyRecord
         private ?\DateTimeImmutable $lastUsedAt = null,
         private ?string $lastUsedIp = null,
         private ?string $lastUsedUserAgent = null,
-    ) {}
+    ) {
+        self::ensureTestingEnvironment();
+    }
 
     public function id(): string|int
     {

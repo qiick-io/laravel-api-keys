@@ -11,8 +11,15 @@ use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
  */
 final class FakeLegacyFormatWarningGate implements LegacyFormatWarningGate
 {
+    use EnsuresTestingEnvironmentTrait;
+
     /** @var array<string, true> */
     private array $claimed = [];
+
+    public function __construct()
+    {
+        self::ensureTestingEnvironment();
+    }
 
     public function claim(string $idempotencyKey): bool
     {

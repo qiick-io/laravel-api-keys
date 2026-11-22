@@ -39,3 +39,12 @@ pre-1.0 additions versus the 0.1.0 sketch:
 - New denial: `ApiKeyRejection::requestNotAllowed()` → `403 request_not_allowed`.
 - Runtime deps: `illuminate/console`, `illuminate/notifications`.
 - New Artisan command: `api-keys:notify-expiring` (bind `ExpiryRecipientResolver`).
+- Day/month quotas (`rate_limit_per_day` / `rate_limit_per_month`) are **rolling
+  windows** via Laravel's `RateLimiter` (decay seconds 86_400 / 2_592_000), not
+  calendar day/month buckets. Durable calendar quotas remain LATER.
+- Origin/referrer restriction patterns are structured: exact origin,
+  `scheme://*.example.com[:port]` on the host-label boundary, and referrer path
+  prefix only after an exact origin. Raw trailing `*` (e.g.
+  `https://app.example.com*`) is rejected at parse time.
+- `Qiick\ApiKeys\Testing\*` doubles refuse construction unless
+  `app()->environment('testing')` or `QIICK_API_KEYS_ALLOW_FAKES=1`.

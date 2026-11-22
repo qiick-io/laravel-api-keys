@@ -21,6 +21,8 @@ use Qiick\ApiKeys\ScopeSet;
  */
 final class FakeKeyAuthorizer implements KeyAuthorizer
 {
+    use EnsuresTestingEnvironmentTrait;
+
     /**
      * @param  list<string>  $creatorMayGrant
      * @param  array<string|int, list<string>>  $creatorMayGrantById
@@ -34,7 +36,9 @@ final class FakeKeyAuthorizer implements KeyAuthorizer
         private array $creatorMayGrant = [],
         private array $creatorMayGrantById = [],
         private bool $allowOwnerlessCeiling = false,
-    ) {}
+    ) {
+        self::ensureTestingEnvironment();
+    }
 
     public function authorizeActor(ApiKeyRecord $record, KeyContext $context): AuthorizationDecision
     {

@@ -32,8 +32,8 @@ divergence: there `id` is the public id.
 | `ip_allowlist` | json | yes | null | — | Null/empty → allow all; malformed → deny |
 | `restrictions` | json | yes | null | — | Versioned shape below; null → unrestricted |
 | `rate_limit_per_minute` | unsignedInteger | yes | null | — | Null → package default |
-| `rate_limit_per_day` | unsignedInteger | yes | null | — | Null → no day bucket |
-| `rate_limit_per_month` | unsignedInteger | yes | null | — | Null → no month bucket |
+| `rate_limit_per_day` | unsignedInteger | yes | null | — | Null → no day bucket (rolling 86_400 s, not calendar) |
+| `rate_limit_per_month` | unsignedInteger | yes | null | — | Null → no month bucket (rolling 2_592_000 s, not calendar) |
 | `metadata` | json | yes | null | — | Labels under `metadata.labels`; never secrets |
 | `expires_at` | **dateTime** | yes | null | index | Future-dated; index serves the expiry command |
 | `expiry_notified_at` | timestamp | yes | null | — | Idempotency stamp for expiry notices |
@@ -92,6 +92,11 @@ content stays on the product; labels live under `metadata.labels`. The grant id
   `v`, or an unknown key denies (fail closed, like `ip_allowlist`).
 - `request` is generic HTTP; the package evaluates it (methods, route names,
   origins, referrers). A denial is `403 request_not_allowed`.
+- Origin patterns: exact origin, or `https://*.example.com` (optional port) on
+  the host-label boundary with scheme/port exact. Referrer patterns: exact
+  string, or path prefix after an exact origin (`https://app.example.com/*`).
+  Raw trailing `*` on an origin (`https://app.example.com*`) is rejected at
+  parse time so `app.example.com.evil.com` cannot sneak through.
 - `resources[].type` is an opaque product string. The package validates the
   shape and hands a `ResourceRestrictions` value object to the product.
 - `mode` accepts only `allow` in version 1.

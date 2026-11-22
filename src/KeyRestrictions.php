@@ -132,8 +132,8 @@ final readonly class KeyRestrictions
 
         $methods = self::stringList($raw['methods'] ?? []);
         $routeNames = self::stringList($raw['route_names'] ?? []);
-        $origins = self::stringList($raw['origins'] ?? []);
-        $referrers = self::stringList($raw['referrers'] ?? []);
+        $origins = self::originPatternList($raw['origins'] ?? []);
+        $referrers = self::referrerPatternList($raw['referrers'] ?? []);
 
         if ($methods === null || $routeNames === null || $origins === null || $referrers === null) {
             return null;
@@ -145,6 +145,133 @@ final readonly class KeyRestrictions
             origins: $origins,
             referrers: $referrers,
         );
+    }
+
+    /**
+     * Exact origin or `scheme://*.example.com[:port]`. Any other `*` is rejected.
+     *
+     * @return list<string>|null
+     */
+    private static function originPatternList(mixed $raw): ?array
+    {
+        $values = self::stringList($raw);
+
+        if ($values === null) {
+            return null;
+        }
+
+        foreach ($values as $pattern) {
+            if (! self::isValidOriginPattern($pattern)) {
+                return null;
+            }
+        }
+
+        return $values;
+    }
+
+    /**
+     * Exact referer, or path prefix after an exact origin (`https://app.example.com/*`).
+     *
+     * @return list<string>|null
+     */
+    private static function referrerPatternList(mixed $raw): ?array
+    {
+        $values = self::stringList($raw);
+
+        if ($values === null) {
+            return null;
+        }
+
+        foreach ($values as $pattern) {
+            if (! self::isValidReferrerPattern($pattern)) {
+                return null;
+            }
+        }
+
+        return $values;
+    }
+
+    private static function isValidOriginPattern(string $pattern): bool
+    {
+        // >1 and >0 are equivalent: a single mid-host `*` still fails the host-shape checks below.
+        if (substr_count($pattern, '*') > 1) { // @pest-mutate-ignore: IncrementInteger
+            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
+        }
+
+        $parts = parse_url($pattern);
+
+        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) { // @pest-mutate-ignore: BooleanOrToBooleanAnd,FalseToTrue
+            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
+        }
+
+        if (isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) { // @pest-mutate-ignore: BooleanOrToBooleanAnd
+            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
+        }
+
+        $path = $parts['path'] ?? null; // @pest-mutate-ignore: CoalesceRemoveLeft
+
+        if ($path !== null && $path !== '' && $path !== '/') { // @pest-mutate-ignore: NotIdenticalToIdentical,EmptyStringToNotEmpty
+            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
+        }
+
+        $host = $parts['host'];
+
+        if (str_contains($host, '*')) {
+            $suffix = substr($host, 2); // @pest-mutate-ignore: DecrementInteger,IncrementInteger
+
+            // Host-label subdomain wildcards only: `*.example.com`.
+            return str_starts_with($host, '*.')
+                && $suffix !== '' // @pest-mutate-ignore: EmptyStringToNotEmpty
+                && ! str_contains($suffix, '*'); // @pest-mutate-ignore: BooleanAndToBooleanOr
+        }
+
+        return ! str_contains($pattern, '*');
+    }
+
+    private static function isValidReferrerPattern(string $pattern): bool
+    {
+        if (! str_contains($pattern, '*')) {
+            $parts = parse_url($pattern);
+
+            // Exact referer: absolute URL with scheme+host; path allowed; no userinfo/query/fragment.
+            return $parts !== false // @pest-mutate-ignore: BooleanAndToBooleanOr,FalseToTrue
+                && isset($parts['scheme'], $parts['host'])
+                && ! isset($parts['user'])
+                && ! isset($parts['pass'])
+                && ! isset($parts['query'])
+                && ! isset($parts['fragment']);
+        }
+
+        if (! str_ends_with($pattern, '*') || substr_count($pattern, '*') !== 1) { // @pest-mutate-ignore: BooleanOrToBooleanAnd
+            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
+        }
+
+        $prefix = substr($pattern, 0, -1); // @pest-mutate-ignore: IncrementInteger,UnwrapSubstr
+        $parts = parse_url($prefix);
+
+        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) { // @pest-mutate-ignore: BooleanOrToBooleanAnd,FalseToTrue
+            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
+        }
+        if (str_contains((string) $parts['host'], '*')) { // @pest-mutate-ignore: RemoveStringCast
+            return false;
+        }
+
+        if (isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) { // @pest-mutate-ignore: BooleanOrToBooleanAnd
+            return false;
+        }
+
+        $origin = $parts['scheme'].'://'.$parts['host'];
+
+        if (isset($parts['port'])) {
+            $origin .= ':'.$parts['port']; // @pest-mutate-ignore: ConcatEqualToEqual,ConcatRemoveLeft,ConcatRemoveRight,ConcatSwitchSides
+        }
+
+        if (! str_starts_with($prefix, $origin)) {
+            return false;
+        }
+
+        // Require `/…` after the exact origin so `https://app.example.com*` is rejected.
+        return strlen($prefix) > strlen($origin) && $prefix[strlen($origin)] === '/';
     }
 
     /**

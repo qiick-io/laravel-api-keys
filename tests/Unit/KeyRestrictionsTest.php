@@ -170,7 +170,7 @@ it('evaluates request restrictions fail-closed on missing context', function ():
         ))->toBeTrue();
 });
 
-it('matches trailing wildcards on routes, origins and referrers', function (): void {
+it('matches route trailing wildcards and structured origins/referrers', function (): void {
     $evaluator = new RequestRestrictionsEvaluator;
     $restricted = new RequestRestrictions(
         routeNames: ['api.v1.*'],
@@ -228,20 +228,112 @@ it('matches trailing wildcards on routes, origins and referrers', function (): v
         ))->toBeFalse();
 });
 
+it('N4: rejects evil-suffix origin patterns and does not allow suffix hosts', function (): void {
+    $evaluator = new RequestRestrictionsEvaluator;
+
+    expect(KeyRestrictions::parse([
+        'v' => 1,
+        'request' => ['origins' => ['https://app.example.com*']],
+    ])->isDenied)->toBeTrue()
+        ->and(KeyRestrictions::parse([
+            'v' => 1,
+            'request' => ['referrers' => ['https://app.example.com*']],
+        ])->isDenied)->toBeTrue()
+        ->and($evaluator->allows(
+            new RequestRestrictions(origins: ['https://app.example.com']),
+            new KeyContext(ip: null, origin: 'https://app.example.com.evil.com'),
+        ))->toBeFalse()
+        ->and($evaluator->allows(
+            new RequestRestrictions(origins: ['https://*.example.com']),
+            new KeyContext(ip: null, origin: 'https://app.example.com'),
+        ))->toBeTrue()
+        ->and($evaluator->allows(
+            new RequestRestrictions(origins: ['https://*.example.com']),
+            new KeyContext(ip: null, origin: 'https://app.example.com.evil.com'),
+        ))->toBeFalse()
+        ->and($evaluator->allows(
+            new RequestRestrictions(origins: ['https://*.example.com']),
+            new KeyContext(ip: null, origin: 'https://example.com'),
+        ))->toBeFalse()
+        ->and(KeyRestrictions::parse([
+            'v' => 1,
+            'request' => ['origins' => ['https://*.example.com']],
+        ])->isDenied)->toBeFalse()
+        ->and(KeyRestrictions::parse([
+            'v' => 1,
+            'request' => ['origins' => ['*']],
+        ])->isDenied)->toBeTrue();
+});
+
+it('N4: rejects malformed origin and referrer patterns at parse time', function (array $request): void {
+    expect(KeyRestrictions::parse(['v' => 1, 'request' => $request])->isDenied)->toBeTrue();
+})->with([
+    'two stars in origin' => [['origins' => ['https://*.*.example.com']]],
+    'origin with path' => [['origins' => ['https://app.example.com/admin']]],
+    'origin with query' => [['origins' => ['https://app.example.com?x=1']]],
+    'origin with fragment' => [['origins' => ['https://app.example.com#x']]],
+    'origin with userinfo' => [['origins' => ['https://user:pass@app.example.com']]],
+    'mid-host star' => [['origins' => ['https://app.*.com']]],
+    'empty subdomain suffix' => [['origins' => ['https://*.']]],
+    'bare star origin' => [['origins' => ['*']]],
+    'not a url' => [['origins' => ['not-a-url']]],
+    'referrer mid star' => [['referrers' => ['https://app.example.com/*/x']]],
+    'referrer subdomain wild path' => [['referrers' => ['https://*.example.com/*']]],
+    'referrer with query' => [['referrers' => ['https://app.example.com?q=1']]],
+    'referrer with userinfo' => [['referrers' => ['https://u@app.example.com/path']]],
+]);
+
+it('N4: accepts exact referers, path prefixes, and ported origins', function (): void {
+    expect(KeyRestrictions::parse([
+        'v' => 1,
+        'request' => [
+            'origins' => ['https://app.example.com:8443', 'https://*.example.com'],
+            'referrers' => [
+                'https://app.example.com/exact',
+                'https://app.example.com/*',
+                'https://app.example.com:8443/admin/*',
+            ],
+        ],
+    ])->isDenied)->toBeFalse();
+
+    $evaluator = new RequestRestrictionsEvaluator;
+
+    expect($evaluator->allows(
+        new RequestRestrictions(origins: ['https://app.example.com:8443']),
+        new KeyContext(ip: null, origin: 'https://app.example.com:8443'),
+    ))->toBeTrue()
+        ->and($evaluator->allows(
+            new RequestRestrictions(origins: ['https://app.example.com:8443']),
+            new KeyContext(ip: null, origin: 'https://app.example.com'),
+        ))->toBeFalse()
+        ->and($evaluator->allows(
+            new RequestRestrictions(referrers: ['https://app.example.com:8443/admin/*']),
+            new KeyContext(ip: null, referer: 'https://app.example.com:8443/admin/users'),
+        ))->toBeTrue()
+        ->and($evaluator->allows(
+            new RequestRestrictions(referrers: ['https://app.example.com:8443/admin/*']),
+            new KeyContext(ip: null, referer: 'https://app.example.com/admin/users'),
+        ))->toBeFalse()
+        ->and($evaluator->allows(
+            new RequestRestrictions(referrers: ['https://app.example.com/exact']),
+            new KeyContext(ip: null, referer: 'https://app.example.com/exact'),
+        ))->toBeTrue()
+        ->and($evaluator->allows(
+            new RequestRestrictions(origins: ['https://*.example.com']),
+            new KeyContext(ip: null, origin: 'https://a.b.example.com'),
+        ))->toBeTrue();
+});
+
 it('denies empty route names even when a star pattern would otherwise match', function (): void {
     $evaluator = new RequestRestrictionsEvaluator;
 
     expect($evaluator->allows(
         new RequestRestrictions(routeNames: ['*']),
         new KeyContext(ip: null, routeName: ''),
-    ))->toBeFalse()
-        ->and($evaluator->allows(
-            new RequestRestrictions(origins: ['*']),
-            new KeyContext(ip: null, origin: ''),
-        ))->toBeFalse();
+    ))->toBeFalse();
 });
 
-it('keeps wildcard prefix length exact (substr -1, not -2)', function (): void {
+it('keeps route wildcard prefix length exact (substr -1, not -2)', function (): void {
     $evaluator = new RequestRestrictionsEvaluator;
 
     expect($evaluator->allows(

@@ -360,3 +360,34 @@ it('O2/T1/T2: oauth, unknown version and unknown algorithm each hit the failed-a
         expect($limiter->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe($index + 1);
     }
 });
+
+it('N1: a zero maxAttempts bucket is skipped so later buckets still run', function (): void {
+    $codec = mustCodec();
+    $issued = $codec->issue();
+    $record = new InMemoryApiKeyRecord(
+        id: 'skip-zero',
+        keyPrefix: $issued->keyPrefix,
+        keyHash: $issued->keyHash,
+        scopes: ['items:read'],
+    );
+    $limiter = new FakeAttemptLimiter;
+    $auth = new ApiKeyAuthenticator(
+        codec: $codec,
+        repository: new FakeApiKeyRepository([$record]),
+        authorizer: (new FakeKeyAuthorizer)->withRateLimits([
+            new RateLimitDecision('zero-bucket', 0, 60),
+            new RateLimitDecision('live-bucket', 5, 60),
+        ]),
+        vocabulary: new ArrayScopeVocabulary(['items:read', 'items:write']),
+        ipAllowlist: new IpAllowlist,
+        usageRecorder: new UsageRecorder,
+        clock: new FixedClock(new DateTimeImmutable('2026-01-15 12:00:00')),
+        attemptLimiter: $limiter,
+        defaultRateLimitPerMinute: 0,
+    );
+
+    $auth->authenticate($issued->plainText, new KeyContext('203.0.113.10'));
+
+    expect($limiter->hitsFor('zero-bucket'))->toBe(0)
+        ->and($limiter->hitsFor('live-bucket'))->toBe(1);
+});

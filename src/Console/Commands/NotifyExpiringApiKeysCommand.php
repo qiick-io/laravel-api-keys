@@ -80,7 +80,16 @@ final class NotifyExpiringApiKeysCommand extends Command
             }
 
             $notification = new $notificationClass($record, $expiresAt);
-            Notification::send($recipients, $notification);
+
+            try {
+                Notification::send($recipients, $notification);
+            } catch (\Throwable $exception) {
+                // Stamp only after a successful send so the next run retries.
+                $this->error('Expiry notice failed for '.$record->publicId().': '.$exception->getMessage());
+
+                continue;
+            }
+
             $repository->markExpiryNotified($record, $now);
             $events->dispatch(new ApiKeyExpiryNoticeSent(
                 apiKeyId: $record->publicId(),

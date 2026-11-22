@@ -11,6 +11,8 @@ use Qiick\ApiKeys\Contracts\AttemptLimiter;
  */
 final class FakeAttemptLimiter implements AttemptLimiter
 {
+    use EnsuresTestingEnvironmentTrait;
+
     /** @var array<string, int> */
     private array $hits = [];
 
@@ -19,6 +21,11 @@ final class FakeAttemptLimiter implements AttemptLimiter
 
     /** @var array<string, int> */
     public array $lastDecaySeconds = [];
+
+    public function __construct()
+    {
+        self::ensureTestingEnvironment();
+    }
 
     public function tooManyAttempts(string $key, int $maxAttempts): bool
     {

@@ -29,8 +29,6 @@ final class ApiKeyAuthenticator
 {
     private const array KNOWN_TOKEN_VERSIONS = [0, 1, 2]; // @pest-mutate-ignore: IncrementInteger,DecrementInteger,RemoveArrayItem
 
-    private const string KNOWN_HASH_ALGORITHM = 'sha256';
-
     private RequestRestrictionsEvaluator $requestRestrictionsEvaluator;
 
     /**
@@ -150,11 +148,7 @@ final class ApiKeyAuthenticator
             throw ApiKeyRejection::invalidToken();
         }
 
-        if ($matched->hashAlgorithm() !== self::KNOWN_HASH_ALGORITHM) {
-            $this->hitFailedAttempt($clientIp);
-
-            throw ApiKeyRejection::invalidToken();
-        }
+        // Unknown hash_algorithm is refused inside TokenCodec::match (single place).
 
         $actor = $this->authorizer->authorizeActor($matched, $context);
         if (! $actor->allowed) {
@@ -307,7 +301,7 @@ final class ApiKeyAuthenticator
 
         foreach ($decisions as $decision) {
             if ($decision->maxAttempts <= 0) { // @pest-mutate-ignore: SmallerOrEqualToSmaller,DecrementInteger
-                continue; // @pest-mutate-ignore: ContinueToBreak — covered when a zero bucket precedes a positive one
+                continue;
             }
 
             if ($this->attemptLimiter->tooManyAttempts($decision->bucketKey, $decision->maxAttempts)) {

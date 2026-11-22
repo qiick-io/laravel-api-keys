@@ -13,6 +13,8 @@ use Qiick\ApiKeys\CredentialKind;
  */
 final class FakeApiKeyRepository implements ApiKeyRepository
 {
+    use EnsuresTestingEnvironmentTrait;
+
     public const int USER_AGENT_MAX_LENGTH = 512;
 
     /** @var list<ApiKeyRecord> */
@@ -31,6 +33,8 @@ final class FakeApiKeyRepository implements ApiKeyRepository
      */
     public function __construct(array $records = [], ?\DateTimeImmutable $now = null)
     {
+        self::ensureTestingEnvironment();
+
         $this->records = $records;
         $this->now = $now;
     }

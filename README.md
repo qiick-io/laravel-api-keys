@@ -70,6 +70,13 @@ Scanner regex (product prefix `ppp`):
 
 See [docs/reference-schema.md](./docs/reference-schema.md) for the full column list.
 
+## Quotas (minute / day / month)
+
+`rate_limit_per_minute`, `rate_limit_per_day`, and `rate_limit_per_month` are
+enforced as **rolling windows** through Laravel's `RateLimiter` (decay 60 s /
+86_400 s / 2_592_000 s). They are not calendar day or calendar month buckets.
+Durable calendar quotas are LATER (standards review L4).
+
 ## Rotation (product persistence)
 
 ```php

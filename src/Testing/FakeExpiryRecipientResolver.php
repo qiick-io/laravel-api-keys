@@ -12,12 +12,16 @@ use Qiick\ApiKeys\Contracts\ExpiryRecipientResolver;
  */
 final class FakeExpiryRecipientResolver implements ExpiryRecipientResolver
 {
+    use EnsuresTestingEnvironmentTrait;
+
     /**
      * @param  list<object>  $recipients
      */
     public function __construct(
         private array $recipients = [],
-    ) {}
+    ) {
+        self::ensureTestingEnvironment();
+    }
 
     public function recipientsFor(ApiKeyRecord $record, array $roles): iterable
     {

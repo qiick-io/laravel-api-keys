@@ -296,3 +296,66 @@ it('L5: KeyRestrictions parses version 1 and denies unknown keys', function (): 
         ->and(KeyRestrictions::parse(['v' => 1, 'extra' => true])->isDenied)->toBeTrue()
         ->and(KeyRestrictions::parse(null)->request->isUnrestricted())->toBeTrue();
 });
+
+it('L7: product resource denial is 403 request_not_allowed', function (): void {
+    $codec = mustCodec();
+    $issued = $codec->issue();
+    $record = (new InMemoryApiKeyRecord(
+        keyPrefix: $issued->keyPrefix,
+        keyHash: $issued->keyHash,
+        scopes: ['items:read'],
+    ))->withRestrictions([
+        'v' => 1,
+        'resources' => [
+            ['type' => 'collection', 'values' => ['news'], 'mode' => 'allow'],
+        ],
+    ]);
+
+    try {
+        mustAuth($record, $issued->plainText, (new FakeKeyAuthorizer)->denyResources())
+            ->authenticate($issued->plainText, new KeyContext('203.0.113.10'));
+        test()->fail('expected resource denial');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->errorCode())->toBe('request_not_allowed');
+    }
+});
+
+it('O2/T1/T2: oauth, unknown version and unknown algorithm each hit the failed-attempt brake', function (): void {
+    $codec = mustCodec();
+    $issued = $codec->issue();
+    $limiter = new FakeAttemptLimiter;
+    $failed = new Qiick\ApiKeys\FailedAttemptLimiter($limiter, maxPerMinute: 20);
+
+    $cases = [
+        (new InMemoryApiKeyRecord(keyPrefix: $issued->keyPrefix, keyHash: $issued->keyHash, scopes: ['items:read']))
+            ->withCredentialKind(CredentialKind::OauthGrant),
+        (new InMemoryApiKeyRecord(keyPrefix: $issued->keyPrefix, keyHash: $issued->keyHash, scopes: ['items:read']))
+            ->withTokenVersion(99),
+        (new InMemoryApiKeyRecord(keyPrefix: $issued->keyPrefix, keyHash: $issued->keyHash, scopes: ['items:read']))
+            ->withHashAlgorithm('md5'),
+    ];
+
+    foreach ($cases as $index => $record) {
+        $auth = new ApiKeyAuthenticator(
+            codec: $codec,
+            repository: new FakeApiKeyRepository([$record]),
+            authorizer: new FakeKeyAuthorizer,
+            vocabulary: new ArrayScopeVocabulary(['items:read', 'items:write']),
+            ipAllowlist: new IpAllowlist,
+            usageRecorder: new UsageRecorder,
+            clock: new FixedClock(new DateTimeImmutable('2026-01-15 12:00:00')),
+            attemptLimiter: new FakeAttemptLimiter,
+            failedAttemptLimiter: $failed,
+            defaultRateLimitPerMinute: 0,
+        );
+
+        try {
+            $auth->authenticate($issued->plainText, new KeyContext('203.0.113.10'));
+            test()->fail('expected invalid_token for case '.$index);
+        } catch (ApiKeyRejection $rejection) {
+            expect($rejection->errorCode())->toBe('invalid_token');
+        }
+
+        expect($limiter->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe($index + 1);
+    }
+});

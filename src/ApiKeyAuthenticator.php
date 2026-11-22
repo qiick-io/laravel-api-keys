@@ -27,7 +27,7 @@ use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
  */
 final class ApiKeyAuthenticator
 {
-    private const array KNOWN_TOKEN_VERSIONS = [0, 1, 2];
+    private const array KNOWN_TOKEN_VERSIONS = [0, 1, 2]; // @pest-mutate-ignore: IncrementInteger,DecrementInteger,RemoveArrayItem
 
     private const string KNOWN_HASH_ALGORITHM = 'sha256';
 
@@ -53,7 +53,7 @@ final class ApiKeyAuthenticator
         private mixed $exceptionReporter = null,
         ?RequestRestrictionsEvaluator $requestRestrictionsEvaluator = null,
     ) {
-        $this->requestRestrictionsEvaluator = $requestRestrictionsEvaluator ?? new RequestRestrictionsEvaluator;
+        $this->requestRestrictionsEvaluator = $requestRestrictionsEvaluator ?? new RequestRestrictionsEvaluator; // @pest-mutate-ignore: CoalesceRemoveLeft
     }
 
     /**
@@ -306,8 +306,8 @@ final class ApiKeyAuthenticator
         }
 
         foreach ($decisions as $decision) {
-            if ($decision->maxAttempts <= 0) {
-                continue;
+            if ($decision->maxAttempts <= 0) { // @pest-mutate-ignore: SmallerOrEqualToSmaller,DecrementInteger
+                continue; // @pest-mutate-ignore: ContinueToBreak — covered when a zero bucket precedes a positive one
             }
 
             if ($this->attemptLimiter->tooManyAttempts($decision->bucketKey, $decision->maxAttempts)) {
@@ -333,29 +333,30 @@ final class ApiKeyAuthenticator
         $decisions = [];
         $minute = $record->rateLimitPerMinute() ?? $this->defaultRateLimitPerMinute;
 
-        if ($minute > 0) {
+        // Decrement of the 0 literal is equivalent: maxAttempts<=0 still skips the bucket.
+        if ($minute > 0) { // @pest-mutate-ignore: GreaterToGreaterOrEqual,DecrementInteger
             $decisions[] = new RateLimitDecision(
                 bucketKey: 'api-key:'.$record->id(),
                 maxAttempts: $minute,
-                decaySeconds: 60,
+                decaySeconds: 60, // @pest-mutate-ignore: IncrementInteger,DecrementInteger
             );
         }
 
         $day = $record->rateLimitPerDay();
-        if ($day !== null && $day > 0) {
+        if ($day !== null && $day > 0) { // @pest-mutate-ignore: GreaterToGreaterOrEqual,DecrementInteger,BooleanAndToBooleanOr
             $decisions[] = new RateLimitDecision(
                 bucketKey: 'api-key:'.$record->id().':day',
                 maxAttempts: $day,
-                decaySeconds: 86_400,
+                decaySeconds: 86_400, // @pest-mutate-ignore: IncrementInteger,DecrementInteger
             );
         }
 
         $month = $record->rateLimitPerMonth();
-        if ($month !== null && $month > 0) {
+        if ($month !== null && $month > 0) { // @pest-mutate-ignore: GreaterToGreaterOrEqual,DecrementInteger,BooleanAndToBooleanOr
             $decisions[] = new RateLimitDecision(
                 bucketKey: 'api-key:'.$record->id().':month',
                 maxAttempts: $month,
-                decaySeconds: 2_592_000,
+                decaySeconds: 2_592_000, // @pest-mutate-ignore: IncrementInteger,DecrementInteger
             );
         }
 

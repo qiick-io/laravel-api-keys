@@ -22,6 +22,9 @@ use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
  *
  * Expiry: non-revoked `api_key` rows with `expires_at` within
  * `api-keys.expiry.notice_days` and null `expiry_notified_at`.
+ * Claim takes a lease on `expiry_notice_claimed_at`; success stamps
+ * `expiry_notified_at`. A dead worker after claim is reclaimable once the
+ * lease (`api-keys.expiry.claim_lease_seconds`) expires.
  *
  * N2: when `now` is within `api-keys.legacy.warn_days_before` of
  * `accept_until`, warns owners of active `token_version` 0 rows once per
@@ -48,6 +51,18 @@ final class NotifyExpiringApiKeysCommand extends Command
         );
         if (! is_int($noticeDays)) {
             $this->error('api-keys.expiry.notice_days must be an integer >= 0.');
+
+            return self::FAILURE;
+        }
+
+        $configuredLeaseSeconds = config('api-keys.expiry.claim_lease_seconds', 900);
+        $leaseSeconds = filter_var(
+            $configuredLeaseSeconds,
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => 1]],
+        );
+        if (! is_int($leaseSeconds)) {
+            $this->error('api-keys.expiry.claim_lease_seconds must be an integer >= 1.');
 
             return self::FAILURE;
         }
@@ -79,12 +94,17 @@ final class NotifyExpiringApiKeysCommand extends Command
                 continue;
             }
 
+            // Lease claim before send; dead workers are reclaimable after TTL.
+            if (! $repository->claimExpiryNotice($record, $now, $leaseSeconds)) {
+                continue;
+            }
+
             $notification = new $notificationClass($record, $expiresAt);
 
             try {
                 Notification::send($recipients, $notification);
             } catch (\Throwable $exception) {
-                // Stamp only after a successful send so the next run retries.
+                $repository->releaseExpiryNotice($record);
                 $this->error('Expiry notice failed for '.$record->publicId().': '.$exception->getMessage());
 
                 continue;

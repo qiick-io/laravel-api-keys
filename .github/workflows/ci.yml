@@ -95,8 +95,8 @@ jobs:
         if: matrix.php == '8.4' && matrix.laravel == '12' && matrix.dependency-version == 'stable'
         run: bash scripts/mutate-per-class.sh
 
-  # Adapter-example smoke once Eloquent examples land; scaffold keeps the job
-  # so the matrix shape matches the design (SQLite / MySQL / MariaDB / PostgreSQL).
+  # Expiry-notice claim CAS on SQLite / MySQL / MariaDB / PostgreSQL.
+  # Services start only for the engine under test (docker in-step for cost).
   databases:
     name: Databases smoke (${{ matrix.engine }})
     runs-on: ubuntu-latest
@@ -126,10 +126,62 @@ jobs:
       - name: Install dependencies
         run: composer update --no-interaction --prefer-dist
 
-      - name: Pest (no adapter examples yet)
+      - name: Start MySQL
+        if: matrix.engine == 'mysql'
         run: |
-          echo "Engine=${{ matrix.engine }}: adapter examples land in a later PR."
-          vendor/bin/pest
+          docker run -d --name claim-mysql \
+            -e MYSQL_ROOT_PASSWORD=password \
+            -e MYSQL_DATABASE=api_keys_claim \
+            -p 3306:3306 \
+            mysql:8.4
+          for attempt in $(seq 1 30); do
+            if docker exec claim-mysql mysqladmin ping -h 127.0.0.1 -uroot -ppassword --silent; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL did not become ready" >&2
+          exit 1
+
+      - name: Start MariaDB
+        if: matrix.engine == 'mariadb'
+        run: |
+          docker run -d --name claim-mariadb \
+            -e MARIADB_ROOT_PASSWORD=password \
+            -e MARIADB_DATABASE=api_keys_claim \
+            -p 3307:3306 \
+            mariadb:11
+          for attempt in $(seq 1 30); do
+            if docker exec claim-mariadb mariadb-admin ping -h 127.0.0.1 -uroot -ppassword --silent; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MariaDB did not become ready" >&2
+          exit 1
+
+      - name: Start PostgreSQL
+        if: matrix.engine == 'pgsql'
+        run: |
+          docker run -d --name claim-pgsql \
+            -e POSTGRES_PASSWORD=password \
+            -e POSTGRES_DB=api_keys_claim \
+            -p 5432:5432 \
+            postgres:16
+          for attempt in $(seq 1 30); do
+            if docker exec claim-pgsql pg_isready -U postgres; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready" >&2
+          exit 1
+
+      - name: Expiry notice claim CAS (${{ matrix.engine }})
+        env:
+          API_KEYS_CLAIM_ENGINE: ${{ matrix.engine }}
+          API_KEYS_CLAIM_PASSWORD: password
+        run: vendor/bin/pest --filter=ExpiryNoticeClaimCas
 
   # Prefer SHA pin when the reusable workflow is addressable; app-ui publishes
   # drift-check under tags, so @v0.11.0 matches qiick-standards.json "ref".

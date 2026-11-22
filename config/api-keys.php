@@ -71,12 +71,18 @@ return [
         'notice_days' => (int) env('API_KEYS_EXPIRY_NOTICE_DAYS', 7),
 
         /*
+         * Claim lease for api-keys:notify-expiring. A worker that dies after
+         * claimExpiryNotice but before send is reclaimable once this many
+         * seconds have passed (expiry_notice_claimed_at).
+         */
+        'claim_lease_seconds' => (int) env('API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 900),
+
+        /*
          * Roles resolved by ExpiryRecipientResolver: owner, issuer, organisation.
          *
          * @var list<string>
          */
         'recipients' => ['owner', 'issuer'],
-
         /*
          * Notification class (products may replace).
          *

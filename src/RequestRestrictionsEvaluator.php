@@ -174,11 +174,12 @@ final class RequestRestrictionsEvaluator
 
     /**
      * Exact referer string, or path-prefix after an exact origin (`https://app.example.com/admin/*`).
+     * Scheme and host are compared case-insensitively; path is case-sensitive.
      */
     private function matchesReferrerPattern(string $pattern, string $value): bool
     {
         if (! str_contains($pattern, '*')) {
-            return $pattern === $value; // @pest-mutate-ignore: IdenticalToNotIdentical
+            return $this->canonicalReferer($pattern) === $this->canonicalReferer($value); // @pest-mutate-ignore: IdenticalToNotIdentical
         }
 
         if (! str_ends_with($pattern, '*') || substr_count($pattern, '*') !== 1) { // @pest-mutate-ignore: BooleanOrToBooleanAnd
@@ -192,8 +193,10 @@ final class RequestRestrictionsEvaluator
             return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
         }
 
+        $prefixPath = $this->pathAndQuery($prefix);
+
         // Path prefix requires a '/' immediately after the exact origin.
-        if (! str_starts_with($prefix, $originUrl.'/')) { // @pest-mutate-ignore: ConcatRemoveRight
+        if ($prefixPath === null || $prefixPath === '' || $prefixPath[0] !== '/') { // @pest-mutate-ignore: EmptyStringToNotEmpty,DecrementInteger,BooleanOrToBooleanAnd
             return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
         }
 
@@ -209,7 +212,40 @@ final class RequestRestrictionsEvaluator
             return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
         }
 
-        return str_starts_with($value, $prefix);
+        $valuePath = $this->pathAndQuery($value);
+
+        return $valuePath !== null && str_starts_with($valuePath, $prefixPath); // @pest-mutate-ignore: BooleanAndToBooleanOr
+    }
+
+    /**
+     * Lowercased scheme/host + original path/query for exact referer equality.
+     */
+    private function canonicalReferer(string $url): ?string
+    {
+        $origin = $this->originUrl($url);
+
+        if ($origin === null) {
+            return null; // @pest-mutate-ignore: RemoveEarlyReturn
+        }
+
+        return $origin.($this->pathAndQuery($url) ?? ''); // @pest-mutate-ignore: ConcatRemoveLeft,ConcatSwitchSides,EmptyStringToNotEmpty
+    }
+
+    private function pathAndQuery(string $url): ?string
+    {
+        $parts = parse_url($url);
+
+        if ($parts === false) { // @pest-mutate-ignore: FalseToTrue
+            return null; // @pest-mutate-ignore: RemoveEarlyReturn
+        }
+
+        $path = $parts['path'] ?? ''; // @pest-mutate-ignore: CoalesceRemoveLeft,EmptyStringToNotEmpty
+
+        if (isset($parts['query'])) {
+            $path .= '?'.$parts['query']; // @pest-mutate-ignore: ConcatRemoveLeft,ConcatRemoveRight,ConcatSwitchSides
+        }
+
+        return $path;
     }
 
     /**
@@ -231,7 +267,7 @@ final class RequestRestrictionsEvaluator
             return null; // @pest-mutate-ignore: RemoveEarlyReturn
         }
 
-        $origin = $parts['scheme'].'://'.$parts['host'];
+        $origin = strtolower($parts['scheme']).'://'.strtolower($parts['host']); // @pest-mutate-ignore: ConcatRemoveLeft,ConcatSwitchSides
 
         if (isset($parts['port']) && is_int($parts['port'])) {
             $origin .= ':'.$parts['port']; // @pest-mutate-ignore: ConcatEqualToEqual,ConcatRemoveLeft,ConcatRemoveRight,ConcatSwitchSides
@@ -270,8 +306,8 @@ final class RequestRestrictionsEvaluator
         }
 
         return [
-            'scheme' => $parts['scheme'],
-            'host' => $parts['host'],
+            'scheme' => strtolower($parts['scheme']),
+            'host' => strtolower($parts['host']),
             'port' => isset($parts['port']) && is_int($parts['port']) ? $parts['port'] : null,
         ];
     }

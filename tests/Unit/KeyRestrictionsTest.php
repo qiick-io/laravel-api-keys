@@ -283,6 +283,46 @@ it('N4: rejects malformed origin and referrer patterns at parse time', function 
     'referrer with userinfo' => [['referrers' => ['https://u@app.example.com/path']]],
 ]);
 
+it('normalizes origin and referrer host and scheme case', function (): void {
+    $evaluator = new RequestRestrictionsEvaluator;
+
+    expect($evaluator->allows(
+        new RequestRestrictions(origins: ['https://app.example.com']),
+        new KeyContext(ip: null, origin: 'HTTPS://APP.EXAMPLE.COM'),
+    ))->toBeTrue()
+        ->and($evaluator->allows(
+            new RequestRestrictions(origins: ['HTTPS://*.Example.COM']),
+            new KeyContext(ip: null, origin: 'https://Api.Example.Com'),
+        ))->toBeTrue()
+        ->and($evaluator->allows(
+            new RequestRestrictions(referrers: ['https://app.example.com/admin/*']),
+            new KeyContext(ip: null, referer: 'HTTPS://APP.EXAMPLE.COM/admin/users'),
+        ))->toBeTrue()
+        ->and($evaluator->allows(
+            new RequestRestrictions(referrers: ['https://app.example.com/Exact']),
+            new KeyContext(ip: null, referer: 'https://APP.example.com/Exact'),
+        ))->toBeTrue()
+        ->and($evaluator->allows(
+            new RequestRestrictions(referrers: ['https://app.example.com/Exact']),
+            new KeyContext(ip: null, referer: 'https://app.example.com/exact'),
+        ))->toBeFalse();
+});
+
+it('covers KeyRestrictions referrer-prefix denials for star host, userinfo and authority mismatch', function (): void {
+    expect(KeyRestrictions::parse([
+        'v' => 1,
+        'request' => ['referrers' => ['https://foo*bar.example.com/x*']],
+    ])->isDenied)->toBeTrue()
+        ->and(KeyRestrictions::parse([
+            'v' => 1,
+            'request' => ['referrers' => ['https://user@app.example.com/admin*']],
+        ])->isDenied)->toBeTrue()
+        ->and(KeyRestrictions::parse([
+            'v' => 1,
+            'request' => ['referrers' => ['https://app.example.com/path?q=1*']],
+        ])->isDenied)->toBeTrue();
+});
+
 it('N4: accepts exact referers, path prefixes, and ported origins', function (): void {
     expect(KeyRestrictions::parse([
         'v' => 1,

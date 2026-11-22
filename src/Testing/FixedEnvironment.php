@@ -10,7 +10,12 @@ use Qiick\ApiKeys\TokenEnvironment;
 /** @api Test environment resolver with a fixed live/test value. */
 final class FixedEnvironment implements EnvironmentResolver
 {
-    public function __construct(private TokenEnvironment $environment) {}
+    use EnsuresTestingEnvironmentTrait;
+
+    public function __construct(private TokenEnvironment $environment)
+    {
+        self::ensureTestingEnvironment();
+    }
 
     public function environment(): TokenEnvironment
     {

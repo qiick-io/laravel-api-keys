@@ -18,6 +18,8 @@ CLASSES=(
   'Qiick\ApiKeys\RotationService'
   'Qiick\ApiKeys\Audit'
   'Qiick\ApiKeys\Http\BearerTokenExtractor'
+  'Qiick\ApiKeys\KeyRestrictions'
+  'Qiick\ApiKeys\RequestRestrictionsEvaluator'
 )
 
 MIN="${MUTATE_MIN:-95}"

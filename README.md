@@ -15,7 +15,8 @@ fail-closed scopes, IP allowlist, RFC 6750 refusals in the fleet error format, r
 grace, usage throttle, audit `api_key_id`, and test helpers.
 
 **Products own** Eloquent models, migrations, permissions, scope enums, tenancy, and
-HTTP middleware. This package does not register middleware or Artisan commands.
+HTTP middleware. This package does not register middleware; it does register
+`api-keys:notify-expiring` (bind `ExpiryRecipientResolver`).
 
 Part of the qiick fleet. Binding design:
 `projects/qiick/packages/laravel-api-keys-design.md` in the knowledge base
@@ -30,7 +31,7 @@ Do not require this package from production apps until a tagged release lands on
 ## Requirements
 
 - PHP `^8.3`
-- Illuminate contracts / http / support `^12.0 \|\| ^13.0` (never `laravel/framework`)
+- Illuminate console / contracts / http / notifications / support `^12.0 \|\| ^13.0` (never `laravel/framework`)
 
 ## Install (when published)
 
@@ -51,15 +52,30 @@ Set `API_KEYS_PRODUCT_PREFIX` (three-letter product code) before issuing tokens.
 | Redaction | Presented tokens / Bearer values MUST NEVER appear in exception messages, JSON bodies, logs, telemetry, activity properties, or `__debugInfo`. |
 | Scopes | Fail-closed: whitespace, wrong case, duplicates, or non-vocabulary values → empty set → `403 insufficient_scope` (never 401). |
 | Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint; lowercase UUID; rejects non-UUID, nil UUID, and a conflicting existing `api_key_id`). |
-| Rotation | `RotationService::rotate(ApiKeyRecord, TokenCodec, Clock, graceHours)` refuses revoked/expired keys and unknown prefixes (legacy only while the matcher still accepts `$now`); invalid/negative/above-max grace → 0 (max default 168h, bound from `rotation_max_grace_hours`). Legacy prefixes migrate to a **fresh canonical** token with **no grace across formats** (old `ek_` plaintext dies as soon as `key_prefix` is updated). Matchers must recognise a bare stored prefix. Products **must** `lockForUpdate` and write `key_prefix` / `key_hash` / `previous_key_hash` / `previous_key_valid_until` unconditionally. |
+| Rotation | `RotationService::rotate` refuses revoked/expired keys, `oauth_grant` rows, and unknown prefixes; invalid/negative/above-max grace → 0 (max default 168h). Legacy prefixes migrate to a **fresh canonical** token; with grace > 0, `previous_key_prefix` keeps the old token findable through the normal window. Products **must** `lockForUpdate` and write every returned field unconditionally (including `previous_key_prefix`, `last_rotated_at`, `token_version`). |
 
 ## Token shape
 
 `{product}_{live|test}_{id}{secret}` — three-letter product prefix, 8-character
-public id, 32-character secret (A–Za–z0–9, ≥160 bits via `RandomSource`). The row
-stores SHA-256 of the **full** plaintext. Issue via `TokenCodec` with injectable
-`EnvironmentResolver` and `RandomSource` (tests: `FixedEnvironment`,
-`FixedRandomSource`).
+public id, 32-character secret (A–Za–z0–9). **Version 2** (default) appends a
+6-character base62 CRC32 checksum (GitHub construction); version 1 stays
+accepted. The row stores SHA-256 of the **full** plaintext (including checksum)
+and records `token_version` / `hash_algorithm`.
+
+Scanner regex (product prefix `ppp`):
+
+```text
+\bppp_(?:live|test)_[A-Za-z0-9]{40}(?:[A-Za-z0-9]{6})?\b
+```
+
+See [docs/reference-schema.md](./docs/reference-schema.md) for the full column list.
+
+## Quotas (minute / day / month)
+
+`rate_limit_per_minute`, `rate_limit_per_day`, and `rate_limit_per_month` are
+enforced as **rolling windows** through Laravel's `RateLimiter` (decay 60 s /
+86_400 s / 2_592_000 s). They are not calendar day or calendar month buckets.
+Durable calendar quotas are LATER (standards review L4).
 
 ## Rotation (product persistence)
 
@@ -68,14 +84,16 @@ DB::transaction(function () use ($key, $codec, $clock) {
     $locked = ApiKey::query()->whereKey($key->id)->lockForUpdate()->firstOrFail();
     $rotation = $rotationService->rotate($locked, $codec, $clock, config('api-keys.rotation_grace_hours'));
 
-    // Write all four columns unconditionally (nulls when grace is 0;
-    // key_prefix changes when migrating a legacy ek_ row onto canonical —
-    // that cut-over is immediate: no grace across formats).
+    // Write every field unconditionally (nulls when grace is 0;
+    // previous_key_prefix is set when migrating a legacy prefix with grace).
     $locked->forceFill([
         'key_prefix' => $rotation->newKeyPrefix,
         'key_hash' => $rotation->newKeyHash,
         'previous_key_hash' => $rotation->previousKeyHash,
         'previous_key_valid_until' => $rotation->previousKeyValidUntil,
+        'previous_key_prefix' => $rotation->previousKeyPrefix,
+        'last_rotated_at' => $rotation->lastRotatedAt,
+        'token_version' => $rotation->tokenVersion,
     ])->save();
 
     return $rotation; // show newPlainText once

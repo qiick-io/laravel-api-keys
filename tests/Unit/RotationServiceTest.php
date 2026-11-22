@@ -214,7 +214,7 @@ it('migrates a legacy-shaped prefix to a fresh canonical token on rotate', funct
         ->and(str_starts_with($rotation->newPlainText, $rotation->newKeyPrefix))->toBeTrue();
 });
 
-it('rotates an Externa ek_ row end-to-end with no grace across formats', function (): void {
+it('F10: rotates an Externa ek_ row with previous_key_prefix grace across formats', function (): void {
     $matcher = RegexLegacyTokenMatcher::externaEkStyle(new DateTimeImmutable('2099-01-01T00:00:00+00:00'));
     $codec = rotationCodec([$matcher]);
     $now = new DateTimeImmutable('2026-01-15T12:00:00+00:00');
@@ -229,16 +229,16 @@ it('rotates an Externa ek_ row end-to-end with no grace across formats', functio
     expect($codec->isValidKeyPrefix('ek_ABCDEFGHI', $now))->toBeTrue()
         ->and($matcher->prefixOf('ek_ABCDEFGHI'))->toBe('ek_ABCDEFGHI');
 
-    // Even with graceHours > 0, legacy→canonical must not keep the old hash.
+    // F10 / Luca 2026-11-22: graceHours > 0 keeps the old hash and previous_key_prefix.
     $rotation = (new RotationService)->rotate($legacy, $codec, $clock, 24);
 
-    expect($rotation->previousKeyHash)->toBeNull()
-        ->and($rotation->previousKeyValidUntil)->toBeNull()
+    expect($rotation->previousKeyHash)->toBe($legacy->keyHash())
+        ->and($rotation->previousKeyPrefix)->toBe('ek_ABCDEFGHI')
+        ->and($rotation->previousKeyValidUntil)->not->toBeNull()
         ->and($codec->isCanonicalKeyPrefix($rotation->newKeyPrefix))->toBeTrue()
         ->and($codec->prefixOf($legacyPlain, $now))->toBe('ek_ABCDEFGHI')
-        // After product persists newKeyPrefix, legacy lookup by old prefix finds nothing
-        // on the row; the old plaintext is cut off immediately (no grace across formats).
-        ->and($rotation->newKeyPrefix)->not->toBe('ek_ABCDEFGHI');
+        ->and($rotation->newKeyPrefix)->not->toBe('ek_ABCDEFGHI')
+        ->and($rotation->lastRotatedAt->format(DateTimeInterface::ATOM))->toBe($now->format(DateTimeInterface::ATOM));
 });
 
 it('refuses to rotate a legacy prefix once the matcher cut-off has passed', function (): void {

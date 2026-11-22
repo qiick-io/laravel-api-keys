@@ -7,12 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Token version 2 (CRC32 checksum, GitHub construction) as the default issuance;
+  version 1 stays accepted. `token_version` / `hash_algorithm` on the record;
+  unknown values fail closed.
+- `previous_key_prefix` grace lookup (including legacy → canonical rotations).
+- Versioned `restrictions` JSON (`request` + `resources`),
+  `403 request_not_allowed`, and `KeyContextFactory`.
+- Day/month rate-limit columns; `KeyAuthorizer::rateLimit()` returns a list;
+  optional `X-RateLimit-Reset`.
+- OAuth grant marking (`credential_kind`) with authenticator and rotation refusal.
+- Revocation attribution, metadata/labels, `last_used_user_agent`, exposure fields.
+- `api-keys:notify-expiring` command, `expiry_notified_at`, recipient resolver seam,
+  `LifetimePolicy` / `CompromisedKeyRevoker` contracts.
+- Expanded testing fakes and red-first tests named after standards review items.
+- N2: legacy-format T−90 warning via `api-keys:notify-expiring`, `LegacyFormatWarningGate`, and `ApiKeyLegacyFormatWarningNotification`.
+
 ### Changed
 
 - `docs/reference-schema.md` is the full 1.0 reference products adopt: unique
   `key_prefix`, version/hash columns, restrictions JSON, quotas, revocation
   attribution, OAuth grant marking, usage and exposure fields, and the scanner
-  regex. Products still own migrations.
+  regex. Products still own migrations. (Landed in #15.)
+- `ApiKeyRecord` / `ApiKeyRepository` / `KeyAuthorizer` / `UsageSideEffect` contracts
+  for the 1.0 surface (`publicId()`, C1 ceiling takes the record, usage takes
+  user agent). `ApiKeyAuthenticated::$apiKeyId` is a UUID string.
 
 ## [0.1.0] - 2026-11-20
 

@@ -12,5 +12,6 @@ enum KeyRejectionCode: string
     case InvalidToken = 'invalid_token';
     case InsufficientScope = 'insufficient_scope';
     case IpNotAllowed = 'ip_not_allowed';
+    case RequestNotAllowed = 'request_not_allowed';
     case RateLimitExceeded = 'rate_limit_exceeded';
 }

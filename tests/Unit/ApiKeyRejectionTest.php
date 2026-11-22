@@ -62,8 +62,21 @@ it('renders ip_not_allowed without WWW-Authenticate (A10)', function (): void {
         ]);
 });
 
+it('renders request_not_allowed without WWW-Authenticate (Q3)', function (): void {
+    $rejection = ApiKeyRejection::requestNotAllowed();
+    $response = $rejection->render();
+
+    expect($rejection->getStatusCode())->toBe(403)
+        ->and($rejection->errorCode())->toBe('request_not_allowed')
+        ->and($response->headers->get('WWW-Authenticate'))->toBeNull()
+        ->and($response->getData(true))->toBe([
+            'message' => 'API key is not allowed for this request.',
+            'error' => 'request_not_allowed',
+        ]);
+});
+
 it('renders rateLimited as 429 with Retry-After and optional X-RateLimit headers', function (): void {
-    $rejection = ApiKeyRejection::rateLimited(42, 60, 0);
+    $rejection = ApiKeyRejection::rateLimited(42, 60, 0, 42);
     $response = $rejection->render();
 
     expect($rejection->getStatusCode())->toBe(429)
@@ -71,6 +84,7 @@ it('renders rateLimited as 429 with Retry-After and optional X-RateLimit headers
         ->and($response->headers->get('Retry-After'))->toBe('42')
         ->and($response->headers->get('X-RateLimit-Limit'))->toBe('60')
         ->and($response->headers->get('X-RateLimit-Remaining'))->toBe('0')
+        ->and($response->headers->get('X-RateLimit-Reset'))->toBe('42')
         ->and($response->getData(true))->toBe([
             'message' => 'Too many requests.',
             'error' => 'rate_limit_exceeded',

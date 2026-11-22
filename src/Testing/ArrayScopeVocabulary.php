@@ -9,10 +9,15 @@ use Qiick\ApiKeys\Contracts\ScopeVocabulary;
 /** @api In-memory vocabulary for tests and examples. */
 final class ArrayScopeVocabulary implements ScopeVocabulary
 {
+    use EnsuresTestingEnvironmentTrait;
+
     /**
      * @param  list<string>  $scopes
      */
-    public function __construct(private array $scopes) {}
+    public function __construct(private array $scopes)
+    {
+        self::ensureTestingEnvironment();
+    }
 
     public function all(): array
     {

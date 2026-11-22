@@ -17,22 +17,24 @@ final readonly class GeneratedToken implements \JsonSerializable
         #[\SensitiveParameter] public string $plainText,
         public string $keyPrefix,
         #[\SensitiveParameter] public string $keyHash,
+        public int $tokenVersion = 2,
     ) {}
 
     /**
-     * @return array{keyPrefix: string, keyHash: string, plainText: string}
+     * @return array{keyPrefix: string, keyHash: string, tokenVersion: int, plainText: string}
      */
     public function __debugInfo(): array
     {
         return [
             'keyPrefix' => $this->keyPrefix,
             'keyHash' => '[REDACTED]',
+            'tokenVersion' => $this->tokenVersion,
             'plainText' => '[REDACTED]',
         ];
     }
 
     /**
-     * @return array{keyPrefix: string, keyHash: string, plainText: string}
+     * @return array{keyPrefix: string, keyHash: string, tokenVersion: int, plainText: string}
      */
     public function jsonSerialize(): array
     {
@@ -40,7 +42,7 @@ final readonly class GeneratedToken implements \JsonSerializable
     }
 
     /**
-     * @return array{keyPrefix: string, keyHash: string, plainText: string}
+     * @return array{keyPrefix: string, keyHash: string, tokenVersion: int, plainText: string}
      */
     public function __serialize(): array
     {
@@ -48,7 +50,7 @@ final readonly class GeneratedToken implements \JsonSerializable
     }
 
     /**
-     * @param  array{keyPrefix?: string, keyHash?: string, plainText?: string}  $data
+     * @param  array{keyPrefix?: string, keyHash?: string, tokenVersion?: int, plainText?: string}  $data
      */
     public function __unserialize(array $data): void
     {

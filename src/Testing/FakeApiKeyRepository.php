@@ -136,6 +136,29 @@ final class FakeApiKeyRepository implements ApiKeyRepository
         }
     }
 
+    public function findActiveLegacy(): iterable
+    {
+        $matches = [];
+
+        foreach ($this->records as $record) {
+            if ($record->credentialKind() !== CredentialKind::ApiKey) {
+                continue;
+            }
+
+            if ($record->revokedAt() !== null) {
+                continue;
+            }
+
+            if ($record->tokenVersion() !== 0) {
+                continue;
+            }
+
+            $matches[] = $record;
+        }
+
+        return $matches;
+    }
+
     /**
      * @param  list<ApiKeyRecord>  $records
      */

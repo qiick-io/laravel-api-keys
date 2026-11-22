@@ -30,6 +30,7 @@ return [
             'Qiick\ApiKeys\Contracts\ExpiryRecipientResolver',
             'Qiick\ApiKeys\Contracts\LifetimePolicy',
             'Qiick\ApiKeys\Contracts\CompromisedKeyRevoker',
+            'Qiick\ApiKeys\Contracts\LegacyFormatWarningGate',
         ],
         'Exceptions' => [
             // Design §3.3: ApiKeyRejection (not *Exception).
@@ -41,10 +42,12 @@ return [
             'Qiick\ApiKeys\Events\ApiKeyAuthenticated',
             'Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSent',
             'Qiick\ApiKeys\Events\ApiKeyExposed',
+            'Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSent',
         ],
         'Notifications' => [
-            // Fleet notification name matches config key / externa command.
+            // Fleet notification names match config keys / externa command.
             'Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification',
+            'Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification',
         ],
     ],
 

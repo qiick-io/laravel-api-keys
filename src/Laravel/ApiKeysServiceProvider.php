@@ -8,10 +8,12 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use Qiick\ApiKeys\AppEnvironmentResolver;
+use Qiick\ApiKeys\CacheLegacyFormatWarningGate;
 use Qiick\ApiKeys\Console\Commands\NotifyExpiringApiKeysCommand;
 use Qiick\ApiKeys\Contracts;
 use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\EnvironmentResolver;
+use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Contracts\RandomSource;
 use Qiick\ApiKeys\LegacyTokenMatcher;
 use Qiick\ApiKeys\RandomBytesSource;
@@ -36,6 +38,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
 
         $this->app->singleton(Clock::class, SystemClock::class);
         $this->app->singleton(RandomSource::class, RandomBytesSource::class);
+        $this->app->singleton(LegacyFormatWarningGate::class, CacheLegacyFormatWarningGate::class);
 
         $this->app->singleton(EnvironmentResolver::class, function (Application $app): EnvironmentResolver {
             $configured = $this->config($app)->get('api-keys.environment');

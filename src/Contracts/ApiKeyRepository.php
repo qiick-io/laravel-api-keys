@@ -39,4 +39,11 @@ interface ApiKeyRepository
     public function expiringUnnotified(\DateTimeImmutable $until): iterable;
 
     public function markExpiryNotified(ApiKeyRecord $record, \DateTimeImmutable $notifiedAt): void;
+
+    /**
+     * Non-revoked `api_key` rows still on token_version 0 (product legacy format).
+     *
+     * @return iterable<ApiKeyRecord>
+     */
+    public function findActiveLegacy(): iterable;
 }

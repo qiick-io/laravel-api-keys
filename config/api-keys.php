@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 use Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification;
+use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
 
 /*
  * qiick/laravel-api-keys configuration.
@@ -103,6 +104,13 @@ return [
          * Warn this many days before accept_until (legacy format EOL). 0 disables.
          */
         'warn_days_before' => (int) env('API_KEYS_LEGACY_WARN_DAYS_BEFORE', 90),
+
+        /*
+         * Notification class for the T−90 legacy-format warning (N2).
+         *
+         * @var class-string
+         */
+        'warning_notification' => ApiKeyLegacyFormatWarningNotification::class,
     ],
 
 ];

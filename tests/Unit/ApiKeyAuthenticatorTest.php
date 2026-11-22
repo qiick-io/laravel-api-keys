@@ -843,6 +843,11 @@ it('keeps authentication when recordUsage throws (audit stamp must not 500)', fu
 
             public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
 
+            public function findActiveLegacy(): iterable
+            {
+                return [];
+            }
+
             public function recordUsage(ApiKeyRecord $record, ?string $ip, ?string $userAgent, DateTimeImmutable $usedAt): void
             {
                 throw new RuntimeException('usage write failed');
@@ -916,6 +921,11 @@ it('never leaks the presented token via SensitiveParameter in traces (A14)', fun
             }
 
             public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+
+            public function findActiveLegacy(): iterable
+            {
+                return [];
+            }
 
             public function recordUsage(ApiKeyRecord $record, ?string $ip, ?string $userAgent, DateTimeImmutable $usedAt): void {}
         },
@@ -1263,6 +1273,11 @@ it('reports usage failures via the Laravel report() helper when no reporter is w
 
             public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
 
+            public function findActiveLegacy(): iterable
+            {
+                return [];
+            }
+
             public function recordUsage(ApiKeyRecord $record, ?string $ip, ?string $userAgent, DateTimeImmutable $usedAt): void
             {
                 throw new RuntimeException('usage write failed');
@@ -1319,6 +1334,11 @@ it('does not count repository exceptions as failed attempts', function (): void 
             }
 
             public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+
+            public function findActiveLegacy(): iterable
+            {
+                return [];
+            }
 
             public function recordUsage(ApiKeyRecord $record, ?string $ip, ?string $userAgent, DateTimeImmutable $usedAt): void {}
         },

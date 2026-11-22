@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `api-keys:notify-expiring` command, `expiry_notified_at`, recipient resolver seam,
   `LifetimePolicy` / `CompromisedKeyRevoker` contracts.
 - Expanded testing fakes and red-first tests named after standards review items.
+- N2: legacy-format T−90 warning via `api-keys:notify-expiring`, `LegacyFormatWarningGate`, and `ApiKeyLegacyFormatWarningNotification`.
 
 ### Changed
 

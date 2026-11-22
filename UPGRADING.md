@@ -16,8 +16,8 @@ pre-1.0 additions versus the 0.1.0 sketch:
   `credential_kind`, `oauth_client_id`, `description`, `metadata`,
   `restrictions`, `rate_limit_per_day` / `rate_limit_per_month`,
   `last_used_user_agent`, `last_rotated_at`, `expiry_notified_at`,
-  `exposed_at` / `exposure_source`, `revoked_by` / `revoked_reason` /
-  `revocation_note`.
+  `expiry_notice_claimed_at`, `exposed_at` / `exposure_source`,
+  `revoked_by` / `revoked_reason` / `revocation_note`.
 - No `owner_kind` or `oauth_grant_uuid` column (principal kind; grant id is
   `uuid`).
 
@@ -27,10 +27,13 @@ pre-1.0 additions versus the 0.1.0 sketch:
   and attribution methods (see interface).
 - `ApiKeyRepository::recordUsage(..., ?string $userAgent, ...)`; add
   `findByPublicId`, `expiringUnnotified`, `markExpiryNotified`,
-  `claimExpiryNotice` / `releaseExpiryNotice` (CAS stamp before send);
-  `findCandidatesByPrefix` also matches `previous_key_prefix` in grace.
-  Products implement claim as
-  `UPDATE … SET expiry_notified_at = ? WHERE … AND expiry_notified_at IS NULL`.
+  `claimExpiryNotice($record, $now, $leaseSeconds)` /
+  `releaseExpiryNotice` (lease CAS before send; mark after success);
+  `ApiKeyRecord::expiryNoticeClaimedAt()`; `findCandidatesByPrefix` also
+  matches `previous_key_prefix` in grace. Products implement claim via
+  {@see \Qiick\ApiKeys\ExpiryNoticeClaimSql} (set
+  `expiry_notice_claimed_at` when unsent and unclaimed or lease-expired;
+  stamp `expiry_notified_at` only after a successful send).
 - `KeyAuthorizer::scopesCreatorMayGrant(ApiKeyRecord, ...)` (was creator id);
   `rateLimit()` returns `list<RateLimitDecision>`; add `authorizeResources`.
 - `UsageSideEffect::afterRecorded` gains `$userAgent`.

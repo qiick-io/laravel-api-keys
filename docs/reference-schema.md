@@ -36,7 +36,8 @@ divergence: there `id` is the public id.
 | `rate_limit_per_month` | unsignedInteger | yes | null | — | Null → no month bucket (rolling 2_592_000 s, not calendar) |
 | `metadata` | json | yes | null | — | Labels under `metadata.labels`; never secrets |
 | `expires_at` | **dateTime** | yes | null | index | Future-dated; index serves the expiry command |
-| `expiry_notified_at` | timestamp | yes | null | — | Idempotency stamp for expiry notices |
+| `expiry_notified_at` | timestamp | yes | null | — | Final success stamp for expiry notices |
+| `expiry_notice_claimed_at` | timestamp | yes | null | — | In-flight claim lease; reclaimable after `api-keys.expiry.claim_lease_seconds` |
 | `last_used_at` | timestamp | yes | null | — | Written via `saveQuietly` |
 | `last_used_ip` | string(45) | yes | null | — | |
 | `last_used_user_agent` | string(512) | yes | null | — | Package truncates to 512 |

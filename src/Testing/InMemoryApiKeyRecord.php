@@ -43,6 +43,7 @@ final class InMemoryApiKeyRecord implements ApiKeyRecord
         private ?int $rateLimitPerMonth = null,
         private ?\DateTimeImmutable $expiresAt = null,
         private ?\DateTimeImmutable $expiryNotifiedAt = null,
+        private ?\DateTimeImmutable $expiryNoticeClaimedAt = null,
         private ?\DateTimeImmutable $revokedAt = null,
         private string|int|null $revokedByIdentifier = null,
         private ?RevocationReason $revokedReason = null,
@@ -165,6 +166,11 @@ final class InMemoryApiKeyRecord implements ApiKeyRecord
     public function expiryNotifiedAt(): ?\DateTimeImmutable
     {
         return $this->expiryNotifiedAt;
+    }
+
+    public function expiryNoticeClaimedAt(): ?\DateTimeImmutable
+    {
+        return $this->expiryNoticeClaimedAt;
     }
 
     public function revokedAt(): ?\DateTimeImmutable
@@ -357,6 +363,14 @@ final class InMemoryApiKeyRecord implements ApiKeyRecord
     {
         $clone = clone $this;
         $clone->expiryNotifiedAt = $expiryNotifiedAt;
+
+        return $clone;
+    }
+
+    public function withExpiryNoticeClaimedAt(?\DateTimeImmutable $expiryNoticeClaimedAt): self
+    {
+        $clone = clone $this;
+        $clone->expiryNoticeClaimedAt = $expiryNoticeClaimedAt;
 
         return $clone;
     }

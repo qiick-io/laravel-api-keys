@@ -73,6 +73,11 @@ interface ApiKeyRecord
 
     public function expiryNotifiedAt(): ?\DateTimeImmutable;
 
+    /**
+     * Lease timestamp for an in-flight expiry notice claim; null when idle.
+     */
+    public function expiryNoticeClaimedAt(): ?\DateTimeImmutable;
+
     public function revokedAt(): ?\DateTimeImmutable;
 
     public function revokedByIdentifier(): string|int|null;

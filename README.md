@@ -24,9 +24,9 @@ Part of the qiick fleet. Binding design:
 
 ## Status
 
-Pre-`0.1.0`. Public APIs may change in any 0.x release; see [UPGRADING.md](./UPGRADING.md).
-Do not require this package from production apps until a tagged release lands on Packagist
-(Packagist publish only after Luca’s go).
+Pre-release `0.2.0`. Public APIs may change in any 0.x release; see
+[UPGRADING.md](./UPGRADING.md). Pin an exact version. Packagist publish only
+after Luca’s go.
 
 ## Requirements
 

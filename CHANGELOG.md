@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
+Pre-1.0 completeness for the standards review (Luca §7): contracts, schema,
+token v2, restrictions, quotas, expiry notices, and claim lease. **0.x may
+still break;** read UPGRADING.md before adopting.
+
+### Upgrade notes
+
+- Publish config and adopt `docs/reference-schema.md` into product `create_api_keys`
+  migrations (pre-1.0 products): new columns include `token_version`,
+  `hash_algorithm`, `previous_key_prefix`, `credential_kind`, `oauth_client_id`,
+  `restrictions`, `rate_limit_per_day` / `rate_limit_per_month`,
+  `last_used_user_agent`, `last_rotated_at`, `expiry_notified_at`,
+  `expiry_notice_claimed_at`, exposure and revocation attribution fields.
+- Implement updated contracts: `ApiKeyRecord::publicId()`,
+  `ApiKeyRepository::claimExpiryNotice($record, $now, $leaseSeconds)` /
+  `releaseExpiryNotice` / `markExpiryNotified`, `KeyAuthorizer::rateLimit()` →
+  `list<RateLimitDecision>`, `scopesCreatorMayGrant(ApiKeyRecord, …)`,
+  `authorizeResources`, `recordUsage(…, ?string $userAgent, …)`.
+- Bind `ExpiryRecipientResolver` for `api-keys:notify-expiring`. Optional:
+  `LifetimePolicy`, `CompromisedKeyRevoker`, `LegacyFormatWarningGate`.
+- Env / config: `API_KEYS_EXPIRY_NOTICE_DAYS`, `API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS`
+  (default 900), `api-keys.token_version` (default 2), `api-keys.max_lifetime_days`.
+- New denial: `403 request_not_allowed` (no `WWW-Authenticate`).
+- Runtime deps now include `illuminate/console` and `illuminate/notifications`.
+
 ### Added
 
 - Token version 2 (CRC32 checksum, GitHub construction) as the default issuance;
@@ -22,31 +48,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `api-keys:notify-expiring` command, `expiry_notified_at`, recipient resolver seam,
   `LifetimePolicy` / `CompromisedKeyRevoker` contracts.
 - Expanded testing fakes and red-first tests named after standards review items.
-- N2: legacy-format T−90 warning via `api-keys:notify-expiring`, `LegacyFormatWarningGate`, and `ApiKeyLegacyFormatWarningNotification`.
+- N2: legacy-format T−90 warning via `api-keys:notify-expiring`,
+  `LegacyFormatWarningGate`, and `ApiKeyLegacyFormatWarningNotification`.
+- `ExpiryNoticeClaimSql` and four-engine CI CAS smoke for the claim lease.
 
 ### Changed
 
-- Document expiry-notice claim lease risks: app-clock skew can reclaim early;
-  a send longer than `claim_lease_seconds` (default 900) can double-notify.
 - `docs/reference-schema.md` is the full 1.0 reference products adopt: unique
   `key_prefix`, version/hash columns, restrictions JSON, quotas, revocation
   attribution, OAuth grant marking, usage and exposure fields, and the scanner
-  regex. Products still own migrations. (Landed in #15.)
+  regex. Products still own migrations. (#15)
 - `ApiKeyRecord` / `ApiKeyRepository` / `KeyAuthorizer` / `UsageSideEffect` contracts
   for the 1.0 surface (`publicId()`, C1 ceiling takes the record, usage takes
-  user agent). `ApiKeyAuthenticated::$apiKeyId` is a UUID string.
+  user agent). `ApiKeyAuthenticated::$apiKeyId` is a UUID string. (#16)
 - `ApiKeyRepository::claimExpiryNotice` / `releaseExpiryNotice` plus
   `expiry_notice_claimed_at` lease (reclaim after
   `api-keys.expiry.claim_lease_seconds`); `markExpiryNotified` after send.
-  Portable SQL in `ExpiryNoticeClaimSql`; Fake uses versioned CAS.
-- Origin/referrer evaluation lowercases scheme and host before compare.
+  Fake uses versioned CAS. (#18)
+- Origin/referrer evaluation lowercases scheme and host before compare. (#18)
+- Document expiry-notice claim lease risks: app-clock skew can reclaim early;
+  a send longer than `claim_lease_seconds` (default 900) can double-notify. (#20)
+- README evaluation order matches the post-1.0-completeness authenticator. (#22)
 
 ### Fixed
 
 - Concurrent `api-keys:notify-expiring` runs can no longer double-send after a
   lost race on the claim lease; a worker that dies after claim no longer
-  suppresses the notice forever.
-- Mixed-case Origin / Referer hosts no longer false-deny against lowercase patterns.
+  suppresses the notice forever. (#18)
+- Mixed-case Origin / Referer hosts no longer false-deny against lowercase patterns. (#18)
 
 ## [0.1.0] - 2026-11-20
 
@@ -87,5 +116,6 @@ First pre-release. The API may still change before 1.0.0; see UPGRADING.md.
   (PHP 8.3/8.4/8.5 × Laravel 12/13 × lowest/stable) with `composer validate
   --strict`, `composer audit`, and SHA-pinned Actions.
 
-[Unreleased]: https://github.com/qiick-io/laravel-api-keys/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/qiick-io/laravel-api-keys/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/qiick-io/laravel-api-keys/releases/tag/v0.2.0
 [0.1.0]: https://github.com/qiick-io/laravel-api-keys/releases/tag/v0.1.0

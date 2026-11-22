@@ -24,9 +24,9 @@ Part of the qiick fleet. Binding design:
 
 ## Status
 
-Pre-`0.1.0`. Public APIs may change in any 0.x release; see [UPGRADING.md](./UPGRADING.md).
-Do not require this package from production apps until a tagged release lands on Packagist
-(Packagist publish only after Luca’s go).
+Pre-release `0.2.0`. Public APIs may change in any 0.x release; see
+[UPGRADING.md](./UPGRADING.md). Pin an exact version. Packagist publish only
+after Luca’s go.
 
 ## Requirements
 
@@ -135,15 +135,30 @@ highest-per-resource drops a sibling `read` when `write` is present.
 
 ## Evaluation order
 
+Extract the bearer first (`BearerTokenExtractor`: no trim; case-insensitive
+`Bearer`), then call
 `ApiKeyAuthenticator::authenticate($presentedToken, $context, $requiredScope)`:
 
 1. Pre-auth `FailedAttemptLimiter` (IPv4 `/32`, IPv6 `/64`; default 20/min in recipes) →
-2. Parse bearer (no trim; case-insensitive `Bearer`; `BearerTokenExtractor`) →
-3. Token format → 4. Lookup + `hash_equals` (dummy on miss) → 5. Revoked/expired →
-6. Actor (`KeyAuthorizer`) → 7. IP allowlist → 8. Scopes: expand → owner ceiling
-   (fail-closed if no owner/creator; write may demote to read) → collapse highest-per-resource →
-9. Per-key rate limit (`AttemptLimiter`, default bucket `api-key:{id}`) →
-10. Usage record (`UsageRecorder` throttle; write failures are reported, not thrown).
+2. Token format (`TokenCodec::prefixOf`, including legacy matchers when configured) →
+3. Lookup by `key_prefix` / in-grace `previous_key_prefix` + `hash_equals`
+   (dummy compare on miss; row `hash_algorithm`) →
+4. Refuse `credential_kind = oauth_grant` as `401 invalid_token` →
+5. Revoked / expired / unknown `token_version` →
+6. Actor (`KeyAuthorizer::authorizeActor`) →
+7. IP allowlist →
+8. Request restrictions (`KeyRestrictions` / `RequestRestrictionsEvaluator`;
+   malformed or denied → `403 request_not_allowed`; scheme/host compared
+   case-insensitively) →
+9. Scopes: expand → owner ceiling via `scopesCreatorMayGrant` on the **record**
+   (C1: the product decides ownerless/creator-less keys; write may demote to
+   read) → collapse highest-per-resource → required scope / `authorizeScopes` →
+10. Resource restrictions (`authorizeResources` when `restrictions.resources`
+    is non-empty; denial → `403 request_not_allowed`) →
+11. Per-key rate limits (`KeyAuthorizer::rateLimit()` list, else minute/day/month
+    defaults from the row; `AttemptLimiter` buckets) →
+12. Usage record (`UsageRecorder` throttle; `last_used_user_agent`; write
+    failures are reported, not thrown).
 
 ### Wiring the failed-attempt brake (recipe default ON)
 
@@ -164,9 +179,10 @@ Clients behind CGNAT / shared office egress share one IPv4 bucket — tune `maxP
 up only if false lockouts outweigh credential-stuffing risk.
 
 Refusals are `ApiKeyRejection`: `401 invalid_token` and `403 insufficient_scope`
-carry RFC 6750 `WWW-Authenticate`; `403 ip_not_allowed` does not. Format-miss and
-hash-miss share the same body/headers. Presented tokens are `#[SensitiveParameter]`
-and never appear in messages, `render()`, `__debugInfo`, JSON, or serialize output.
+carry RFC 6750 `WWW-Authenticate`; `403 ip_not_allowed`, `403 request_not_allowed`,
+and rate-limit responses do not. Format-miss and hash-miss share the same
+body/headers. Presented tokens are `#[SensitiveParameter]` and never appear in
+messages, `render()`, `__debugInfo`, JSON, or serialize output.
 
 ## Legacy matchers (product-owned)
 

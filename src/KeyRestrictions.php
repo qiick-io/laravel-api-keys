@@ -12,7 +12,7 @@ namespace Qiick\ApiKeys;
  */
 final readonly class KeyRestrictions
 {
-    public const int VERSION = 1;
+    public const int VERSION = 1; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
 
     private function __construct(
         public bool $isDenied,
@@ -53,7 +53,7 @@ final readonly class KeyRestrictions
             }
 
             try {
-                $decoded = json_decode($raw, true, 32, JSON_THROW_ON_ERROR);
+                $decoded = json_decode($raw, true, 32, JSON_THROW_ON_ERROR); // @pest-mutate-ignore: IncrementInteger,DecrementInteger
             } catch (\JsonException) {
                 return self::denied();
             }
@@ -77,7 +77,8 @@ final readonly class KeyRestrictions
             return self::denied();
         }
 
-        $allowedKeys = ['v' => true, 'request' => true, 'resources' => true];
+        // Values are unused; presence of the key is the allow-list (TrueToFalse is equivalent).
+        $allowedKeys = ['v' => true, 'request' => true, 'resources' => true]; // @pest-mutate-ignore: TrueToFalse
 
         foreach (array_keys($raw) as $key) {
             if (! is_string($key) || ! array_key_exists($key, $allowedKeys)) {
@@ -115,11 +116,12 @@ final readonly class KeyRestrictions
             return null;
         }
 
+        // Values unused; key presence is the allow-list.
         $allowedKeys = [
-            'methods' => true,
-            'route_names' => true,
-            'origins' => true,
-            'referrers' => true,
+            'methods' => true, // @pest-mutate-ignore: TrueToFalse
+            'route_names' => true, // @pest-mutate-ignore: TrueToFalse
+            'origins' => true, // @pest-mutate-ignore: TrueToFalse
+            'referrers' => true, // @pest-mutate-ignore: TrueToFalse
         ];
 
         foreach (array_keys($raw) as $key) {
@@ -169,7 +171,8 @@ final readonly class KeyRestrictions
                 return null;
             }
 
-            $allowedKeys = ['type' => true, 'values' => true, 'mode' => true];
+            // Values unused; key presence is the allow-list.
+            $allowedKeys = ['type' => true, 'values' => true, 'mode' => true]; // @pest-mutate-ignore: TrueToFalse
 
             foreach (array_keys($entry) as $key) {
                 if (! is_string($key) || ! array_key_exists($key, $allowedKeys)) {

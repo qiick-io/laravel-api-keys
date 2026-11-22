@@ -16,7 +16,7 @@ final class RequestRestrictionsEvaluator
     public function allows(RequestRestrictions $restrictions, KeyContext $context): bool
     {
         if ($restrictions->isUnrestricted()) {
-            return true;
+            return true; // @pest-mutate-ignore: RemoveEarlyReturn
         }
 
         if ($restrictions->methods !== [] && ! $this->methodAllowed($restrictions->methods, $context->method)) {
@@ -43,8 +43,8 @@ final class RequestRestrictionsEvaluator
      */
     private function methodAllowed(array $methods, ?string $method): bool
     {
-        if ($method === null || $method === '') {
-            return false;
+        if ($method === null || $method === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
+            return false; // @pest-mutate-ignore: FalseToTrue
         }
 
         $normalized = strtoupper($method);

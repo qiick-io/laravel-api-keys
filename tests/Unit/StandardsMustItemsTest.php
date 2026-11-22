@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Qiick\ApiKeys\ApiKeyAuthenticator;
 use Qiick\ApiKeys\CredentialKind;
 use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
+use Qiick\ApiKeys\FailedAttemptLimiter;
 use Qiick\ApiKeys\Http\KeyContextFactory;
 use Qiick\ApiKeys\IpAllowlist;
 use Qiick\ApiKeys\KeyContext;
@@ -324,7 +325,7 @@ it('O2/T1/T2: oauth, unknown version and unknown algorithm each hit the failed-a
     $codec = mustCodec();
     $issued = $codec->issue();
     $limiter = new FakeAttemptLimiter;
-    $failed = new Qiick\ApiKeys\FailedAttemptLimiter($limiter, maxPerMinute: 20);
+    $failed = new FailedAttemptLimiter($limiter, maxPerMinute: 20);
 
     $cases = [
         (new InMemoryApiKeyRecord(keyPrefix: $issued->keyPrefix, keyHash: $issued->keyHash, scopes: ['items:read']))

@@ -10,6 +10,9 @@ namespace Qiick\ApiKeys;
  * `ip` MUST be {@see Http\ClientIp::from} / `Request::ip()` after TrustProxies
  * is configured correctly. Never pass raw X-Forwarded-For / X-Real-IP from
  * untrusted clients.
+ *
+ * `method`, `routeName`, `origin` and `referer` feed request restrictions.
+ * Origin and Referer are client-supplied (defence in depth only).
  */
 final readonly class KeyContext
 {
@@ -19,6 +22,10 @@ final readonly class KeyContext
     public function __construct(
         public ?string $ip,
         public ?string $userAgent = null,
+        public ?string $method = null,
+        public ?string $routeName = null,
+        public ?string $origin = null,
+        public ?string $referer = null,
         public array $attributes = [],
     ) {}
 }

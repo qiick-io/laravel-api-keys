@@ -9,12 +9,12 @@ use Qiick\ApiKeys\ApiKeyAuthenticator;
 /**
  * @api Fired by products after a successful {@see ApiKeyAuthenticator} call.
  *
- * Payload never includes the plaintext token.
+ * Payload never includes the plaintext token. `$apiKeyId` is the public UUID.
  */
 final class ApiKeyAuthenticated
 {
     public function __construct(
-        public string|int $apiKeyId,
+        public string $apiKeyId,
         public string $keyPrefix,
         public bool $usedPreviousSecret,
         public ?string $clientIp,

@@ -19,12 +19,18 @@ use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
  * No HTTP middleware ships with this package — products call this from their own.
  *
  * Order: failed-attempt guard → format → lookup + hash_equals (dummy on miss) →
- * revoked/expired → actor → IP → scopes + authorizer ceiling → rate limit → usage.
+ * refuse oauth_grant → revoked/expired → unknown version/algorithm → actor → IP →
+ * request restrictions → scopes + authorizer ceiling → resource restrictions →
+ * rate limits (minute/day/month) → usage.
  *
  * Never puts `$presentedToken` in exception messages.
  */
 final class ApiKeyAuthenticator
 {
+    private const array KNOWN_TOKEN_VERSIONS = [0, 1, 2]; // @pest-mutate-ignore: IncrementInteger,DecrementInteger,RemoveArrayItem
+
+    private RequestRestrictionsEvaluator $requestRestrictionsEvaluator;
+
     /**
      * @param  (callable(\Throwable): void)|null  $exceptionReporter
      */
@@ -43,7 +49,10 @@ final class ApiKeyAuthenticator
         private bool $bypassThrottleOnIpChange = true,
         private int $defaultRateLimitPerMinute = 60,
         private mixed $exceptionReporter = null,
-    ) {}
+        ?RequestRestrictionsEvaluator $requestRestrictionsEvaluator = null,
+    ) {
+        $this->requestRestrictionsEvaluator = $requestRestrictionsEvaluator ?? new RequestRestrictionsEvaluator; // @pest-mutate-ignore: CoalesceRemoveLeft
+    }
 
     /**
      * @throws ApiKeyRejection
@@ -98,6 +107,7 @@ final class ApiKeyAuthenticator
                 $candidate->previousKeyHash(),
                 $candidate->previousKeyValidUntil(),
                 $now,
+                $candidate->hashAlgorithm(),
             );
 
             if ($kind !== TokenMatch::None) {
@@ -108,6 +118,13 @@ final class ApiKeyAuthenticator
         }
 
         if ($matched === null) {
+            $this->hitFailedAttempt($clientIp);
+
+            throw ApiKeyRejection::invalidToken();
+        }
+
+        // O2: oauth_grant rows have no usable bearer secret.
+        if ($matched->credentialKind() === CredentialKind::OauthGrant) {
             $this->hitFailedAttempt($clientIp);
 
             throw ApiKeyRejection::invalidToken();
@@ -125,6 +142,14 @@ final class ApiKeyAuthenticator
             throw ApiKeyRejection::invalidToken('The API key has expired.');
         }
 
+        if (! in_array($matched->tokenVersion(), self::KNOWN_TOKEN_VERSIONS, true)) {
+            $this->hitFailedAttempt($clientIp);
+
+            throw ApiKeyRejection::invalidToken();
+        }
+
+        // Unknown hash_algorithm is refused inside TokenCodec::match (single place).
+
         $actor = $this->authorizer->authorizeActor($matched, $context);
         if (! $actor->allowed) {
             $this->hitFailedAttempt($clientIp);
@@ -137,6 +162,15 @@ final class ApiKeyAuthenticator
         // Cast keeps a strict string for IpAllowlist; empty fallback is for null IP only.
         if (! $this->ipAllowlist->allows((string) ($clientIp ?? ''), $matched->rawIpAllowlist())) { // @pest-mutate-ignore: RemoveStringCast,EmptyStringToNotEmpty
             throw ApiKeyRejection::ipNotAllowed();
+        }
+
+        $restrictions = KeyRestrictions::parse($matched->rawRestrictions());
+        if ($restrictions->isDenied) {
+            throw ApiKeyRejection::requestNotAllowed();
+        }
+
+        if (! $this->requestRestrictionsEvaluator->allows($restrictions->request, $context)) {
+            throw ApiKeyRejection::requestNotAllowed();
         }
 
         $expanded = ScopeSet::parseStoredExpanded($matched->rawScopes(), $this->vocabulary);
@@ -167,7 +201,18 @@ final class ApiKeyAuthenticator
             throw ApiKeyRejection::noUsableScopes();
         }
 
-        $this->enforceRateLimit($matched, $context);
+        if (! $restrictions->resources->isEmpty()) {
+            $resourceDecision = $this->authorizer->authorizeResources(
+                $matched,
+                $restrictions->resources,
+                $context,
+            );
+            if (! $resourceDecision->allowed) {
+                throw ApiKeyRejection::requestNotAllowed();
+            }
+        }
+
+        $this->enforceRateLimits($matched, $context);
 
         $wasFirstUse = $matched->lastUsedAt() === null;
         if ($this->usageRecorder->shouldRecord(
@@ -178,7 +223,7 @@ final class ApiKeyAuthenticator
             $this->usageThrottleSeconds,
             $this->bypassThrottleOnIpChange,
         )) {
-            $this->recordUsageQuietly($matched, $context->ip, $now, $wasFirstUse);
+            $this->recordUsageQuietly($matched, $context->ip, $context->userAgent, $now, $wasFirstUse);
         }
 
         $legacyMatcher = $this->codec->legacyMatcherFor($presentedToken, $now);
@@ -197,21 +242,16 @@ final class ApiKeyAuthenticator
     }
 
     /**
-     * Fail closed with no owner/creator. Narrow against the expanded offer
-     * (writes imply reads) before collapsing highest-per-resource.
+     * C1: the product decides the ceiling for ownerless / creator-less keys.
+     * Narrow against the expanded offer (writes imply reads) before collapsing.
      */
     private function narrowToOwnerCeiling(
         ApiKeyRecord $record,
         ScopeSet $expanded,
         KeyContext $context,
     ): ScopeSet {
-        $ceilingId = $record->ownerIdentifier() ?? $record->createdByIdentifier();
-        if ($ceilingId === null) {
-            return new ScopeSet([]);
-        }
-
         $allowedValues = $this->authorizer->scopesCreatorMayGrant(
-            $ceilingId,
+            $record,
             $expanded->valuesOfferedToAuthorizer(),
             $context,
         );
@@ -222,12 +262,13 @@ final class ApiKeyAuthenticator
     private function recordUsageQuietly(
         ApiKeyRecord $record,
         ?string $ip,
+        ?string $userAgent,
         \DateTimeImmutable $usedAt,
         bool $wasFirstUse,
     ): void {
         try {
-            $this->repository->recordUsage($record, $ip, $usedAt);
-            $this->usageSideEffect?->afterRecorded($record, $ip, $wasFirstUse);
+            $this->repository->recordUsage($record, $ip, $userAgent, $usedAt);
+            $this->usageSideEffect?->afterRecorded($record, $ip, $userAgent, $wasFirstUse);
         } catch (\Throwable $exception) {
             $this->reportException($exception);
         }
@@ -250,32 +291,69 @@ final class ApiKeyAuthenticator
     /**
      * @throws ApiKeyRejection
      */
-    private function enforceRateLimit(ApiKeyRecord $record, KeyContext $context): void
+    private function enforceRateLimits(ApiKeyRecord $record, KeyContext $context): void
     {
-        $decision = $this->authorizer->rateLimit($record, $context);
+        $decisions = $this->authorizer->rateLimit($record, $context);
 
-        if ($decision === null) {
-            $limit = $record->rateLimitPerMinute() ?? $this->defaultRateLimitPerMinute;
-            // Design: 0 disables the per-key brake (config default_rate_limit_per_minute).
-            if ($limit <= 0) {
-                return;
+        if ($decisions === []) {
+            $decisions = $this->defaultRateLimits($record);
+        }
+
+        foreach ($decisions as $decision) {
+            if ($decision->maxAttempts <= 0) { // @pest-mutate-ignore: SmallerOrEqualToSmaller,DecrementInteger
+                continue;
             }
 
-            $decision = new RateLimitDecision(
+            if ($this->attemptLimiter->tooManyAttempts($decision->bucketKey, $decision->maxAttempts)) {
+                $retryAfter = $this->attemptLimiter->availableIn($decision->bucketKey);
+
+                throw ApiKeyRejection::rateLimited(
+                    $retryAfter,
+                    $decision->maxAttempts,
+                    remaining: 0,
+                    resetAfterSeconds: $retryAfter,
+                );
+            }
+
+            $this->attemptLimiter->hit($decision->bucketKey, $decision->decaySeconds);
+        }
+    }
+
+    /**
+     * @return list<RateLimitDecision>
+     */
+    private function defaultRateLimits(ApiKeyRecord $record): array
+    {
+        $decisions = [];
+        $minute = $record->rateLimitPerMinute() ?? $this->defaultRateLimitPerMinute;
+
+        // Decrement of the 0 literal is equivalent: maxAttempts<=0 still skips the bucket.
+        if ($minute > 0) { // @pest-mutate-ignore: GreaterToGreaterOrEqual,DecrementInteger
+            $decisions[] = new RateLimitDecision(
                 bucketKey: 'api-key:'.$record->id(),
-                maxAttempts: $limit,
-                decaySeconds: 60,
+                maxAttempts: $minute,
+                decaySeconds: 60, // @pest-mutate-ignore: IncrementInteger,DecrementInteger
             );
         }
 
-        if ($this->attemptLimiter->tooManyAttempts($decision->bucketKey, $decision->maxAttempts)) {
-            throw ApiKeyRejection::rateLimited(
-                $this->attemptLimiter->availableIn($decision->bucketKey),
-                $decision->maxAttempts,
-                remaining: 0,
+        $day = $record->rateLimitPerDay();
+        if ($day !== null && $day > 0) { // @pest-mutate-ignore: GreaterToGreaterOrEqual,DecrementInteger,BooleanAndToBooleanOr
+            $decisions[] = new RateLimitDecision(
+                bucketKey: 'api-key:'.$record->id().':day',
+                maxAttempts: $day,
+                decaySeconds: 86_400, // @pest-mutate-ignore: IncrementInteger,DecrementInteger
             );
         }
 
-        $this->attemptLimiter->hit($decision->bucketKey, $decision->decaySeconds);
+        $month = $record->rateLimitPerMonth();
+        if ($month !== null && $month > 0) { // @pest-mutate-ignore: GreaterToGreaterOrEqual,DecrementInteger,BooleanAndToBooleanOr
+            $decisions[] = new RateLimitDecision(
+                bucketKey: 'api-key:'.$record->id().':month',
+                maxAttempts: $month,
+                decaySeconds: 2_592_000, // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+            );
+        }
+
+        return $decisions;
     }
 }

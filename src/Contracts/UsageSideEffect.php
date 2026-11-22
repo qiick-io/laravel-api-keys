@@ -9,5 +9,10 @@ namespace Qiick\ApiKeys\Contracts;
  */
 interface UsageSideEffect
 {
-    public function afterRecorded(ApiKeyRecord $record, ?string $ip, bool $wasFirstUse): void;
+    public function afterRecorded(
+        ApiKeyRecord $record,
+        ?string $ip,
+        ?string $userAgent,
+        bool $wasFirstUse,
+    ): void;
 }

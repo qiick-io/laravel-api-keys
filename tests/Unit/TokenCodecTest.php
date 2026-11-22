@@ -38,16 +38,19 @@ it('pins ID_LENGTH and SECRET_LENGTH to the fleet sizes (A1)', function (): void
     // Public consts are the @api names; operational lengths live in private
     // methods (typed class-const lines are not coverage-attributed by Pest mutate).
     expect(TokenCodec::ID_LENGTH)->toBe(8)
-        ->and(TokenCodec::SECRET_LENGTH)->toBe(32);
+        ->and(TokenCodec::SECRET_LENGTH)->toBe(32)
+        ->and(TokenCodec::CHECKSUM_LENGTH)->toBe(6)
+        ->and(TokenCodec::DEFAULT_TOKEN_VERSION)->toBe(2);
 
     $token = codec()->issue();
     $id = substr($token->keyPrefix, -8);
+    $remainder = strlen($token->plainText) - strlen($token->keyPrefix);
 
     expect(strlen($id))->toBe(8)
-        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(32)
+        ->and($remainder)->toBe(TokenCodec::SECRET_LENGTH + TokenCodec::CHECKSUM_LENGTH)
         // Consts stay aligned with the operational methods used at issue time.
         ->and(strlen($id))->toBe(TokenCodec::ID_LENGTH)
-        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(TokenCodec::SECRET_LENGTH);
+        ->and($token->tokenVersion)->toBe(2);
 });
 
 it('issues a token with the fleet shape and hashes the full plaintext', function (): void {
@@ -57,8 +60,9 @@ it('issues a token with the fleet shape and hashes the full plaintext', function
     // Hardcoded lengths also kill shrink/grow of the lengths used at issue time.
     expect($token->keyPrefix)->toMatch('/^tst_test_[A-Za-z0-9]{8}$/D')
         ->and($token->plainText)->toStartWith($token->keyPrefix)
-        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(32)
+        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(38)
         ->and(strlen($token->keyPrefix))->toBe(17)
+        ->and($token->tokenVersion)->toBe(2)
         ->and($token->keyHash)->toBe(hash('sha256', $token->plainText))
         ->and($codec->parse($token->plainText))->not->toBeNull()
         ->and($codec->prefixOf($token->plainText, codecNow()))->toBe($token->keyPrefix);
@@ -68,9 +72,10 @@ it('redacts plaintext and hash in GeneratedToken debug output', function (): voi
     $token = codec()->issue();
     $debug = $token->__debugInfo();
 
-    expect($debug)->toHaveKeys(['keyPrefix', 'keyHash', 'plainText'])
+    expect($debug)->toHaveKeys(['keyPrefix', 'keyHash', 'tokenVersion', 'plainText'])
         ->and($debug['keyPrefix'])->toBe($token->keyPrefix)
         ->and($debug['keyHash'])->toBe('[REDACTED]')
+        ->and($debug['tokenVersion'])->toBe(2)
         ->and($debug['plainText'])->toBe('[REDACTED]')
         ->and($debug['plainText'])->not->toBe($token->plainText)
         ->and($debug['keyHash'])->not->toBe($token->keyHash);
@@ -304,7 +309,7 @@ it('is deterministic for the same FixedEnvironment and FixedRandomSource seed', 
     expect($first->plainText)->toBe($second->plainText)
         ->and($first->keyPrefix)->toBe($second->keyPrefix)
         ->and(strlen($first->keyPrefix))->toBe(17)
-        ->and(strlen($first->plainText) - strlen($first->keyPrefix))->toBe(32);
+        ->and(strlen($first->plainText) - strlen($first->keyPrefix))->toBe(38);
 });
 
 it('rejects bytes 248..255 when mapping onto the alphabet (no modulo bias)', function (): void {
@@ -316,11 +321,12 @@ it('rejects bytes 248..255 when mapping onto the alphabet (no modulo bias)', fun
         .str_repeat("\x02", 16);
     $secretChunk = str_repeat("\x00", 32);
     $token = codec(seed: $idChunk.$secretChunk)->issue();
+    $secret = substr($token->plainText, strlen($token->keyPrefix), 32);
 
     expect(strlen($token->keyPrefix))->toBe(17)
-        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(32)
+        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(38)
         ->and(substr($token->keyPrefix, -8))->toBe('BBBBBBBB')
-        ->and(substr($token->plainText, -32))->toBe(str_repeat('A', 32));
+        ->and($secret)->toBe(str_repeat('A', 32));
 });
 
 it('keeps byte 247 and skips byte 248 at the rejection threshold', function (): void {
@@ -333,7 +339,7 @@ it('keeps byte 247 and skips byte 248 at the rejection threshold', function (): 
 
     expect(substr($token->keyPrefix, -8))->toStartWith('9')
         ->and(strlen(substr($token->keyPrefix, -8)))->toBe(8)
-        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(32);
+        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(38);
 });
 
 it('refills after a whole chunk of rejected bytes', function (): void {
@@ -345,7 +351,7 @@ it('refills after a whole chunk of rejected bytes', function (): void {
     $token = codec(seed: $rejectedChunk.$idChunk.$secretChunk)->issue();
 
     expect(substr($token->keyPrefix, -8))->toBe('BBBBBBBB')
-        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(32);
+        ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(38);
 });
 
 it('runs a dummy compare when asked and when match returns none', function (): void {

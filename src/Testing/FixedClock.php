@@ -9,7 +9,12 @@ use Qiick\ApiKeys\Contracts\Clock;
 /** @api Test clock that returns a fixed instant. */
 final class FixedClock implements Clock
 {
-    public function __construct(private \DateTimeImmutable $now) {}
+    use EnsuresTestingEnvironmentTrait;
+
+    public function __construct(private \DateTimeImmutable $now)
+    {
+        self::ensureTestingEnvironment();
+    }
 
     public function now(): \DateTimeImmutable
     {

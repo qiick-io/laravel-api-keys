@@ -38,13 +38,13 @@ it('assertLegacyTokenUsed checks the event payload', function (): void {
 
 it('ApiKeyAuthenticated carries ids without a plaintext token field', function (): void {
     $event = new ApiKeyAuthenticated(
-        apiKeyId: '42',
+        apiKeyId: '00000000-0000-7000-8000-000000000042',
         keyPrefix: 'tst_test_abcdefgh',
         usedPreviousSecret: false,
         clientIp: '203.0.113.10',
     );
 
-    expect($event->apiKeyId)->toBe('42')
+    expect($event->apiKeyId)->toBe('00000000-0000-7000-8000-000000000042')
         ->and(json_encode($event))->not->toContain('plainText')
         ->and(json_encode($event))->not->toContain('secret');
 });

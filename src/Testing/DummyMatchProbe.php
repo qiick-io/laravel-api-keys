@@ -11,7 +11,14 @@ use Qiick\ApiKeys\TokenCodec;
  */
 final class DummyMatchProbe
 {
+    use EnsuresTestingEnvironmentTrait;
+
     public int $calls = 0;
+
+    public function __construct()
+    {
+        self::ensureTestingEnvironment();
+    }
 
     public function record(): void
     {

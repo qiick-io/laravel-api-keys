@@ -6,6 +6,7 @@ namespace Qiick\ApiKeys;
 
 use Qiick\ApiKeys\Contracts\ApiKeyRecord;
 use Qiick\ApiKeys\Contracts\Clock;
+use Qiick\ApiKeys\Contracts\LifetimePolicy;
 
 /**
  * @api Issues a new secret for an existing key_prefix and optional grace window.
@@ -14,20 +15,15 @@ use Qiick\ApiKeys\Contracts\Clock;
  * second rotation replaces the previous grace secret — only the secret displaced
  * by the latest rotate stays valid until `previousKeyValidUntil`.
  *
- * Refuses revoked or expired keys. Validates `key_prefix` against the codec’s
- * canonical shape (or an accepting legacy matcher at `$now`) so a typo cannot
- * brick a row. A legacy prefix is migrated to a **fresh canonical** token
- * (`issue()`), not reissued behind `ek_…`. That cut-over is immediate: there is
- * **no grace across formats** — the old legacy plaintext stops matching as soon
- * as the product persists the new `key_prefix` (even if `$graceHours` > 0).
- * Matchers must recognise a bare stored prefix via `prefixOf($keyPrefix)` for
- * rotation to accept the row.
+ * Refuses revoked or expired keys and `oauth_grant` rows. Validates `key_prefix`
+ * against the codec’s canonical shape (or an accepting legacy matcher at `$now`).
+ * A legacy prefix is migrated to a **fresh canonical** token (`issue()`). With
+ * `$graceHours` > 0 the old prefix is kept as `previous_key_prefix` so the legacy
+ * plaintext keeps working through the normal grace window (F10 / Luca 2026-11-22).
  *
  * **Product obligation:** call `rotate` inside a DB transaction with
- * `lockForUpdate` on the key row, then write `key_prefix`, `key_hash`,
- * `previous_key_hash`, and `previous_key_valid_until` **unconditionally**
- * (including nulls when grace is 0; including the new canonical prefix when
- * migrating off legacy). The package does not persist.
+ * `lockForUpdate` on the key row, then write every returned field **unconditionally**
+ * (including nulls when grace is 0). The package does not persist.
  */
 final class RotationService
 {
@@ -35,6 +31,7 @@ final class RotationService
 
     public function __construct(
         private int $maxGraceHours = self::DEFAULT_MAX_GRACE_HOURS,
+        private ?LifetimePolicy $lifetimePolicy = null,
     ) {}
 
     /**
@@ -45,8 +42,13 @@ final class RotationService
         TokenCodec $codec,
         Clock $clock,
         int $graceHours,
+        ?\DateTimeImmutable $newExpiresAt = null,
     ): Rotation {
         $now = $clock->now();
+
+        if ($record->credentialKind() === CredentialKind::OauthGrant) {
+            throw new \InvalidArgumentException('Cannot rotate an OAuth grant API key row.');
+        }
 
         if ($record->revokedAt() !== null) {
             throw new \InvalidArgumentException('Cannot rotate a revoked API key.');
@@ -54,6 +56,11 @@ final class RotationService
 
         if ($record->expiresAt() !== null && $now >= $record->expiresAt()) {
             throw new \InvalidArgumentException('Cannot rotate an expired API key.');
+        }
+
+        $expiresAt = $newExpiresAt ?? $record->expiresAt();
+        if ($this->lifetimePolicy !== null && ! $this->lifetimePolicy->allowsExpiry($expiresAt, $now)) {
+            throw new \InvalidArgumentException('Cannot rotate: expiry exceeds the lifetime policy.');
         }
 
         $keyPrefix = $record->keyPrefix();
@@ -65,16 +72,18 @@ final class RotationService
 
         $graceHours = self::normalizeGraceHours($graceHours, $this->maxGraceHours);
         $canonical = $codec->isCanonicalKeyPrefix($keyPrefix);
-        // Legacy → canonical: never reissue behind ek_; no grace across formats.
         $issued = $canonical ? $codec->reissueForPrefix($keyPrefix) : $codec->issue();
 
-        if (! $canonical || $graceHours <= 0) {
+        if ($graceHours <= 0) {
             return new Rotation(
                 newPlainText: $issued->plainText,
                 newKeyPrefix: $issued->keyPrefix,
                 newKeyHash: $issued->keyHash,
                 previousKeyHash: null,
                 previousKeyValidUntil: null,
+                lastRotatedAt: $now,
+                tokenVersion: $issued->tokenVersion,
+                previousKeyPrefix: null,
             );
         }
 
@@ -84,6 +93,9 @@ final class RotationService
             newKeyHash: $issued->keyHash,
             previousKeyHash: $record->keyHash(),
             previousKeyValidUntil: $now->add(new \DateInterval('PT'.$graceHours.'H')),
+            lastRotatedAt: $now,
+            tokenVersion: $issued->tokenVersion,
+            previousKeyPrefix: $canonical ? null : $keyPrefix,
         );
     }
 

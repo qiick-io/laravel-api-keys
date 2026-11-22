@@ -14,10 +14,14 @@ use Qiick\ApiKeys\Contracts\RandomSource;
  */
 final class FixedRandomSource implements RandomSource
 {
+    use EnsuresTestingEnvironmentTrait;
+
     private int $offset = 0;
 
     public function __construct(private string $seed)
     {
+        self::ensureTestingEnvironment();
+
         if ($this->seed === '') {
             throw new \InvalidArgumentException('FixedRandomSource seed must not be empty.');
         }

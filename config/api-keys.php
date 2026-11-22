@@ -1,12 +1,15 @@
 <?php
 
 declare(strict_types=1);
+use Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification;
+use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
 
 /*
  * qiick/laravel-api-keys configuration.
  *
  * Products own models, migrations, scope enums and HTTP middleware. This file
- * only tunes the contract-only mechanics (codec, grace, usage, rate brakes).
+ * only tunes the contract-only mechanics (codec, grace, usage, rate brakes,
+ * expiry notices).
  */
 return [
 
@@ -20,6 +23,11 @@ return [
      * Force live/test for issuance. Null → EnvironmentResolver (app environment).
      */
     'environment' => env('API_KEYS_ENVIRONMENT'),
+
+    /*
+     * Default issuance token version: 2 (checksum). Version 1 stays accepted.
+     */
+    'token_version' => (int) env('API_KEYS_TOKEN_VERSION', 2),
 
     /*
      * Hours the previous secret stays valid after rotation. Invalid, negative,
@@ -49,6 +57,45 @@ return [
     'failed_attempts_per_minute' => (int) env('API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 20),
 
     /*
+     * Optional max lifetime in days for issue/rotate when a LifetimePolicy is bound.
+     * Null disables the package-side default policy.
+     */
+    'max_lifetime_days' => env('API_KEYS_MAX_LIFETIME_DAYS') !== null
+        ? (int) env('API_KEYS_MAX_LIFETIME_DAYS')
+        : null,
+
+    'expiry' => [
+        /*
+         * Notify when expires_at is within this many days and expiry_notified_at is null.
+         */
+        'notice_days' => (int) env('API_KEYS_EXPIRY_NOTICE_DAYS', 7),
+
+        /*
+         * Claim lease for api-keys:notify-expiring (app/worker clock, not DB
+         * NOW()). A worker that dies after claimExpiryNotice but before send
+         * is reclaimable once this many seconds have passed
+         * (expiry_notice_claimed_at). Keep this above worst-case send latency:
+         * an in-flight send longer than the lease can be reclaimed by another
+         * worker and produce a second notice. Workers must share NTP-synced
+         * UTC; skew can reclaim a live claim early.
+         */
+        'claim_lease_seconds' => (int) env('API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 900),
+
+        /*
+         * Roles resolved by ExpiryRecipientResolver: owner, issuer, organisation.
+         *
+         * @var list<string>
+         */
+        'recipients' => ['owner', 'issuer'],
+        /*
+         * Notification class (products may replace).
+         *
+         * @var class-string
+         */
+        'notification' => ApiKeyExpiringNotification::class,
+    ],
+
+    /*
      * Legacy matchers (class names). Boot fails when non-empty without accept_until.
      *
      * @var list<class-string>
@@ -62,6 +109,18 @@ return [
          * Relative strings and date-only values are rejected.
          */
         'accept_until' => env('API_KEYS_LEGACY_ACCEPT_UNTIL'),
+
+        /*
+         * Warn this many days before accept_until (legacy format EOL). 0 disables.
+         */
+        'warn_days_before' => (int) env('API_KEYS_LEGACY_WARN_DAYS_BEFORE', 90),
+
+        /*
+         * Notification class for the T−90 legacy-format warning (N2).
+         *
+         * @var class-string
+         */
+        'warning_notification' => ApiKeyLegacyFormatWarningNotification::class,
     ],
 
 ];

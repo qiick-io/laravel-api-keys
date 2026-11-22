@@ -33,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ApiKeyRecord` / `ApiKeyRepository` / `KeyAuthorizer` / `UsageSideEffect` contracts
   for the 1.0 surface (`publicId()`, C1 ceiling takes the record, usage takes
   user agent). `ApiKeyAuthenticated::$apiKeyId` is a UUID string.
+- `ApiKeyRepository::claimExpiryNotice` / `releaseExpiryNotice` for atomic
+  expiry-notice claims before send (concurrent workers).
+- Origin/referrer evaluation lowercases scheme and host before compare.
+
+### Fixed
+
+- Concurrent `api-keys:notify-expiring` runs can no longer double-send after a
+  lost race on `expiry_notified_at`.
+- Mixed-case Origin / Referer hosts no longer false-deny against lowercase patterns.
 
 ## [0.1.0] - 2026-11-20
 

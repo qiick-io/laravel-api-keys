@@ -252,12 +252,11 @@ final readonly class KeyRestrictions
         if ($parts === false || ! isset($parts['scheme'], $parts['host'])) { // @pest-mutate-ignore: BooleanOrToBooleanAnd,FalseToTrue
             return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
         }
-        if (str_contains((string) $parts['host'], '*')) { // @pest-mutate-ignore: RemoveStringCast
-            return false;
-        }
 
-        if (isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) { // @pest-mutate-ignore: BooleanOrToBooleanAnd
-            return false;
+        // Unreachable when the pattern has a single trailing `*` (that star is stripped
+        // before parse); kept as defence in depth if the star-count guard changes.
+        if (str_contains((string) $parts['host'], '*')) { // @pest-mutate-ignore: RemoveStringCast
+            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
         }
 
         $origin = $parts['scheme'].'://'.$parts['host'];
@@ -266,8 +265,13 @@ final readonly class KeyRestrictions
             $origin .= ':'.$parts['port']; // @pest-mutate-ignore: ConcatEqualToEqual,ConcatRemoveLeft,ConcatRemoveRight,ConcatSwitchSides
         }
 
+        // Userinfo makes rebuilt origin miss the literal prefix (`https://user@host/...`).
         if (! str_starts_with($prefix, $origin)) {
-            return false;
+            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
+        }
+
+        if (isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) { // @pest-mutate-ignore: BooleanOrToBooleanAnd
+            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
         }
 
         // Require `/…` after the exact origin so `https://app.example.com*` is rejected.

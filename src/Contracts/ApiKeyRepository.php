@@ -38,7 +38,23 @@ interface ApiKeyRepository
      */
     public function expiringUnnotified(\DateTimeImmutable $until): iterable;
 
+    /**
+     * Unconditional stamp (tests / migrations). Prefer {@see claimExpiryNotice()}
+     * on the notify command path so concurrent workers cannot double-send.
+     */
     public function markExpiryNotified(ApiKeyRecord $record, \DateTimeImmutable $notifiedAt): void;
+
+    /**
+     * Atomic claim: set `expiry_notified_at` only when it is still null
+     * (`UPDATE … WHERE expiry_notified_at IS NULL`). Returns whether this
+     * caller won. Claim before send; {@see releaseExpiryNotice()} if send fails.
+     */
+    public function claimExpiryNotice(ApiKeyRecord $record, \DateTimeImmutable $notifiedAt): bool;
+
+    /**
+     * Clear `expiry_notified_at` after a failed send so the next run retries.
+     */
+    public function releaseExpiryNotice(ApiKeyRecord $record): void;
 
     /**
      * Non-revoked `api_key` rows still on token_version 0 (product legacy format).

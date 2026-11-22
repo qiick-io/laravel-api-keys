@@ -26,8 +26,11 @@ pre-1.0 additions versus the 0.1.0 sketch:
 - `ApiKeyRecord`: add `publicId()`, version/hash/credential/restrictions/quota
   and attribution methods (see interface).
 - `ApiKeyRepository::recordUsage(..., ?string $userAgent, ...)`; add
-  `findByPublicId`, `expiringUnnotified`, `markExpiryNotified`;
+  `findByPublicId`, `expiringUnnotified`, `markExpiryNotified`,
+  `claimExpiryNotice` / `releaseExpiryNotice` (CAS stamp before send);
   `findCandidatesByPrefix` also matches `previous_key_prefix` in grace.
+  Products implement claim as
+  `UPDATE … SET expiry_notified_at = ? WHERE … AND expiry_notified_at IS NULL`.
 - `KeyAuthorizer::scopesCreatorMayGrant(ApiKeyRecord, ...)` (was creator id);
   `rateLimit()` returns `list<RateLimitDecision>`; add `authorizeResources`.
 - `UsageSideEffect::afterRecorded` gains `$userAgent`.

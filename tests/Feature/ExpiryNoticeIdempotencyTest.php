@@ -148,7 +148,7 @@ it('B1: send failure does not stamp and the next successful run retries', functi
     Event::assertDispatched(ApiKeyExpiryNoticeSent::class);
 });
 
-it('B1: the stamp happens only after a successful send', function (): void {
+it('B1: a successful send keeps the claim stamp and dispatches the event', function (): void {
     Notification::fake();
     Event::fake([ApiKeyExpiryNoticeSent::class]);
 
@@ -172,4 +172,28 @@ it('B1: the stamp happens only after a successful send', function (): void {
         return $event->apiKeyId === $record->publicId()
             && $event->notifiedAt == $now;
     });
+});
+
+it('B1: concurrent claimExpiryNotice allows only one winner', function (): void {
+    Notification::fake();
+    Event::fake([ApiKeyExpiryNoticeSent::class]);
+
+    $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
+    $record = (new InMemoryApiKeyRecord(
+        publicId: '018f0000-0000-7000-8000-0000000000e5',
+        keyPrefix: 'tst_test_expiry05',
+        keyHash: 'hash',
+        scopes: ['items:read'],
+    ))->withExpiresAt(new DateTimeImmutable('2026-01-15T00:00:00+00:00'));
+
+    [$repository, $notifiable] = bindExpiryNoticeCommand($record, $now);
+
+    expect($repository->claimExpiryNotice($record, $now))->toBeTrue()
+        ->and($repository->claimExpiryNotice($record, $now))->toBeFalse();
+
+    // Second artisan pass must not send again after the claim stamp.
+    $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
+
+    Notification::assertNothingSent();
+    Event::assertNotDispatched(ApiKeyExpiryNoticeSent::class);
 });

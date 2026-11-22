@@ -125,6 +125,41 @@ final class FakeApiKeyRepository implements ApiKeyRepository
 
     public function markExpiryNotified(ApiKeyRecord $record, \DateTimeImmutable $notifiedAt): void
     {
+        $this->stampExpiryNotified($record, $notifiedAt);
+    }
+
+    public function claimExpiryNotice(ApiKeyRecord $record, \DateTimeImmutable $notifiedAt): bool
+    {
+        $current = $this->findByPublicId($record->publicId()) ?? $record;
+
+        if ($current->expiryNotifiedAt() !== null) {
+            return false;
+        }
+
+        $this->stampExpiryNotified($current, $notifiedAt);
+
+        return true;
+    }
+
+    public function releaseExpiryNotice(ApiKeyRecord $record): void
+    {
+        if ($record instanceof InMemoryApiKeyRecord) {
+            $cleared = $record->withExpiryNotifiedAt(null);
+            foreach ($this->records as $index => $existing) {
+                if ($existing->publicId() === $record->publicId()) {
+                    $this->records[$index] = $cleared;
+                }
+            }
+        }
+
+        $this->expiryNotifications = array_values(array_filter(
+            $this->expiryNotifications,
+            static fn (array $entry): bool => $entry['record']->publicId() !== $record->publicId(),
+        ));
+    }
+
+    private function stampExpiryNotified(ApiKeyRecord $record, \DateTimeImmutable $notifiedAt): void
+    {
         $this->expiryNotifications[] = [
             'record' => $record,
             'notifiedAt' => $notifiedAt,

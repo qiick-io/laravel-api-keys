@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Memcached in CI.
 - A request refused by a later window gives back the hits it took on the
   earlier windows.
+- On Redis, `CacheAttemptLimiter::availableIn()` reads the counter's TTL, so
+  `Retry-After` is no longer always 0; on Memcached a window longer than 30
+  days is sent as an absolute expiry.
 - The legacy-format warning lease is a cache lock with an owner token, so a
   late worker cannot release a lease another worker took over.
 - `api-keys.max_lifetime_days` accepts digits only (` 30`, `+30` and `030`
@@ -43,8 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `AttemptLimiter`: `hit()` returns `int`; `decrement(string $key)` added
   (no-op on a missing counter, never below zero); `tooManyAttempts()` removed.
-- `FailedAttemptLimiter`: `reserve()` / `release()` replace
-  `tooManyAttempts()` / `hit()`.
+- `FailedAttemptLimiter`: `isBlocked()` / `countFailure()` replace
+  `tooManyAttempts()` / `hit()`. It counts failed guesses only, so valid
+  requests in flight never take a slot.
+- `RateLimitDecision` and `CacheAttemptLimiter::hit()` throw for a window
+  shorter than one second.
 - `LegacyFormatWarningGate`: `claim($key, $leaseSeconds)` returns an owner
   token or null; `release($key, $ownerToken)` and `markSent($key, $ownerToken)`.
 

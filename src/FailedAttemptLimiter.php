@@ -20,8 +20,6 @@ use Qiick\ApiKeys\Contracts\AttemptLimiter;
  */
 final class FailedAttemptLimiter
 {
-    private const int DECAY_SECONDS = 60;
-
     public function __construct(
         private AttemptLimiter $limiter,
         private int $maxPerMinute = 20,
@@ -29,44 +27,27 @@ final class FailedAttemptLimiter
     ) {}
 
     /**
-     * Counts this attempt against the client's bucket before the token is
-     * evaluated, and returns false when the bucket was already full.
-     *
-     * Counting first is what makes the cap hold under concurrency: guesses
-     * racing from one network each take their own slot in one atomic
-     * increment, so at most `maxPerMinute` of them are ever evaluated. A
-     * refused attempt hands its slot back at once; the caller hands back the
-     * slot of an attempt that turns out not to be a failure with
-     * {@see release()}.
+     * True once the client's bucket holds `maxPerMinute` failed guesses. Only
+     * reads the counter: a request that is still being verified takes no slot.
      */
-    public function reserve(?string $clientIp): bool
+    public function isBlocked(?string $clientIp): bool
     {
         $bucket = $this->enabledBucketKey($clientIp);
 
-        if ($bucket === null) {
-            return true;
-        }
-
-        if ($this->limiter->hit($bucket, self::DECAY_SECONDS) <= $this->maxPerMinute) {
-            return true;
-        }
-
-        $this->limiter->decrement($bucket);
-
-        return false;
+        return $bucket !== null && $this->limiter->remaining($bucket, $this->maxPerMinute) === 0;
     }
 
     /**
-     * Hands back a slot taken by {@see reserve()} for an attempt that was not
-     * a failed guess (it authenticated, or was refused for another reason).
+     * Counts a failed guess with one atomic increment and returns false when it
+     * went over the limit; the caller then answers `rate_limited` instead of
+     * `invalid_token`, so guesses past the limit teach an attacker nothing
+     * even when they race.
      */
-    public function release(?string $clientIp): void
+    public function countFailure(?string $clientIp): bool
     {
         $bucket = $this->enabledBucketKey($clientIp);
 
-        if ($bucket !== null) {
-            $this->limiter->decrement($bucket);
-        }
+        return $bucket === null || $this->limiter->hit($bucket, 60) <= $this->maxPerMinute;
     }
 
     public function availableIn(?string $clientIp): int

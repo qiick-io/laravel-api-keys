@@ -8,8 +8,8 @@ declare(strict_types=1);
  * workers do. Prints 1 when the attempt was admitted, 0 when refused.
  *
  * Usage: php attempt-limiter-worker.php <redis|memcached> <operation> <ip-or-key> <max> <start-at>
- * Operations on the failed-attempt brake for an IP: guess (reserve, keep) and
- * request (reserve, then release, like a key that authenticates).
+ * Operations on the failed-attempt brake for an IP: guess (a failed guess) and
+ * request / slow-request (a key that authenticates).
  * Operations on a raw counter key: hit (give the attempt back when over max),
  * hit-short (hit with a one-second window), decrement, forget, and count
  * (prints the stored value, or "missing").
@@ -60,30 +60,23 @@ if ((float) $startAt > microtime(true)) {
 $maxAttempts = (int) $maxAttempts;
 
 echo match ($operation) {
-    'guess' => (new FailedAttemptLimiter($limiter, $maxAttempts))->reserve($key) ? 1 : 0,
-    'request' => (function () use ($limiter, $maxAttempts, $key): int {
+    // A failed guess, as ApiKeyAuthenticator handles it: refused early when the bucket is full, else counted.
+    'guess' => (function () use ($limiter, $maxAttempts, $key): int {
         $brake = new FailedAttemptLimiter($limiter, $maxAttempts);
-        if (! $brake->reserve($key)) {
-            return 0;
-        }
 
-        // The key authenticated: like ApiKeyAuthenticator, hand the slot back.
-        $brake->release($key);
-
-        return 1;
+        return ! $brake->isBlocked($key) && $brake->countFailure($key) ? 1 : 0;
     })(),
-    'slow-request' => (function () use ($limiter, $maxAttempts, $key): int {
+    // A valid key whose verification (lookup, hash, authorizer) takes 0 or 200 ms; it is only read against the brake.
+    'request', 'slow-request' => (function () use ($limiter, $maxAttempts, $key, $operation): int {
         $brake = new FailedAttemptLimiter($limiter, $maxAttempts);
 
-        if (! $brake->reserve($key)) {
+        if ($brake->isBlocked($key)) {
             return 0;
         }
 
-        // A valid key whose verification (lookup, hash, authorizer) takes 200 ms.
-        usleep(200_000);
-        $brake->release($key);
+        usleep($operation === 'slow-request' ? 200_000 : 0);
 
-        return 1;
+        return $brake->isBlocked($key) ? 0 : 1;
     })(),
     'hit' => (function () use ($limiter, $maxAttempts, $key): int {
         if ($limiter->hit($key, 60) <= $maxAttempts) {

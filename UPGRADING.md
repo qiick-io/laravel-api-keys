@@ -28,7 +28,8 @@ pre-1.0 additions versus the 0.1.0 sketch:
   a missing counter, never below zero); `tooManyAttempts()` is gone. Delete any
   adapter over Laravel's `RateLimiter` (it is not atomic) and use the bound
   `CacheAttemptLimiter`, which needs a Redis or Memcached default cache store. `FailedAttemptLimiter`
-  now exposes `reserve()` / `release()` instead of `tooManyAttempts()` / `hit()`.
+  now exposes `isBlocked()` / `countFailure()` instead of `tooManyAttempts()` / `hit()`;
+  `RateLimitDecision` refuses `decaySeconds` below 1.
 - `LegacyFormatWarningGate`: `claim(string $key, int $leaseSeconds): ?string`
   returns an owner token; `release(string $key, string $ownerToken)` and
   `markSent(string $key, string $ownerToken)`. Only custom gates need

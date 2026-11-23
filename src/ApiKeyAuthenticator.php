@@ -55,10 +55,12 @@ final class ApiKeyAuthenticator
     }
 
     /**
-     * The failed-attempt brake takes its slot before the token is evaluated
-     * (see {@see FailedAttemptLimiter::reserve()}). Only an `invalid_token`
-     * refusal is a failed guess and keeps the slot; every other outcome,
-     * success included, hands it back.
+     * The failed-attempt brake counts only failed guesses, after they fail, so
+     * valid requests in flight never take a slot. Once a client's bucket is
+     * full, every outcome that would tell a guess apart is answered
+     * `rate_limited` instead: a guess over the limit, and a correct key (see
+     * {@see verify()}). Racing guesses therefore reveal at most
+     * `maxPerMinute` outcomes per window.
      *
      * @throws ApiKeyRejection
      */
@@ -69,26 +71,20 @@ final class ApiKeyAuthenticator
     ): AuthenticationResult {
         $clientIp = $context->ip;
 
-        if ($this->failedAttemptLimiter !== null && ! $this->failedAttemptLimiter->reserve($clientIp)) {
-            throw ApiKeyRejection::rateLimited(
-                $this->failedAttemptLimiter->availableIn($clientIp),
-                $this->failedAttemptLimiter->maxPerMinute(),
-                remaining: 0,
-            );
+        if ($this->failedAttemptLimiter?->isBlocked($clientIp) === true) {
+            throw $this->failedAttemptsExceeded($this->failedAttemptLimiter, $clientIp);
         }
-
-        $isFailedGuess = false;
 
         try {
             return $this->verify($presentedToken, $context, $requiredScope);
         } catch (ApiKeyRejection $rejection) {
             $isFailedGuess = $rejection->errorCode() === KeyRejectionCode::InvalidToken->value;
 
-            throw $rejection;
-        } finally {
-            if (! $isFailedGuess) {
-                $this->failedAttemptLimiter?->release($clientIp);
+            if ($isFailedGuess && $this->failedAttemptLimiter?->countFailure($clientIp) === false) {
+                throw $this->failedAttemptsExceeded($this->failedAttemptLimiter, $clientIp);
             }
+
+            throw $rejection;
         }
     }
 
@@ -173,6 +169,11 @@ final class ApiKeyAuthenticator
             );
         }
 
+        // The credential is valid. If racing guesses filled the bucket meanwhile, do not reveal it.
+        if ($this->failedAttemptLimiter?->isBlocked($clientIp) === true) {
+            throw $this->failedAttemptsExceeded($this->failedAttemptLimiter, $clientIp);
+        }
+
         // Cast keeps a strict string for IpAllowlist; empty fallback is for null IP only.
         if (! $this->ipAllowlist->allows((string) ($clientIp ?? ''), $matched->rawIpAllowlist())) { // @pest-mutate-ignore: RemoveStringCast,EmptyStringToNotEmpty
             throw ApiKeyRejection::ipNotAllowed();
@@ -247,6 +248,15 @@ final class ApiKeyAuthenticator
             $granted,
             $matchKind === TokenMatch::Previous,
             $legacyMatcher === null ? null : $legacyMatcher::class,
+        );
+    }
+
+    private function failedAttemptsExceeded(FailedAttemptLimiter $failedAttemptLimiter, ?string $clientIp): ApiKeyRejection
+    {
+        return ApiKeyRejection::rateLimited(
+            $failedAttemptLimiter->availableIn($clientIp),
+            $failedAttemptLimiter->maxPerMinute(),
+            remaining: 0,
         );
     }
 

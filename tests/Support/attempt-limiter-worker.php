@@ -53,7 +53,9 @@ $store = match ($storeName) {
 $limiter = new CacheAttemptLimiter(new Repository($store));
 
 // Start together: every worker waits for the same instant before touching the store.
-time_sleep_until((float) $startAt);
+if ((float) $startAt > microtime(true)) {
+    time_sleep_until((float) $startAt);
+}
 
 $maxAttempts = (int) $maxAttempts;
 
@@ -61,10 +63,14 @@ echo match ($operation) {
     'guess' => (new FailedAttemptLimiter($limiter, $maxAttempts))->reserve($key) ? 1 : 0,
     'request' => (function () use ($limiter, $maxAttempts, $key): int {
         $brake = new FailedAttemptLimiter($limiter, $maxAttempts);
-        $isAdmitted = $brake->reserve($key);
+        if (! $brake->reserve($key)) {
+            return 0;
+        }
+
+        // The key authenticated: like ApiKeyAuthenticator, hand the slot back.
         $brake->release($key);
 
-        return $isAdmitted ? 1 : 0;
+        return 1;
     })(),
     'hit' => (function () use ($limiter, $maxAttempts, $key): int {
         if ($limiter->hit($key, 60) <= $maxAttempts) {

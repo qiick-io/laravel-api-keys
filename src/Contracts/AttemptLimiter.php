@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Qiick\ApiKeys\Contracts;
 
+use Qiick\ApiKeys\CacheAttemptLimiter;
+
 /**
  * @api Counter store behind the per-key rate limits and the pre-auth brake.
  *
@@ -14,9 +16,11 @@ namespace Qiick\ApiKeys\Contracts;
  * not to count (over the limit, or a successful key on the failure brake) is
  * handed back with {@see decrement()}.
  *
- * Products typically adapt Illuminate's `RateLimiter`, whose `hit()` and
- * `decrement()` are atomic `Cache::increment` calls on Redis, Memcached and
- * the database store; tests use the in-memory fake.
+ * The package ships {@see CacheAttemptLimiter} (Redis,
+ * Memcached) and binds it by default. Do not adapt Illuminate's `RateLimiter`:
+ * its `increment()` recreates counters with a non-atomic `put()`, so parallel
+ * requests overshoot the limit and counters go negative. Tests use the
+ * in-memory fake.
  */
 interface AttemptLimiter
 {
@@ -29,8 +33,10 @@ interface AttemptLimiter
 
     /**
      * Atomically takes back one attempt previously added with {@see hit()}.
+     * A missing counter (its window expired) stays missing, and a counter
+     * never goes below zero.
      */
-    public function decrement(string $key, int $decaySeconds = 60): void;
+    public function decrement(string $key): void;
 
     public function availableIn(string $key): int;
 

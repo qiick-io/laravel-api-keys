@@ -51,7 +51,7 @@ final class FailedAttemptLimiter
             return true;
         }
 
-        $this->limiter->decrement($bucket, self::DECAY_SECONDS);
+        $this->limiter->decrement($bucket);
 
         return false;
     }
@@ -65,7 +65,7 @@ final class FailedAttemptLimiter
         $bucket = $this->enabledBucketKey($clientIp);
 
         if ($bucket !== null) {
-            $this->limiter->decrement($bucket, self::DECAY_SECONDS);
+            $this->limiter->decrement($bucket);
         }
     }
 

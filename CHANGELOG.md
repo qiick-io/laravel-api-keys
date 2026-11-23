@@ -21,14 +21,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ConfigLifetimePolicy` unless the product binds its own `LifetimePolicy`,
   and an invalid value fails at boot instead of being cast with `(int)`.
 
+- Rate limits and the failed-attempt brake were still beatable through the
+  README's `RateLimiter` adapter (Laravel recreates counters with a
+  non-atomic `put()`, the database store is not atomic, and late decrements
+  left negative counters). New `CacheAttemptLimiter`, bound by default, counts
+  with atomic store primitives (Lua on Redis, `add`/`increment` on Memcached)
+  and refuses other stores; it is raced across real processes on Redis and
+  Memcached in CI.
+- A request refused by a later window gives back the hits it took on the
+  earlier windows.
+- The legacy-format warning lease is a cache lock with an owner token, so a
+  late worker cannot release a lease another worker took over.
+- `api-keys.max_lifetime_days` accepts digits only (` 30`, `+30` and `030`
+  fail at boot).
+
+### Added
+
+- `CacheAttemptLimiter`, bound to `AttemptLimiter` unless the product binds one.
+
 ### Changed (breaking)
 
-- `AttemptLimiter`: `hit()` returns `int`; `decrement()` added;
-  `tooManyAttempts()` removed.
+- `AttemptLimiter`: `hit()` returns `int`; `decrement(string $key)` added
+  (no-op on a missing counter, never below zero); `tooManyAttempts()` removed.
 - `FailedAttemptLimiter`: `reserve()` / `release()` replace
   `tooManyAttempts()` / `hit()`.
-- `LegacyFormatWarningGate`: `claim($key, $leaseSeconds)`, plus `release()`
-  and `markSent()`.
+- `LegacyFormatWarningGate`: `claim($key, $leaseSeconds)` returns an owner
+  token or null; `release($key, $ownerToken)` and `markSent($key, $ownerToken)`.
 
 ## [0.2.0] - 2026-11-22
 

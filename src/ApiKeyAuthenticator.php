@@ -308,17 +308,23 @@ final class ApiKeyAuthenticator
             $decisions = $this->defaultRateLimits($record);
         }
 
+        $countedBucketKeys = [];
+
         foreach ($decisions as $decision) {
-            if ($decision->maxAttempts <= 0) { // @pest-mutate-ignore: SmallerOrEqualToSmaller,DecrementInteger
+            if ($decision->maxAttempts <= 0) {
                 continue;
             }
 
             // Count first, then compare: one atomic step, so concurrent requests cannot all see room.
             $hits = $this->attemptLimiter->hit($decision->bucketKey, $decision->decaySeconds);
+            $countedBucketKeys[] = $decision->bucketKey;
 
             if ($hits > $decision->maxAttempts) {
-                // A refused request does not count against the limit.
-                $this->attemptLimiter->decrement($decision->bucketKey, $decision->decaySeconds);
+                // A refused request counts against no window, the earlier ones included.
+                foreach ($countedBucketKeys as $countedBucketKey) {
+                    $this->attemptLimiter->decrement($countedBucketKey);
+                }
+
                 $retryAfter = $this->attemptLimiter->availableIn($decision->bucketKey);
 
                 throw ApiKeyRejection::rateLimited(

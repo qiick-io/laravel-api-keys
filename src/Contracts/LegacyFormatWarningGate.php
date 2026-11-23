@@ -13,22 +13,28 @@ namespace Qiick\ApiKeys\Contracts;
  * dies between claim and send leaves a lease that expires after
  * `$leaseSeconds`, so the warning is never lost to a crash or a transient
  * transport error, and repeated daily runs never re-send a sent warning.
+ *
+ * Every lease carries an owner token: a worker whose lease already expired and
+ * was taken over must not be able to release the new owner's lease.
  */
 interface LegacyFormatWarningGate
 {
     /**
-     * Atomically takes a lease of `$leaseSeconds` on the warning. Returns
-     * false while another worker holds a live lease or once it was sent.
+     * Atomically takes a lease of `$leaseSeconds` on the warning and returns
+     * its owner token, or null while another worker holds a live lease or
+     * once the warning was sent.
      */
-    public function claim(string $idempotencyKey, int $leaseSeconds): bool;
+    public function claim(string $idempotencyKey, int $leaseSeconds): ?string;
 
     /**
-     * Drops the lease after a failed send so the next run retries.
+     * Drops the lease after a failed send so the next run retries; a no-op
+     * unless `$ownerToken` still owns it.
      */
-    public function release(string $idempotencyKey): void;
+    public function release(string $idempotencyKey, string $ownerToken): void;
 
     /**
-     * Records the warning as sent, permanently: {@see claim()} never succeeds again.
+     * Records the warning as sent, permanently: {@see claim()} never succeeds
+     * again. Then drops the owner's lease.
      */
-    public function markSent(string $idempotencyKey): void;
+    public function markSent(string $idempotencyKey, string $ownerToken): void;
 }

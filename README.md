@@ -74,42 +74,35 @@ See [docs/reference-schema.md](./docs/reference-schema.md) for the full column l
 ## Quotas (minute / day / month)
 
 `rate_limit_per_minute`, `rate_limit_per_day`, and `rate_limit_per_month` are
-enforced as **rolling windows** through Laravel's `RateLimiter` (decay 60 s /
+enforced as **fixed windows** opened by their first hit (decay 60 s /
 86_400 s / 2_592_000 s). They are not calendar day or calendar month buckets.
 Durable calendar quotas are LATER (standards review L4).
 
 Limits hold under concurrency: the authenticator counts a request first with
 `AttemptLimiter::hit()`, one atomic increment that returns the new count, and
-refuses it when that count is over the limit (handing the attempt back with
-`decrement()`). It never checks and then counts in two steps. Your adapter
-must keep `hit()` atomic in a store every worker shares; Laravel's
-`RateLimiter` does on Redis, Memcached and the database cache:
+refuses it when that count is over the limit. A refused request hands back the
+hits it took on every window, so it counts against none of them. It never
+checks and then counts in two steps.
+
+The package binds `CacheAttemptLimiter` on your default cache store. It
+accepts only stores that can count atomically across workers and throws
+otherwise:
+
+| Store | How it stays atomic |
+| --- | --- |
+| Redis | One Lua script per call: `INCR` plus `EXPIRE` on the first hit; `DECR` only on an existing counter above zero. |
+| Memcached | Atomic `add` (with the window as TTL) then `increment`; `decrement` is a no-op on a missing key and floors at zero. |
+| Array | Single process only: tests and local development. |
+| Database, file, others | Refused: their `add` / `increment` are not atomic. |
+
+A decrement that arrives after its window expired finds no counter and does
+nothing, so counts never go negative. Do **not** adapt Laravel's
+`RateLimiter` instead: its `increment()` recreates counters with a non-atomic
+`put()` and its decrement can leave negative counters, so parallel requests
+overshoot the limit. To use a store other than the default, bind your own:
 
 ```php
-final class RateLimiterAttemptLimiter implements AttemptLimiter
-{
-    public function __construct(private RateLimiter $rateLimiter) {}
-
-    public function hit(string $key, int $decaySeconds = 60): int
-    {
-        return $this->rateLimiter->hit($key, $decaySeconds);
-    }
-
-    public function decrement(string $key, int $decaySeconds = 60): void
-    {
-        $this->rateLimiter->decrement($key, $decaySeconds);
-    }
-
-    public function availableIn(string $key): int
-    {
-        return $this->rateLimiter->availableIn($key);
-    }
-
-    public function remaining(string $key, int $maxAttempts): int
-    {
-        return $this->rateLimiter->remaining($key, $maxAttempts);
-    }
-}
+$this->app->singleton(AttemptLimiter::class, fn () => new CacheAttemptLimiter(Cache::store('redis')));
 ```
 
 ## Expiry notices (claim lease)
@@ -130,7 +123,8 @@ Two operational risks (accepted as documented nits after #18):
 The legacy-format T−90 warning follows the same protocol with the same lease,
 through `LegacyFormatWarningGate` (cache-backed by default): recipients are
 resolved first, so a key with no recipient yet stays claimable; a failed send
-releases the lease and the next run retries; a worker that dies mid-send
+releases the lease (only its owner can: the lease is a cache lock with an
+owner token) and the next run retries; a worker that dies mid-send
 leaves a lease that lapses after `claim_lease_seconds`; a sent warning is
 marked permanently and never repeats. The cache must be shared by all workers.
 
@@ -216,7 +210,7 @@ Extract the bearer first (`BearerTokenExtractor`: no trim; case-insensitive
 
 ```php
 $failedAttempts = new FailedAttemptLimiter(
-    limiter: $attemptLimiter, // your RateLimiter adapter
+    limiter: app(AttemptLimiter::class), // CacheAttemptLimiter by default
     maxPerMinute: 20,         // ≤0 disables; leave ON unless you have a reason
 );
 

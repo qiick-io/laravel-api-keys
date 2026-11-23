@@ -16,36 +16,40 @@ final class FakeLegacyFormatWarningGate implements LegacyFormatWarningGate
 {
     use EnsuresTestingEnvironmentTrait;
 
-    /** @var array<string, true> */
-    public array $leasedKeys = [];
+    /** @var array<string, string> owner token by idempotency key */
+    public array $leaseOwnersByKey = [];
 
     /** @var array<string, true> */
     public array $sentKeys = [];
+
+    private int $issuedTokens = 0;
 
     public function __construct()
     {
         self::ensureTestingEnvironment();
     }
 
-    public function claim(string $idempotencyKey, int $leaseSeconds): bool
+    public function claim(string $idempotencyKey, int $leaseSeconds): ?string
     {
-        if (isset($this->leasedKeys[$idempotencyKey]) || isset($this->sentKeys[$idempotencyKey])) {
-            return false;
+        if (isset($this->leaseOwnersByKey[$idempotencyKey]) || isset($this->sentKeys[$idempotencyKey])) {
+            return null;
         }
 
-        $this->leasedKeys[$idempotencyKey] = true;
+        $this->issuedTokens++;
 
-        return true;
+        return $this->leaseOwnersByKey[$idempotencyKey] = 'owner-'.$this->issuedTokens;
     }
 
-    public function release(string $idempotencyKey): void
+    public function release(string $idempotencyKey, string $ownerToken): void
     {
-        unset($this->leasedKeys[$idempotencyKey]);
+        if (($this->leaseOwnersByKey[$idempotencyKey] ?? null) === $ownerToken) {
+            unset($this->leaseOwnersByKey[$idempotencyKey]);
+        }
     }
 
-    public function markSent(string $idempotencyKey): void
+    public function markSent(string $idempotencyKey, string $ownerToken): void
     {
-        unset($this->leasedKeys[$idempotencyKey]);
         $this->sentKeys[$idempotencyKey] = true;
+        $this->release($idempotencyKey, $ownerToken);
     }
 }

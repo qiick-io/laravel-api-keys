@@ -120,7 +120,7 @@ it('lets the warning be reclaimed once a dead worker\'s lease has expired', func
     bindLegacyWarningCommand([$notifiable]);
 
     // A worker claimed the warning and died before sending or marking it.
-    expect(app(LegacyFormatWarningGate::class)->claim(legacyWarningIdempotencyKey(), 900))->toBeTrue();
+    expect(app(LegacyFormatWarningGate::class)->claim(legacyWarningIdempotencyKey(), 900))->toBeString();
 
     $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
     Notification::assertNothingSent();

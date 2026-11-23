@@ -25,7 +25,8 @@ function limiterStoreUnderTest(): ?string
  */
 function raceLimiterWorkers(array $operations, int $maxAttempts): array
 {
-    $startAt = sprintf('%.6F', microtime(true) + 1.5);
+    // Enough lead for every process to boot before the common start instant.
+    $startAt = sprintf('%.6F', microtime(true) + 0.5 + 0.05 * count($operations));
     $processes = [];
 
     foreach ($operations as [$operation, $target]) {

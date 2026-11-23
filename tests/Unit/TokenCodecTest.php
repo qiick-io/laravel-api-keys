@@ -406,3 +406,11 @@ it('accepts only token versions 1 and 2 as the default to issue', function (int 
     'checksummed 2' => [2, true],
     'unknown 3' => [3, false],
 ]);
+
+it('keeps a 20-character secret floor even when a matcher declares a shorter secret', function (): void {
+    $matcher = new RecordingLegacyTokenMatcher('ek_SHORT', new DateTimeImmutable('2099-01-01T00:00:00Z'), secretLength: 5);
+    $codec = codec(legacyMatchers: [$matcher]);
+
+    expect($codec->prefixOf('ek_SHORT'.str_repeat('y', 19), codecNow()))->toBeNull()
+        ->and($codec->prefixOf('ek_SHORT'.str_repeat('y', 20), codecNow()))->toBe('ek_SHORT');
+});

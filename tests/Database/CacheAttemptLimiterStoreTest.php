@@ -80,6 +80,11 @@ it('never decrements below zero, and ignores a counter that does not exist', fun
     expect($limiter->remaining('bucket', 5))->toBe(5);
 
     $limiter->hit('bucket', 60);
+    $limiter->hit('bucket', 60);
+    $limiter->decrement('bucket');
+
+    expect($limiter->remaining('bucket', 5))->toBe(4);
+
     $limiter->decrement('bucket');
     $limiter->decrement('bucket');
 
@@ -142,6 +147,12 @@ it('fails loudly when memcached cannot be reached', function (): void {
         'api-keys-limiter-store-test:',
     ));
 
-    expect(fn () => (new CacheAttemptLimiter($unreachable))->hit('bucket'))
-        ->toThrow(RuntimeException::class, 'Memcached could not count an attempt: ');
+    try {
+        (new CacheAttemptLimiter($unreachable))->hit('bucket');
+        $this->fail('expected the unreachable server to be reported');
+    } catch (RuntimeException $exception) {
+        // The prefix, then memcached's own reason.
+        expect($exception->getMessage())->toStartWith('Memcached could not count an attempt: ')
+            ->and(strlen($exception->getMessage()))->toBeGreaterThan(strlen('Memcached could not count an attempt: '));
+    }
 });

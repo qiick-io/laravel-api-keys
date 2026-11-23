@@ -50,7 +50,11 @@ final class CacheAttemptLimiter implements AttemptLimiter
         return 0
         LUA;
 
-    /** One of `redis`, `memcached`, `array`: decided once, so every call takes the same path. */
+    /**
+     * Decided once, so every call takes the same path.
+     *
+     * @var 'redis'|'memcached'|'array'
+     */
     private string $storeKind;
 
     /**
@@ -82,58 +86,71 @@ final class CacheAttemptLimiter implements AttemptLimiter
             throw new \InvalidArgumentException('An attempt window must last at least one second.');
         }
 
-        if ($this->storeKind === 'redis') {
-            // Redis reads the window from the counter's own TTL.
-            return $this->countedHits($this->redisEval(self::REDIS_HIT, $key, $decaySeconds));
-        }
-
-        $this->cache->add($key.':timer', Carbon::now()->getTimestamp() + $decaySeconds, $decaySeconds);
-
-        if ($this->storeKind === 'memcached') {
-            return $this->memcachedHit($key, $decaySeconds);
-        }
-
-        $this->cache->add($key, 0, $decaySeconds);
-
-        return $this->countedHits($this->cache->increment($key));
+        // One arm per store, no fall-through: a store never borrows another store's path.
+        return match ($this->storeKind) {
+            'redis' => $this->countedHits($this->redisEval(self::REDIS_HIT, $key, $decaySeconds)),
+            'memcached' => $this->memcachedHit($key, $decaySeconds),
+            'array' => $this->arrayHit($key, $decaySeconds),
+        };
     }
 
     public function decrement(string $key): void
     {
-        if ($this->storeKind === 'redis') {
-            $this->redisEval(self::REDIS_DECREMENT, $key);
-
-            return;
-        }
-
-        if ($this->storeKind === 'memcached') {
+        match ($this->storeKind) {
+            'redis' => $this->redisEval(self::REDIS_DECREMENT, $key),
             // Memcached refuses to decrement a missing key and never goes below zero.
-            $this->memcachedStore()->getMemcached()->decrement($this->memcachedStore()->getPrefix().$key);
-
-            return;
-        }
-
-        if ($this->hits($key) > 0) {
-            $this->cache->decrement($key);
-        }
+            'memcached' => $this->memcachedStore()->getMemcached()->decrement($this->memcachedStore()->getPrefix().$key),
+            'array' => $this->arrayDecrement($key),
+        };
     }
 
     public function availableIn(string $key): int
     {
-        if ($this->storeKind === 'redis') {
+        return match ($this->storeKind) {
             // TTL is -2 for a missing counter; a counter without TTL cannot exist (see REDIS_HIT).
-            return max(0, $this->countedHits($this->redisConnection()->ttl($this->redisStore()->getPrefix().$key)));
-        }
-
-        // Stores may hand numbers back as numeric strings.
-        $windowEndsAt = $this->cache->get($key.':timer');
-
-        return is_numeric($windowEndsAt) ? max(0, (int) $windowEndsAt - Carbon::now()->getTimestamp()) : 0;
+            'redis' => max(0, $this->countedHits($this->redisConnection()->ttl($this->redisStore()->getPrefix().$key))),
+            'memcached', 'array' => $this->secondsUntilTimer($key),
+        };
     }
 
     public function remaining(string $key, int $maxAttempts): int
     {
         return max(0, $maxAttempts - $this->hits($key));
+    }
+
+    /**
+     * Redis reads the window from the counter's TTL; the other stores keep its end in a `:timer` key.
+     */
+    private function secondsUntilTimer(string $key): int
+    {
+        // Array and Memcached hand the stored integer back as an integer.
+        $windowEndsAt = $this->cache->get($key.':timer');
+
+        // Equivalent mutants: a live timer always ends in the future; max() only absorbs clock skew between workers.
+        return is_int($windowEndsAt) ? max(0, $windowEndsAt - Carbon::now()->getTimestamp()) : 0; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+    }
+
+    private function startTimer(string $key, int $decaySeconds): void
+    {
+        $this->cache->add($key.':timer', Carbon::now()->getTimestamp() + $decaySeconds, $decaySeconds);
+    }
+
+    /**
+     * A single process cannot race, so plain cache calls are enough here.
+     */
+    private function arrayHit(string $key, int $decaySeconds): int
+    {
+        $this->startTimer($key, $decaySeconds);
+        $this->cache->add($key, 0, $decaySeconds);
+
+        return $this->countedHits($this->cache->increment($key));
+    }
+
+    private function arrayDecrement(string $key): void
+    {
+        if ($this->hits($key) > 0) {
+            $this->cache->decrement($key);
+        }
     }
 
     private function hits(string $key): int
@@ -193,14 +210,16 @@ final class CacheAttemptLimiter implements AttemptLimiter
      */
     private function memcachedHit(string $key, int $decaySeconds): int
     {
+        $this->startTimer($key, $decaySeconds);
         $memcached = $this->memcachedStore()->getMemcached();
         $prefixedKey = $this->memcachedStore()->getPrefix().$key;
         // Memcached reads an expiry above 30 days as a Unix timestamp, not a duration.
         // Equivalent mutants: at exactly 30 days both forms name the same instant.
         $expiry = $decaySeconds > 2_592_000 ? Carbon::now()->getTimestamp() + $decaySeconds : $decaySeconds; // @pest-mutate-ignore: GreaterToGreaterOrEqual,DecrementInteger
 
-        // Equivalent mutant: the second attempt only runs if the window expires between add and increment.
-        foreach ([1, 2] as $attempt) { // @pest-mutate-ignore: RemoveArrayItem
+        // Equivalent mutants: the values only label the attempts, and the second one only runs
+        // if the window expires between add and increment.
+        foreach ([1, 2] as $attempt) { // @pest-mutate-ignore: RemoveArrayItem,IncrementInteger
             $memcached->add($prefixedKey, 0, $expiry);
             $hits = $memcached->increment($prefixedKey);
 

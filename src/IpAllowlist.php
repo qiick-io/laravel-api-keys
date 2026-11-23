@@ -71,12 +71,13 @@ final class IpAllowlist
         }
 
         if (strlen($binary) === 16 && str_starts_with($binary, self::MAPPED_PREFIX)) {
-            // inet_ntop cannot fail for a 4-byte slice from a successful inet_pton.
-            return (string) inet_ntop(substr($binary, 12)); // @pest-mutate-ignore: RemoveStringCast
+            $binary = substr($binary, 12);
         }
 
-        // inet_ntop cannot fail for a binary from a successful inet_pton.
-        return (string) inet_ntop($binary); // @pest-mutate-ignore: RemoveStringCast
+        // inet_ntop only fails on a malformed binary; inet_pton output never is one.
+        $rendered = inet_ntop($binary);
+
+        return $rendered === false ? null : $rendered;
     }
 
     private function isIpv4Mapped(string $ip): bool
@@ -100,6 +101,7 @@ final class IpAllowlist
         }
 
         $address = $parts[0];
+        // Equivalent mutant: a digit string compares and subtracts like the int, and IpUtils reads "/024" as /24.
         $prefixLength = (int) $parts[1]; // @pest-mutate-ignore: RemoveIntegerCast
         $wasMapped = $this->isIpv4Mapped($address);
         $expanded = $this->expandMapped($address);

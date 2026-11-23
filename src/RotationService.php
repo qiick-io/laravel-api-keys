@@ -27,7 +27,7 @@ use Qiick\ApiKeys\Contracts\LifetimePolicy;
  */
 final class RotationService
 {
-    public const int DEFAULT_MAX_GRACE_HOURS = 168; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+    public const int DEFAULT_MAX_GRACE_HOURS = 168;
 
     public function __construct(
         private int $maxGraceHours = self::DEFAULT_MAX_GRACE_HOURS,
@@ -117,7 +117,7 @@ final class RotationService
         $parsed = filter_var(
             $configValue,
             FILTER_VALIDATE_INT,
-            ['options' => ['min_range' => 0]], // @pest-mutate-ignore: IncrementInteger
+            ['options' => ['min_range' => 0]],
         );
 
         if (! is_int($parsed)) {

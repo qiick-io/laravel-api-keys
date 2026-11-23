@@ -27,7 +27,7 @@ use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
  */
 final class ApiKeyAuthenticator
 {
-    private const array KNOWN_TOKEN_VERSIONS = [0, 1, 2]; // @pest-mutate-ignore: IncrementInteger,DecrementInteger,RemoveArrayItem
+    private const array KNOWN_TOKEN_VERSIONS = [0, 1, 2];
 
     private RequestRestrictionsEvaluator $requestRestrictionsEvaluator;
 
@@ -51,7 +51,7 @@ final class ApiKeyAuthenticator
         private mixed $exceptionReporter = null,
         ?RequestRestrictionsEvaluator $requestRestrictionsEvaluator = null,
     ) {
-        $this->requestRestrictionsEvaluator = $requestRestrictionsEvaluator ?? new RequestRestrictionsEvaluator; // @pest-mutate-ignore: CoalesceRemoveLeft
+        $this->requestRestrictionsEvaluator = $requestRestrictionsEvaluator ?? new RequestRestrictionsEvaluator;
     }
 
     /**
@@ -174,7 +174,7 @@ final class ApiKeyAuthenticator
         }
 
         // Cast keeps a strict string for IpAllowlist; empty fallback is for null IP only.
-        if (! $this->ipAllowlist->allows((string) ($clientIp ?? ''), $matched->rawIpAllowlist())) { // @pest-mutate-ignore: RemoveStringCast,EmptyStringToNotEmpty
+        if (! $this->ipAllowlist->allows((string) ($clientIp ?? ''), $matched->rawIpAllowlist())) {
             throw ApiKeyRejection::ipNotAllowed();
         }
 
@@ -292,8 +292,8 @@ final class ApiKeyAuthenticator
         }
 
         // Laravel helper when present; host apps without it still authenticate.
-        if (\function_exists('report')) { // @pest-mutate-ignore: IfNegated
-            report($exception); // @pest-mutate-ignore: RemoveFunctionCall
+        if (\function_exists('report')) {
+            report($exception);
         }
     }
 
@@ -309,7 +309,7 @@ final class ApiKeyAuthenticator
         }
 
         foreach ($decisions as $decision) {
-            if ($decision->maxAttempts <= 0) { // @pest-mutate-ignore: SmallerOrEqualToSmaller,DecrementInteger
+            if ($decision->maxAttempts <= 0) {
                 continue;
             }
 
@@ -340,29 +340,29 @@ final class ApiKeyAuthenticator
         $minute = $record->rateLimitPerMinute() ?? $this->defaultRateLimitPerMinute;
 
         // Decrement of the 0 literal is equivalent: maxAttempts<=0 still skips the bucket.
-        if ($minute > 0) { // @pest-mutate-ignore: GreaterToGreaterOrEqual,DecrementInteger
+        if ($minute > 0) {
             $decisions[] = new RateLimitDecision(
                 bucketKey: 'api-key:'.$record->id(),
                 maxAttempts: $minute,
-                decaySeconds: 60, // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+                decaySeconds: 60,
             );
         }
 
         $day = $record->rateLimitPerDay();
-        if ($day !== null && $day > 0) { // @pest-mutate-ignore: GreaterToGreaterOrEqual,DecrementInteger,BooleanAndToBooleanOr
+        if ($day !== null && $day > 0) {
             $decisions[] = new RateLimitDecision(
                 bucketKey: 'api-key:'.$record->id().':day',
                 maxAttempts: $day,
-                decaySeconds: 86_400, // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+                decaySeconds: 86_400,
             );
         }
 
         $month = $record->rateLimitPerMonth();
-        if ($month !== null && $month > 0) { // @pest-mutate-ignore: GreaterToGreaterOrEqual,DecrementInteger,BooleanAndToBooleanOr
+        if ($month !== null && $month > 0) {
             $decisions[] = new RateLimitDecision(
                 bucketKey: 'api-key:'.$record->id().':month',
                 maxAttempts: $month,
-                decaySeconds: 2_592_000, // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+                decaySeconds: 2_592_000,
             );
         }
 

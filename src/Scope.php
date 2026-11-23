@@ -55,6 +55,6 @@ final readonly class Scope
 
         // Only write may stand in for read (same resource already checked).
         // After the guards above, AND→OR on this line is behaviourally equivalent.
-        return $this->action === 'write' && $required->action === 'read'; // @pest-mutate-ignore: BooleanAndToBooleanOr
+        return $this->action === 'write' && $required->action === 'read';
     }
 }

@@ -98,7 +98,7 @@ final class FailedAttemptLimiter
      */
     public function bucketKey(?string $clientIp): ?string
     {
-        if ($clientIp === null || $clientIp === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
+        if ($clientIp === null || $clientIp === '') {
             return null;
         }
 
@@ -109,8 +109,8 @@ final class FailedAttemptLimiter
 
         // expandMapped only returns addresses inet_pton already accepted.
         $binary = @inet_pton($canonical);
-        if ($binary === false) { // @pest-mutate-ignore: FalseToTrue
-            return null; // @pest-mutate-ignore: RemoveEarlyReturn
+        if ($binary === false) {
+            return null;
         }
 
         if (strlen($binary) === 4) {
@@ -121,8 +121,8 @@ final class FailedAttemptLimiter
         $network = substr($binary, 0, 8).str_repeat("\0", 8);
         $rendered = inet_ntop($network);
         // inet_ntop only fails on corrupt binary; our 16-byte network is always valid.
-        if ($rendered === false) { // @pest-mutate-ignore: FalseToTrue
-            return null; // @pest-mutate-ignore: RemoveEarlyReturn
+        if ($rendered === false) {
+            return null;
         }
 
         return 'api-key-failures:v6:'.$rendered;

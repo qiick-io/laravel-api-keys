@@ -85,6 +85,13 @@ it('renders rateLimited as 429 with Retry-After and optional X-RateLimit headers
         ->and($response->headers->get('X-RateLimit-Limit'))->toBe('60')
         ->and($response->headers->get('X-RateLimit-Remaining'))->toBe('0')
         ->and($response->headers->get('X-RateLimit-Reset'))->toBe('42')
+        // Products that copy getHeaders() onto their own response (PSR-7, Octane) get strings.
+        ->and($rejection->getHeaders())->toBe([
+            'Retry-After' => '42',
+            'X-RateLimit-Limit' => '60',
+            'X-RateLimit-Remaining' => '0',
+            'X-RateLimit-Reset' => '42',
+        ])
         ->and($response->getData(true))->toBe([
             'message' => 'Too many requests.',
             'error' => 'rate_limit_exceeded',

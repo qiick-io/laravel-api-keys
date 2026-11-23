@@ -28,13 +28,13 @@ final class TokenCodec
      * these lines is ignored; the covered {@see self::idLength()} /
      * {@see self::secretLength()} methods are the values issue/parse actually use.
      */
-    public const int ID_LENGTH = 8; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+    public const int ID_LENGTH = 8;
 
-    public const int SECRET_LENGTH = 32; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+    public const int SECRET_LENGTH = 32;
 
-    public const int CHECKSUM_LENGTH = 6; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+    public const int CHECKSUM_LENGTH = 6;
 
-    public const int DEFAULT_TOKEN_VERSION = 2; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+    public const int DEFAULT_TOKEN_VERSION = 2;
 
     private const string ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -198,7 +198,7 @@ final class TokenCodec
     /**
      * Floor for matcher-declared secret remainders (blocks near-whole-token "prefixes").
      */
-    private const int MIN_LEGACY_SECRET_REMAINDER = 20; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+    private const int MIN_LEGACY_SECRET_REMAINDER = 20;
 
     /**
      * Accepted only when {@see LegacyTokenMatcher::isAccepting} is true **and**
@@ -213,7 +213,7 @@ final class TokenCodec
 
         $matcherUntil = $matcher->acceptUntil();
         // min(config, matcher): equality is equivalent either side; ignore ≤ vs <.
-        $until = $this->legacyAcceptUntil === null || $matcherUntil < $this->legacyAcceptUntil // @pest-mutate-ignore: SmallerToSmallerOrEqual
+        $until = $this->legacyAcceptUntil === null || $matcherUntil < $this->legacyAcceptUntil
             ? $matcherUntil
             : $this->legacyAcceptUntil;
 

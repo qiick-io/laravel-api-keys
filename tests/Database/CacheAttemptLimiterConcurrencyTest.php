@@ -92,6 +92,12 @@ it('caps guesses and never goes negative when valid requests from the same IP ra
         ->and(limiterWorker('count', 'api-key-failures:v4:203.0.113.10'))->toBe((string) $admittedGuesses);
 });
 
+it('admits every valid request from one IP however many are verified at once', function (): void {
+    $outcomes = raceLimiterWorkers(array_fill(0, 30, ['slow-request', '203.0.113.10']), 20);
+
+    expect(array_sum(array_map(intval(...), $outcomes)))->toBe(30);
+});
+
 it('admits exactly the limit on a per-key bucket and leaves the counter at the limit', function (): void {
     $outcomes = raceLimiterWorkers(array_fill(0, 50, ['hit', 'race:key']), 10);
 

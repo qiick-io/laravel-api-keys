@@ -72,6 +72,19 @@ echo match ($operation) {
 
         return 1;
     })(),
+    'slow-request' => (function () use ($limiter, $maxAttempts, $key): int {
+        $brake = new FailedAttemptLimiter($limiter, $maxAttempts);
+
+        if (! $brake->reserve($key)) {
+            return 0;
+        }
+
+        // A valid key whose verification (lookup, hash, authorizer) takes 200 ms.
+        usleep(200_000);
+        $brake->release($key);
+
+        return 1;
+    })(),
     'hit' => (function () use ($limiter, $maxAttempts, $key): int {
         if ($limiter->hit($key, 60) <= $maxAttempts) {
             return 1;

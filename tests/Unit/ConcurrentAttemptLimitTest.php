@@ -16,6 +16,7 @@ use Qiick\ApiKeys\Testing\FixedEnvironment;
 use Qiick\ApiKeys\Testing\FixedRandomSource;
 use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\Tests\Support\InterleavingAttemptLimiter;
+use Qiick\ApiKeys\Tests\Support\ReentrantApiKeyRepository;
 use Qiick\ApiKeys\TokenCodec;
 use Qiick\ApiKeys\TokenEnvironment;
 use Qiick\ApiKeys\UsageRecorder;
@@ -110,4 +111,38 @@ it('evaluates only maxPerMinute guesses when two invalid guesses race from one I
 
     expect([$firstOutcome, $secondOutcome])->toEqualCanonicalizing(['invalid_token', 'rate_limit_exceeded'])
         ->and($failureLimiter->inner->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(1);
+});
+
+it('never refuses a valid key because other valid requests from its IP are still being verified', function (): void {
+    $codec = concurrentCodec();
+    $issued = $codec->issue();
+    $record = new InMemoryApiKeyRecord(
+        keyPrefix: $issued->keyPrefix,
+        keyHash: $issued->keyHash,
+        scopes: ['items:read'],
+    );
+    $repository = new ReentrantApiKeyRepository(new FakeApiKeyRepository([$record]));
+    $failures = new FakeAttemptLimiter;
+    $authenticator = new ApiKeyAuthenticator(
+        codec: $codec,
+        repository: $repository,
+        authorizer: new FakeKeyAuthorizer,
+        vocabulary: new ArrayScopeVocabulary(['items:read']),
+        ipAllowlist: new IpAllowlist,
+        usageRecorder: new UsageRecorder,
+        clock: new FixedClock(new DateTimeImmutable('2026-01-15 12:00:00')),
+        attemptLimiter: new FakeAttemptLimiter,
+        failedAttemptLimiter: new FailedAttemptLimiter($failures, maxPerMinute: 1),
+        defaultRateLimitPerMinute: 0,
+    );
+    $authenticate = fn () => $authenticator->authenticate($issued->plainText, new KeyContext('203.0.113.10'));
+
+    $secondOutcome = null;
+    $repository->interleave(function () use (&$secondOutcome, $authenticate): void {
+        $secondOutcome = concurrentOutcome($authenticate);
+    });
+    $firstOutcome = concurrentOutcome($authenticate);
+
+    expect([$firstOutcome, $secondOutcome])->toBe(['authenticated', 'authenticated'])
+        ->and($failures->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(0);
 });

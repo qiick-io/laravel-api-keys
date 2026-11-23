@@ -13,7 +13,8 @@ function limiterStoreUnderTest(): ?string
 {
     $store = getenv('API_KEYS_LIMITER_STORE');
 
-    return is_string($store) && $store !== '' ? $store : null;
+    // "both" is the in-process mutation job; the races run once per store in the smoke matrix.
+    return in_array($store, ['redis', 'memcached'], true) ? $store : null;
 }
 
 /**

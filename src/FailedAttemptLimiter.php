@@ -49,7 +49,7 @@ final class FailedAttemptLimiter
             return true;
         }
 
-        $this->limiter->decrement($bucket, 60);
+        $this->limiter->decrement($bucket);
 
         return false;
     }
@@ -63,7 +63,7 @@ final class FailedAttemptLimiter
         $bucket = $this->enabledBucketKey($clientIp);
 
         if ($bucket !== null) {
-            $this->limiter->decrement($bucket, 60);
+            $this->limiter->decrement($bucket);
         }
     }
 

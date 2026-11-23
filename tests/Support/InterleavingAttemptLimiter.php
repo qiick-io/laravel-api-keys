@@ -37,9 +37,9 @@ final class InterleavingAttemptLimiter implements AttemptLimiter
         return $hits;
     }
 
-    public function decrement(string $key, int $decaySeconds = 60): void
+    public function decrement(string $key): void
     {
-        $this->inner->decrement($key, $decaySeconds);
+        $this->inner->decrement($key);
     }
 
     public function availableIn(string $key): int

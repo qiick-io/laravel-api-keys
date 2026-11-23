@@ -120,7 +120,7 @@ it('lets the warning be reclaimed once a dead worker\'s lease has expired', func
     bindLegacyWarningCommand([$notifiable]);
 
     // A worker claimed the warning and died before sending or marking it.
-    expect(app(LegacyFormatWarningGate::class)->claim(legacyWarningIdempotencyKey(), 900))->toBeTrue();
+    expect(app(LegacyFormatWarningGate::class)->claim(legacyWarningIdempotencyKey(), 900))->toBeString();
 
     $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
     Notification::assertNothingSent();
@@ -141,4 +141,36 @@ it('never re-sends a warning that was sent, even after the lease would have expi
     $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
 
     Notification::assertSentToTimes($notifiable, ApiKeyLegacyFormatWarningNotification::class, 1);
+});
+
+it('lets only the lease owner release it, so a late worker cannot free another worker\'s lease', function (): void {
+    $gate = app(LegacyFormatWarningGate::class);
+    $key = legacyWarningIdempotencyKey();
+
+    $lateWorker = $gate->claim($key, 900);
+    $this->travel(901)->seconds();
+    $currentWorker = $gate->claim($key, 900);
+
+    expect($lateWorker)->toBeString()
+        ->and($currentWorker)->toBeString()
+        ->and($currentWorker)->not->toBe($lateWorker);
+
+    $gate->release($key, $lateWorker);
+
+    expect($gate->claim($key, 900))->toBeNull();
+
+    $gate->release($key, $currentWorker);
+
+    expect($gate->claim($key, 900))->toBeString();
+});
+
+it('never grants a lease on a warning that was marked sent', function (): void {
+    $gate = app(LegacyFormatWarningGate::class);
+    $key = legacyWarningIdempotencyKey();
+
+    $owner = $gate->claim($key, 900);
+    $gate->markSent($key, $owner);
+    $this->travel(901)->seconds();
+
+    expect($gate->claim($key, 900))->toBeNull();
 });

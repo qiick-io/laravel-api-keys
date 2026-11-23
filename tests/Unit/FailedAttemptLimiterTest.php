@@ -26,11 +26,9 @@ it('hands a released slot back so the next attempt is admitted', function (): vo
     $limiter = new FailedAttemptLimiter($inner, maxPerMinute: 1);
 
     expect($limiter->reserve('203.0.113.10'))->toBeTrue();
-    $inner->lastDecaySeconds = [];
     $limiter->release('203.0.113.10');
 
     expect($inner->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(0)
-        ->and($inner->lastDecaySeconds)->toBe(['api-key-failures:v4:203.0.113.10' => 60])
         ->and($limiter->reserve('203.0.113.10'))->toBeTrue()
         ->and($limiter->reserve('203.0.113.10'))->toBeFalse();
 });

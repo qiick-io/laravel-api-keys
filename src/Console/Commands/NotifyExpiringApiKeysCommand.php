@@ -193,20 +193,21 @@ final class NotifyExpiringApiKeysCommand extends Command
                 continue;
             }
 
-            if (! $legacyWarningGate->claim($idempotencyKey, $leaseSeconds)) {
+            $leaseOwner = $legacyWarningGate->claim($idempotencyKey, $leaseSeconds);
+            if ($leaseOwner === null) {
                 continue;
             }
 
             try {
                 Notification::send($recipients, new $notificationClass($record, $acceptUntil));
             } catch (\Throwable $exception) {
-                $legacyWarningGate->release($idempotencyKey);
+                $legacyWarningGate->release($idempotencyKey, $leaseOwner);
                 $this->error('Legacy-format warning failed for '.$record->publicId().': '.$exception->getMessage());
 
                 continue;
             }
 
-            $legacyWarningGate->markSent($idempotencyKey);
+            $legacyWarningGate->markSent($idempotencyKey, $leaseOwner);
             $events->dispatch(new ApiKeyLegacyFormatWarningSent(
                 apiKeyId: $record->publicId(),
                 acceptUntil: $acceptUntil,

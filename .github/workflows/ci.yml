@@ -109,6 +109,9 @@ jobs:
           - mysql
           - mariadb
           - pgsql
+          # CacheAttemptLimiter races on the stores it supports.
+          - redis
+          - memcached
     steps:
       - name: Checkout
         # actions/checkout@v4.1.1
@@ -121,7 +124,7 @@ jobs:
           php-version: '8.4'
           coverage: none
           tools: composer:v2
-          extensions: pdo_sqlite, pdo_mysql, pdo_pgsql
+          extensions: pdo_sqlite, pdo_mysql, pdo_pgsql, redis, memcached, pcntl
 
       - name: Install dependencies
         run: composer update --no-interaction --prefer-dist
@@ -177,7 +180,40 @@ jobs:
           echo "PostgreSQL did not become ready" >&2
           exit 1
 
+      - name: Start Redis
+        if: matrix.engine == 'redis'
+        run: |
+          docker run -d --name limiter-redis -p 6379:6379 redis:7
+          for attempt in $(seq 1 30); do
+            if docker exec limiter-redis redis-cli ping | grep -q PONG; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Redis did not become ready" >&2
+          exit 1
+
+      - name: Start Memcached
+        if: matrix.engine == 'memcached'
+        run: |
+          docker run -d --name limiter-memcached -p 11211:11211 memcached:1.6
+          for attempt in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/11211) 2>/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Memcached did not become ready" >&2
+          exit 1
+
+      - name: Attempt limiter races (${{ matrix.engine }})
+        if: matrix.engine == 'redis' || matrix.engine == 'memcached'
+        env:
+          API_KEYS_LIMITER_STORE: ${{ matrix.engine }}
+        run: vendor/bin/pest --filter=CacheAttemptLimiterConcurrency
+
       - name: Expiry notice claim CAS (${{ matrix.engine }})
+        if: matrix.engine != 'redis' && matrix.engine != 'memcached'
         env:
           API_KEYS_CLAIM_ENGINE: ${{ matrix.engine }}
           API_KEYS_CLAIM_PASSWORD: password

@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace Qiick\ApiKeys\Laravel;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use Qiick\ApiKeys\AppEnvironmentResolver;
+use Qiick\ApiKeys\CacheAttemptLimiter;
 use Qiick\ApiKeys\CacheLegacyFormatWarningGate;
 use Qiick\ApiKeys\ConfigLifetimePolicy;
 use Qiick\ApiKeys\Console\Commands\NotifyExpiringApiKeysCommand;
+use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
@@ -40,6 +43,12 @@ final class ApiKeysServiceProvider extends ServiceProvider
         $this->app->singleton(Clock::class, SystemClock::class);
         $this->app->singleton(RandomSource::class, RandomBytesSource::class);
         $this->app->singleton(LegacyFormatWarningGate::class, CacheLegacyFormatWarningGate::class);
+
+        // The default cache store must be redis or memcached (array in tests); a product binding wins.
+        $this->app->singletonIf(
+            AttemptLimiter::class,
+            fn (Application $app): AttemptLimiter => new CacheAttemptLimiter($app->make(CacheRepository::class)),
+        );
 
         $this->app->singleton(EnvironmentResolver::class, function (Application $app): EnvironmentResolver {
             $configured = $this->config($app)->get('api-keys.environment');
@@ -176,11 +185,14 @@ final class ApiKeysServiceProvider extends ServiceProvider
             return null;
         }
 
-        $days = is_int($configured) || is_string($configured)
-            ? filter_var($configured, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])
-            : false;
+        // Digits only: filter_var() would also accept " 30" and "+30".
+        $days = match (true) {
+            is_int($configured) => $configured,
+            is_string($configured) && preg_match('/^[1-9][0-9]*$/D', $configured) === 1 => (int) $configured,
+            default => 0,
+        };
 
-        if (! is_int($days)) {
+        if ($days < 1) {
             throw new \InvalidArgumentException(
                 'api-keys.max_lifetime_days (API_KEYS_MAX_LIFETIME_DAYS) must be a whole number of days >= 1, or unset to disable.',
             );

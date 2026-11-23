@@ -30,7 +30,8 @@ use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
  *
  * N2: when `now` is within `api-keys.legacy.warn_days_before` of
  * `accept_until`, warns owners of active `token_version` 0 rows once per
- * key/cut-off via {@see LegacyFormatWarningGate}.
+ * key/cut-off via {@see LegacyFormatWarningGate}, with the same protocol and
+ * the same lease: resolve recipients, claim, send, then mark sent or release.
  */
 final class NotifyExpiringApiKeysCommand extends Command
 {
@@ -130,6 +131,7 @@ final class NotifyExpiringApiKeysCommand extends Command
             $events,
             $roles,
             $now,
+            $leaseSeconds,
         );
         $this->info("Legacy-format warnings sent: {$legacyWarned}");
 
@@ -146,6 +148,7 @@ final class NotifyExpiringApiKeysCommand extends Command
         Dispatcher $events,
         array $roles,
         \DateTimeImmutable $now,
+        int $leaseSeconds,
     ): int {
         $acceptUntil = $this->legacyAcceptUntil();
         if ($acceptUntil === null) {
@@ -184,16 +187,26 @@ final class NotifyExpiringApiKeysCommand extends Command
                 .':'
                 .$acceptUntil->format(\DateTimeInterface::ATOM);
 
-            if (! $legacyWarningGate->claim($idempotencyKey)) {
-                continue;
-            }
-
+            // Resolve before claiming: a key with no recipient yet must stay claimable.
             $recipients = iterator_to_array($recipientResolver->recipientsFor($record, $roles), false);
             if ($recipients === []) {
                 continue;
             }
 
-            Notification::send($recipients, new $notificationClass($record, $acceptUntil));
+            if (! $legacyWarningGate->claim($idempotencyKey, $leaseSeconds)) {
+                continue;
+            }
+
+            try {
+                Notification::send($recipients, new $notificationClass($record, $acceptUntil));
+            } catch (\Throwable $exception) {
+                $legacyWarningGate->release($idempotencyKey);
+                $this->error('Legacy-format warning failed for '.$record->publicId().': '.$exception->getMessage());
+
+                continue;
+            }
+
+            $legacyWarningGate->markSent($idempotencyKey);
             $events->dispatch(new ApiKeyLegacyFormatWarningSent(
                 apiKeyId: $record->publicId(),
                 acceptUntil: $acceptUntil,

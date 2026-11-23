@@ -194,7 +194,19 @@ it('keeps a product LifetimePolicy binding over the config default', function ()
     app()->instance(LifetimePolicy::class, $productPolicy);
     app()->forgetInstance(RotationService::class);
 
-    expect(app(LifetimePolicy::class))->toBe($productPolicy);
+    $now = new DateTimeImmutable('2026-01-15T12:00:00+00:00');
+    $codec = app(TokenCodec::class);
+    $issued = $codec->issue();
+    $record = (new InMemoryApiKeyRecord(
+        keyPrefix: $issued->keyPrefix,
+        keyHash: $issued->keyHash,
+        scopes: ['items:read'],
+    ))->withExpiresAt($now->modify('+365 days'));
+
+    $rotation = app(RotationService::class)->rotate($record, $codec, new FixedClock($now), 0);
+
+    expect(app(LifetimePolicy::class))->toBe($productPolicy)
+        ->and($rotation->lastRotatedAt)->toEqual($now);
 });
 
 it('fails boot when api-keys.max_lifetime_days is not a whole number of days >= 1', function (mixed $configured): void {

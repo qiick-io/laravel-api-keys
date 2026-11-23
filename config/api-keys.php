@@ -57,12 +57,13 @@ return [
     'failed_attempts_per_minute' => (int) env('API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 20),
 
     /*
-     * Optional max lifetime in days for issue/rotate when a LifetimePolicy is bound.
-     * Null disables the package-side default policy.
+     * Optional organisation max lifetime in days, enforced on rotation by the
+     * default ConfigLifetimePolicy (a product binding of LifetimePolicy
+     * replaces it). Unset disables it; any other value must be a whole number
+     * >= 1, or the app fails at boot. Not cast here, so a typo cannot
+     * silently become another number.
      */
-    'max_lifetime_days' => env('API_KEYS_MAX_LIFETIME_DAYS') !== null
-        ? (int) env('API_KEYS_MAX_LIFETIME_DAYS')
-        : null,
+    'max_lifetime_days' => env('API_KEYS_MAX_LIFETIME_DAYS'),
 
     'expiry' => [
         /*

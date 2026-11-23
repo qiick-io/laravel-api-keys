@@ -29,18 +29,17 @@ final class InterleavingAttemptLimiter implements AttemptLimiter
         $this->concurrentRequest = $concurrentRequest;
     }
 
-    public function tooManyAttempts(string $key, int $maxAttempts): bool
+    public function hit(string $key, int $decaySeconds = 60): int
     {
-        $answer = $this->inner->tooManyAttempts($key, $maxAttempts);
+        $hits = $this->inner->hit($key, $decaySeconds);
         $this->runConcurrentRequestOnce();
 
-        return $answer;
+        return $hits;
     }
 
-    public function hit(string $key, int $decaySeconds = 60): void
+    public function decrement(string $key, int $decaySeconds = 60): void
     {
-        $this->inner->hit($key, $decaySeconds);
-        $this->runConcurrentRequestOnce();
+        $this->inner->decrement($key, $decaySeconds);
     }
 
     public function availableIn(string $key): int

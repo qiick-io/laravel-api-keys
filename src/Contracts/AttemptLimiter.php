@@ -5,15 +5,32 @@ declare(strict_types=1);
 namespace Qiick\ApiKeys\Contracts;
 
 /**
- * @api Brake for per-key (and later pre-auth) attempt buckets.
+ * @api Counter store behind the per-key rate limits and the pre-auth brake.
  *
- * Products typically adapt Illuminate's RateLimiter; tests use an in-memory fake.
+ * The package never asks "is there room?" and then counts in a second step:
+ * concurrent requests would all see room and all get through. It counts first
+ * with {@see hit()}, which must be one atomic increment in the shared store,
+ * and compares the returned count with the limit. An attempt that turns out
+ * not to count (over the limit, or a successful key on the failure brake) is
+ * handed back with {@see decrement()}.
+ *
+ * Products typically adapt Illuminate's `RateLimiter`, whose `hit()` and
+ * `decrement()` are atomic `Cache::increment` calls on Redis, Memcached and
+ * the database store; tests use the in-memory fake.
  */
 interface AttemptLimiter
 {
-    public function tooManyAttempts(string $key, int $maxAttempts): bool;
+    /**
+     * Atomically adds one attempt to `$key` and returns the bucket's count
+     * including it. The first hit opens a window of `$decaySeconds`; later
+     * hits must not extend it.
+     */
+    public function hit(string $key, int $decaySeconds = 60): int;
 
-    public function hit(string $key, int $decaySeconds = 60): void;
+    /**
+     * Atomically takes back one attempt previously added with {@see hit()}.
+     */
+    public function decrement(string $key, int $decaySeconds = 60): void;
 
     public function availableIn(string $key): int;
 

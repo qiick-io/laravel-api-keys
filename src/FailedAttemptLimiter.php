@@ -20,38 +20,53 @@ use Qiick\ApiKeys\Contracts\AttemptLimiter;
  */
 final class FailedAttemptLimiter
 {
+    private const int DECAY_SECONDS = 60;
+
     public function __construct(
         private AttemptLimiter $limiter,
         private int $maxPerMinute = 20,
         private IpAllowlist $ipAllowlist = new IpAllowlist,
     ) {}
 
-    public function tooManyAttempts(?string $clientIp): bool
+    /**
+     * Counts this attempt against the client's bucket before the token is
+     * evaluated, and returns false when the bucket was already full.
+     *
+     * Counting first is what makes the cap hold under concurrency: guesses
+     * racing from one network each take their own slot in one atomic
+     * increment, so at most `maxPerMinute` of them are ever evaluated. A
+     * refused attempt hands its slot back at once; the caller hands back the
+     * slot of an attempt that turns out not to be a failure with
+     * {@see release()}.
+     */
+    public function reserve(?string $clientIp): bool
     {
-        if ($this->maxPerMinute <= 0) {
-            return false;
-        }
+        $bucket = $this->enabledBucketKey($clientIp);
 
-        $bucket = $this->bucketKey($clientIp);
         if ($bucket === null) {
-            return false;
+            return true;
         }
 
-        return $this->limiter->tooManyAttempts($bucket, $this->maxPerMinute);
+        if ($this->limiter->hit($bucket, self::DECAY_SECONDS) <= $this->maxPerMinute) {
+            return true;
+        }
+
+        $this->limiter->decrement($bucket, self::DECAY_SECONDS);
+
+        return false;
     }
 
-    public function hit(?string $clientIp): void
+    /**
+     * Hands back a slot taken by {@see reserve()} for an attempt that was not
+     * a failed guess (it authenticated, or was refused for another reason).
+     */
+    public function release(?string $clientIp): void
     {
-        if ($this->maxPerMinute <= 0) {
-            return;
-        }
+        $bucket = $this->enabledBucketKey($clientIp);
 
-        $bucket = $this->bucketKey($clientIp);
-        if ($bucket === null) {
-            return;
+        if ($bucket !== null) {
+            $this->limiter->decrement($bucket, self::DECAY_SECONDS);
         }
-
-        $this->limiter->hit($bucket, 60);
     }
 
     public function availableIn(?string $clientIp): int
@@ -67,6 +82,15 @@ final class FailedAttemptLimiter
     public function maxPerMinute(): int
     {
         return $this->maxPerMinute;
+    }
+
+    private function enabledBucketKey(?string $clientIp): ?string
+    {
+        if ($this->maxPerMinute <= 0) {
+            return null;
+        }
+
+        return $this->bucketKey($clientIp);
     }
 
     /**

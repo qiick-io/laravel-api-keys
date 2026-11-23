@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Rate limits and the failed-attempt brake are atomic: the authenticator counts
+  first with `AttemptLimiter::hit()` (which now returns the count) and refuses
+  over the limit, so concurrent requests can no longer all pass a check made
+  before any of them counted. A refused or non-failure attempt is handed back
+  with `AttemptLimiter::decrement()`.
+- The legacy-format warning no longer consumes its idempotency claim before
+  resolving recipients and sending: it follows the expiry-notice protocol
+  (resolve, lease claim, send, mark sent or release) with the same lease.
+- `api-keys.max_lifetime_days` is enforced by default: the provider binds
+  `ConfigLifetimePolicy` unless the product binds its own `LifetimePolicy`,
+  and an invalid value fails at boot instead of being cast with `(int)`.
+
+### Changed (breaking)
+
+- `AttemptLimiter`: `hit()` returns `int`; `decrement()` added;
+  `tooManyAttempts()` removed.
+- `FailedAttemptLimiter`: `reserve()` / `release()` replace
+  `tooManyAttempts()` / `hit()`.
+- `LegacyFormatWarningGate`: `claim($key, $leaseSeconds)`, plus `release()`
+  and `markSent()`.
+
 ## [0.2.0] - 2026-11-22
 
 Pre-1.0 completeness for the standards review (Luca §7): contracts, schema,

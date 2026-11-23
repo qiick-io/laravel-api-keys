@@ -48,7 +48,7 @@ Set `API_KEYS_PRODUCT_PREFIX` (three-letter product code) before issuing tokens.
 | --- | --- |
 | Proxies | `KeyContext::ip` / `ClientIp::from` MUST use `Request::ip()` only after `TrustProxies` is configured correctly. Never pass raw `X-Forwarded-For` / `X-Real-IP` from untrusted clients. |
 | Enumeration | Format-miss and hash-miss return the **same** `401 invalid_token` body/headers. A dummy `hash_equals` runs when no candidates match. Pre-auth `FailedAttemptLimiter` is default-on in recipes. The public `key_prefix` is non-secret by design. |
-| Failed-attempt brake | Buckets IPv4 by `/32` and IPv6 by `/64`. IPv4-mapped (`::ffff:a.b.c.d`) expands to dotted IPv4 before bucketing (same path as `IpAllowlist`). Null/empty/unparseable client IPs **skip** the brake (never share one bucket — that would lock out everyone behind a misconfigured proxy). Repository/infra exceptions are **not** counted. Shared egress / NAT: many clients behind one public IP share one bucket and can lock each other out; keep the recipe default **on** (20/min) and raise only with a clear threat model. Wire after `TrustProxies` so `KeyContext::ip` is the real client, not the LB. |
+| Failed-attempt brake | Buckets IPv4 by `/32` and IPv6 by `/64`. IPv4-mapped (`::ffff:a.b.c.d`) expands to dotted IPv4 before bucketing (same path as `IpAllowlist`). Null/empty/unparseable client IPs **skip** the brake (never share one bucket — that would lock out everyone behind a misconfigured proxy). Repository/infra exceptions are **not** counted. The brake counts each attempt **before** evaluating it (one atomic `AttemptLimiter::hit`), so concurrent guesses cannot exceed the cap; a successful or non-credential outcome hands its slot back. Shared egress / NAT: many clients behind one public IP share one bucket and can lock each other out; keep the recipe default **on** (20/min) and raise only with a clear threat model. Wire after `TrustProxies` so `KeyContext::ip` is the real client, not the LB. |
 | Redaction | Presented tokens / Bearer values MUST NEVER appear in exception messages, JSON bodies, logs, telemetry, activity properties, or `__debugInfo`. |
 | Scopes | Fail-closed: whitespace, wrong case, duplicates, or non-vocabulary values → empty set → `403 insufficient_scope` (never 401). |
 | Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint; lowercase UUID; rejects non-UUID, nil UUID, and a conflicting existing `api_key_id`). |
@@ -78,6 +78,40 @@ enforced as **rolling windows** through Laravel's `RateLimiter` (decay 60 s /
 86_400 s / 2_592_000 s). They are not calendar day or calendar month buckets.
 Durable calendar quotas are LATER (standards review L4).
 
+Limits hold under concurrency: the authenticator counts a request first with
+`AttemptLimiter::hit()`, one atomic increment that returns the new count, and
+refuses it when that count is over the limit (handing the attempt back with
+`decrement()`). It never checks and then counts in two steps. Your adapter
+must keep `hit()` atomic in a store every worker shares; Laravel's
+`RateLimiter` does on Redis, Memcached and the database cache:
+
+```php
+final class RateLimiterAttemptLimiter implements AttemptLimiter
+{
+    public function __construct(private RateLimiter $rateLimiter) {}
+
+    public function hit(string $key, int $decaySeconds = 60): int
+    {
+        return $this->rateLimiter->hit($key, $decaySeconds);
+    }
+
+    public function decrement(string $key, int $decaySeconds = 60): void
+    {
+        $this->rateLimiter->decrement($key, $decaySeconds);
+    }
+
+    public function availableIn(string $key): int
+    {
+        return $this->rateLimiter->availableIn($key);
+    }
+
+    public function remaining(string $key, int $maxAttempts): int
+    {
+        return $this->rateLimiter->remaining($key, $maxAttempts);
+    }
+}
+```
+
 ## Expiry notices (claim lease)
 
 `api-keys:notify-expiring` takes a CAS lease on `expiry_notice_claimed_at`
@@ -92,6 +126,23 @@ Two operational risks (accepted as documented nits after #18):
 2. **Send longer than the lease.** If delivery (mail, queue, webhook) exceeds
    `api-keys.expiry.claim_lease_seconds` (default **900**), another worker can
    win the CAS and send a second notice. Raise the lease, or keep sends short.
+
+The legacy-format T−90 warning follows the same protocol with the same lease,
+through `LegacyFormatWarningGate` (cache-backed by default): recipients are
+resolved first, so a key with no recipient yet stays claimable; a failed send
+releases the lease and the next run retries; a worker that dies mid-send
+leaves a lease that lapses after `claim_lease_seconds`; a sent warning is
+marked permanently and never repeats. The cache must be shared by all workers.
+
+## Max key lifetime
+
+`api-keys.max_lifetime_days` (`API_KEYS_MAX_LIFETIME_DAYS`) is enforced on
+rotation by the default `ConfigLifetimePolicy`: `RotationService` refuses an
+expiry later than now + that many days, or no expiry at all. Unset disables
+it. Any other value must be a whole number >= 1; anything else (`0`, `30abc`,
+`thirty`) fails at boot instead of being silently cast. Bind your own
+`Contracts\LifetimePolicy` to replace the default, and call it from your
+issuance code too: issuance is product-owned.
 
 ## Rotation (product persistence)
 
@@ -139,7 +190,8 @@ Extract the bearer first (`BearerTokenExtractor`: no trim; case-insensitive
 `Bearer`), then call
 `ApiKeyAuthenticator::authenticate($presentedToken, $context, $requiredScope)`:
 
-1. Pre-auth `FailedAttemptLimiter` (IPv4 `/32`, IPv6 `/64`; default 20/min in recipes) →
+1. Pre-auth `FailedAttemptLimiter` takes a slot (IPv4 `/32`, IPv6 `/64`; default
+   20/min in recipes); only an `invalid_token` outcome keeps it →
 2. Token format (`TokenCodec::prefixOf`, including legacy matchers when configured) →
 3. Lookup by `key_prefix` / in-grace `previous_key_prefix` + `hash_equals`
    (dummy compare on miss; row `hash_algorithm`) →

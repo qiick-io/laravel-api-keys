@@ -55,6 +55,11 @@ final class ApiKeyAuthenticator
     }
 
     /**
+     * The failed-attempt brake takes its slot before the token is evaluated
+     * (see {@see FailedAttemptLimiter::reserve()}). Only an `invalid_token`
+     * refusal is a failed guess and keeps the slot; every other outcome,
+     * success included, hands it back.
+     *
      * @throws ApiKeyRejection
      */
     public function authenticate(
@@ -64,10 +69,7 @@ final class ApiKeyAuthenticator
     ): AuthenticationResult {
         $clientIp = $context->ip;
 
-        if (
-            $this->failedAttemptLimiter !== null
-            && $this->failedAttemptLimiter->tooManyAttempts($clientIp)
-        ) {
+        if ($this->failedAttemptLimiter !== null && ! $this->failedAttemptLimiter->reserve($clientIp)) {
             throw ApiKeyRejection::rateLimited(
                 $this->failedAttemptLimiter->availableIn($clientIp),
                 $this->failedAttemptLimiter->maxPerMinute(),
@@ -75,16 +77,42 @@ final class ApiKeyAuthenticator
             );
         }
 
+        $isFailedGuess = false;
+
+        try {
+            return $this->verify($presentedToken, $context, $requiredScope);
+        } catch (ApiKeyRejection $rejection) {
+            $isFailedGuess = $rejection->errorCode() === KeyRejectionCode::InvalidToken->value;
+
+            throw $rejection;
+        } finally {
+            if (! $isFailedGuess) {
+                $this->failedAttemptLimiter?->release($clientIp);
+            }
+        }
+    }
+
+    /**
+     * The evaluation order itself. Every credential failure is the same
+     * `invalid_token` refusal (A2b), which is what the brake counts.
+     *
+     * @throws ApiKeyRejection
+     */
+    private function verify(
+        #[\SensitiveParameter] string $presentedToken,
+        KeyContext $context,
+        ?Scope $requiredScope,
+    ): AuthenticationResult {
+        $clientIp = $context->ip;
+
         $now = $this->clock->now();
         // Pass $now so legacy matchers respect accept_until (A13).
         $keyPrefix = $this->codec->prefixOf($presentedToken, $now);
         if ($keyPrefix === null) {
-            $this->hitFailedAttempt($clientIp);
-
             throw ApiKeyRejection::invalidToken();
         }
 
-        // Repository failures are infrastructure errors, not auth attempts — do not hit the brake.
+        // Repository failures are infrastructure errors, not failed guesses: authenticate() releases the brake slot.
         $candidates = [];
         foreach ($this->repository->findCandidatesByPrefix($keyPrefix) as $candidate) {
             $candidates[] = $candidate;
@@ -92,8 +120,6 @@ final class ApiKeyAuthenticator
 
         if ($candidates === []) {
             $this->codec->performDummyMatch($presentedToken);
-            $this->hitFailedAttempt($clientIp);
-
             throw ApiKeyRejection::invalidToken();
         }
 
@@ -118,33 +144,23 @@ final class ApiKeyAuthenticator
         }
 
         if ($matched === null) {
-            $this->hitFailedAttempt($clientIp);
-
             throw ApiKeyRejection::invalidToken();
         }
 
         // O2: oauth_grant rows have no usable bearer secret.
         if ($matched->credentialKind() === CredentialKind::OauthGrant) {
-            $this->hitFailedAttempt($clientIp);
-
             throw ApiKeyRejection::invalidToken();
         }
 
         if ($matched->revokedAt() !== null) {
-            $this->hitFailedAttempt($clientIp);
-
             throw ApiKeyRejection::invalidToken('The API key has been revoked.');
         }
 
         if ($matched->expiresAt() !== null && $now >= $matched->expiresAt()) {
-            $this->hitFailedAttempt($clientIp);
-
             throw ApiKeyRejection::invalidToken('The API key has expired.');
         }
 
         if (! in_array($matched->tokenVersion(), self::KNOWN_TOKEN_VERSIONS, true)) {
-            $this->hitFailedAttempt($clientIp);
-
             throw ApiKeyRejection::invalidToken();
         }
 
@@ -152,8 +168,6 @@ final class ApiKeyAuthenticator
 
         $actor = $this->authorizer->authorizeActor($matched, $context);
         if (! $actor->allowed) {
-            $this->hitFailedAttempt($clientIp);
-
             throw ApiKeyRejection::invalidToken(
                 $actor->denialMessage ?? 'The API key is not valid.',
             );
@@ -236,11 +250,6 @@ final class ApiKeyAuthenticator
         );
     }
 
-    private function hitFailedAttempt(?string $clientIp): void
-    {
-        $this->failedAttemptLimiter?->hit($clientIp);
-    }
-
     /**
      * C1: the product decides the ceiling for ownerless / creator-less keys.
      * Narrow against the expanded offer (writes imply reads) before collapsing.
@@ -304,7 +313,12 @@ final class ApiKeyAuthenticator
                 continue;
             }
 
-            if ($this->attemptLimiter->tooManyAttempts($decision->bucketKey, $decision->maxAttempts)) {
+            // Count first, then compare: one atomic step, so concurrent requests cannot all see room.
+            $hits = $this->attemptLimiter->hit($decision->bucketKey, $decision->decaySeconds);
+
+            if ($hits > $decision->maxAttempts) {
+                // A refused request does not count against the limit.
+                $this->attemptLimiter->decrement($decision->bucketKey, $decision->decaySeconds);
                 $retryAfter = $this->attemptLimiter->availableIn($decision->bucketKey);
 
                 throw ApiKeyRejection::rateLimited(
@@ -314,8 +328,6 @@ final class ApiKeyAuthenticator
                     resetAfterSeconds: $retryAfter,
                 );
             }
-
-            $this->attemptLimiter->hit($decision->bucketKey, $decision->decaySeconds);
         }
     }
 

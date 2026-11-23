@@ -12,7 +12,8 @@ namespace Qiick\ApiKeys;
  */
 final readonly class KeyRestrictions
 {
-    public const int VERSION = 1;
+    // Pest gives constant declarations no line coverage; KeyRestrictionsTest pins the value.
+    public const int VERSION = 1; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
 
     private function __construct(
         public bool $isDenied,
@@ -53,7 +54,9 @@ final readonly class KeyRestrictions
             }
 
             try {
-                $decoded = json_decode($raw, true, 32, JSON_THROW_ON_ERROR);
+                // Equivalent mutant: a document deeper than the schema is denied by the shape checks
+                // anyway; the depth only caps decoder work on stored data.
+                $decoded = json_decode($raw, true, 32, JSON_THROW_ON_ERROR); // @pest-mutate-ignore: IncrementInteger,DecrementInteger
             } catch (\JsonException) {
                 return self::denied();
             }
@@ -77,13 +80,8 @@ final readonly class KeyRestrictions
             return self::denied();
         }
 
-        // Values are unused; presence of the key is the allow-list (TrueToFalse is equivalent).
-        $allowedKeys = ['v' => true, 'request' => true, 'resources' => true];
-
-        foreach (array_keys($raw) as $key) {
-            if (! is_string($key) || ! array_key_exists($key, $allowedKeys)) {
-                return self::denied();
-            }
+        if (! self::hasOnlyKeys($raw, ['v', 'request', 'resources'])) {
+            return self::denied();
         }
 
         $request = self::parseRequest($raw['request'] ?? null);
@@ -116,18 +114,8 @@ final readonly class KeyRestrictions
             return null;
         }
 
-        // Values unused; key presence is the allow-list.
-        $allowedKeys = [
-            'methods' => true,
-            'route_names' => true,
-            'origins' => true,
-            'referrers' => true,
-        ];
-
-        foreach (array_keys($raw) as $key) {
-            if (! is_string($key) || ! array_key_exists($key, $allowedKeys)) {
-                return null;
-            }
+        if (! self::hasOnlyKeys($raw, ['methods', 'route_names', 'origins', 'referrers'])) {
+            return null;
         }
 
         $methods = $raw['methods'] ?? [];
@@ -176,13 +164,8 @@ final readonly class KeyRestrictions
                 return null;
             }
 
-            // Values unused; key presence is the allow-list.
-            $allowedKeys = ['type' => true, 'values' => true, 'mode' => true];
-
-            foreach (array_keys($entry) as $key) {
-                if (! is_string($key) || ! array_key_exists($key, $allowedKeys)) {
-                    return null;
-                }
+            if (! self::hasOnlyKeys($entry, ['type', 'values', 'mode'])) {
+                return null;
             }
 
             if (! isset($entry['type'], $entry['values']) || ! is_string($entry['type']) || $entry['type'] === '') {
@@ -207,6 +190,23 @@ final readonly class KeyRestrictions
         }
 
         return new ResourceRestrictions($entries);
+    }
+
+    /**
+     * Unknown keys make a section malformed (fail closed); integer keys never match.
+     *
+     * @param  array<mixed>  $section
+     * @param  list<string>  $allowedKeys
+     */
+    private static function hasOnlyKeys(array $section, array $allowedKeys): bool
+    {
+        foreach (array_keys($section) as $key) {
+            if (! in_array($key, $allowedKeys, true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

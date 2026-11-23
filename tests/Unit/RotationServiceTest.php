@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Qiick\ApiKeys\ConfigLifetimePolicy;
 use Qiick\ApiKeys\Rotation;
 use Qiick\ApiKeys\RotationService;
 use Qiick\ApiKeys\Testing\FixedClock;
@@ -272,4 +273,16 @@ it('redacts plaintext and hashes in Rotation debug, JSON, and serialize output',
         ->and($rotation->__debugInfo()['newPlainText'])->toBe('[REDACTED]');
 
     expect(fn () => unserialize(serialize($rotation)))->toThrow(LogicException::class);
+});
+
+it('checks the lifetime policy against the new expiry when one is given, else the current one', function (): void {
+    $codec = rotationCodec();
+    $now = new DateTimeImmutable('2026-01-15T12:00:00Z');
+    $record = rotationRecord($codec)->withExpiresAt($now->modify('+365 days'));
+    $service = new RotationService(lifetimePolicy: new ConfigLifetimePolicy(30));
+    $clock = new FixedClock($now);
+
+    expect($service->rotate($record, $codec, $clock, 0, $now->modify('+10 days'))->lastRotatedAt)->toEqual($now)
+        ->and(fn () => $service->rotate($record, $codec, $clock, 0))
+        ->toThrow(InvalidArgumentException::class, 'lifetime policy');
 });

@@ -16,6 +16,8 @@ namespace Qiick\ApiKeys;
  * wildcard (`*.example.com`, scheme and port exact); referrers match exactly
  * or on a path prefix after an exact origin. Scheme and host compare
  * case-insensitively; path and query are case-sensitive.
+ *
+ * @phpstan-type ParsedUrl array{scheme: string, host: string, port: int|null, path: string, query: string|null, hasFragment: bool}
  */
 final class RequestRestrictionsEvaluator
 {
@@ -87,14 +89,15 @@ final class RequestRestrictionsEvaluator
      */
     private function originAllowed(array $patterns, ?string $origin): bool
     {
-        $requestOrigin = $origin === null ? null : $this->bareOrigin($origin);
+        $request = $origin === null ? null : $this->parseAbsoluteUrl($origin);
 
-        if ($requestOrigin === null) {
+        // An Origin header is a bare origin: nothing after the host but an optional `/`.
+        if ($request === null || $request['query'] !== null || $request['hasFragment'] || ! in_array($request['path'], ['', '/'], true)) {
             return false;
         }
 
         foreach ($patterns as $pattern) {
-            if ($this->matchesOriginPattern($this->validatedPattern($this->bareOrigin($pattern)), $requestOrigin)) {
+            if ($this->matchesOriginPattern($this->validatedPattern($this->parseAbsoluteUrl($pattern)), $request)) {
                 return true;
             }
         }
@@ -107,14 +110,14 @@ final class RequestRestrictionsEvaluator
      */
     private function referrerAllowed(array $patterns, ?string $referer): bool
     {
-        $requestReferer = $referer === null ? null : $this->splitUrl($referer);
+        $request = $referer === null ? null : $this->parseAbsoluteUrl($referer);
 
-        if ($requestReferer === null) {
+        if ($request === null) {
             return false;
         }
 
         foreach ($patterns as $pattern) {
-            if ($this->matchesReferrerPattern($pattern, $requestReferer)) {
+            if ($this->matchesReferrerPattern($pattern, $request)) {
                 return true;
             }
         }
@@ -125,67 +128,69 @@ final class RequestRestrictionsEvaluator
     /**
      * Exact origin, or `*.example.com` on the host-label boundary.
      *
-     * @param  array{scheme: string, host: string, port: int|null}  $pattern
-     * @param  array{scheme: string, host: string, port: int|null}  $request
+     * @param  ParsedUrl  $pattern
+     * @param  ParsedUrl  $request
      */
     private function matchesOriginPattern(array $pattern, array $request): bool
     {
-        if ($pattern['scheme'] !== $request['scheme'] || $pattern['port'] !== $request['port']) {
-            return false;
-        }
-
         if (! str_starts_with($pattern['host'], '*.')) {
-            return $pattern['host'] === $request['host'];
+            return $this->isSameOrigin($pattern, $request);
         }
 
-        // `*.example.com` keeps the dot: `api.example.com` matches, `example.com` and `evilexample.com` do not.
-        $boundary = substr($pattern['host'], 1);
-
-        if (! str_ends_with($request['host'], $boundary)) {
-            return false;
-        }
-
-        // Every label before the boundary must be non-empty: no `.example.com`, `a..example.com`, `.a.example.com`.
-        $subdomainLabels = explode('.', substr($request['host'], 0, -strlen($boundary)));
-
-        return ! in_array('', $subdomainLabels, true);
+        // `*.example.com` keeps the dot, and every label must be non-empty:
+        // `api.example.com` matches; `example.com`, `evilexample.com`, `.example.com` and `a..example.com` do not.
+        return $pattern['scheme'] === $request['scheme']
+            && $pattern['port'] === $request['port']
+            && str_ends_with($request['host'], substr($pattern['host'], 1))
+            && ! in_array('', explode('.', $request['host']), true);
     }
 
     /**
-     * Exact referer, or a path prefix (`https://app.example.com/admin/*`).
+     * Exact referer (fragment ignored), or a path prefix after an exact origin
+     * (`https://app.example.com/admin/*`). Patterns never carry a query, so a
+     * prefix only ever applies to the path.
      *
-     * @param  array{origin: string, pathAndQuery: string}  $request
+     * @param  ParsedUrl  $request
      */
     private function matchesReferrerPattern(string $pattern, array $request): bool
     {
         if (! str_ends_with($pattern, '*')) {
-            return $this->validatedPattern($this->splitUrl($pattern)) === $request;
+            $exact = $this->validatedPattern($this->parseAbsoluteUrl($pattern));
+
+            return $this->isSameOrigin($exact, $request)
+                && $exact['path'] === $request['path']
+                && $request['query'] === null;
         }
 
-        $prefix = $this->validatedPattern($this->splitUrl(substr($pattern, 0, -1)));
+        $prefix = $this->validatedPattern($this->parseAbsoluteUrl(substr($pattern, 0, -1)));
 
-        return $prefix['origin'] === $request['origin']
-            && str_starts_with($request['pathAndQuery'], $prefix['pathAndQuery']);
+        return $this->isSameOrigin($prefix, $request)
+            && str_starts_with($request['path'], $prefix['path']);
     }
 
     /**
-     * A bare origin: scheme and host lowercased, port, at most a `/` path.
-     *
-     * @return array{scheme: string, host: string, port: int|null}|null
+     * @param  ParsedUrl  $first
+     * @param  ParsedUrl  $second
      */
-    private function bareOrigin(string $url): ?array
+    private function isSameOrigin(array $first, array $second): bool
     {
+        return $first['scheme'] === $second['scheme']
+            && $first['host'] === $second['host']
+            && $first['port'] === $second['port'];
+    }
+
+    /**
+     * An absolute URL with scheme and host lowercased. Userinfo is refused:
+     * `https://app.example.com@evil.example/` is not the app.
+     *
+     * @return ParsedUrl|null
+     */
+    private function parseAbsoluteUrl(string $url): ?array
+    {
+        // parse_url() returns false on a seriously malformed URL, and isset() on false is false.
         $parts = parse_url($url);
 
-        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
-            return null;
-        }
-
-        if (isset($parts['user']) || isset($parts['query']) || isset($parts['fragment'])) {
-            return null;
-        }
-
-        if (($parts['path'] ?? '/') !== '/') {
+        if (! isset($parts['scheme'], $parts['host']) || isset($parts['user'])) {
             return null;
         }
 
@@ -193,38 +198,10 @@ final class RequestRestrictionsEvaluator
             'scheme' => strtolower($parts['scheme']),
             'host' => strtolower($parts['host']),
             'port' => $parts['port'] ?? null,
+            'path' => $parts['path'] ?? '',
+            'query' => $parts['query'] ?? null,
+            'hasFragment' => isset($parts['fragment']),
         ];
-    }
-
-    /**
-     * An absolute URL as its lowercased `scheme://host[:port]` and its
-     * case-sensitive path and query (the fragment never reaches a server).
-     * Userinfo is refused: `https://app.example.com@evil.example/` is not
-     * the app.
-     *
-     * @return array{origin: string, pathAndQuery: string}|null
-     */
-    private function splitUrl(string $url): ?array
-    {
-        $parts = parse_url($url);
-
-        if ($parts === false || ! isset($parts['scheme'], $parts['host']) || isset($parts['user'])) {
-            return null;
-        }
-
-        $origin = strtolower($parts['scheme']).'://'.strtolower($parts['host']);
-
-        if (isset($parts['port'])) {
-            $origin .= ':'.$parts['port'];
-        }
-
-        $pathAndQuery = $parts['path'] ?? '';
-
-        if (isset($parts['query'])) {
-            $pathAndQuery .= '?'.$parts['query'];
-        }
-
-        return ['origin' => $origin, 'pathAndQuery' => $pathAndQuery];
     }
 
     /**

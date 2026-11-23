@@ -27,10 +27,6 @@ use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
  */
 final class ApiKeyAuthenticator
 {
-    private const array KNOWN_TOKEN_VERSIONS = [0, 1, 2];
-
-    private RequestRestrictionsEvaluator $requestRestrictionsEvaluator;
-
     /**
      * @param  (callable(\Throwable): void)|null  $exceptionReporter
      */
@@ -49,10 +45,7 @@ final class ApiKeyAuthenticator
         private bool $bypassThrottleOnIpChange = true,
         private int $defaultRateLimitPerMinute = 60,
         private mixed $exceptionReporter = null,
-        ?RequestRestrictionsEvaluator $requestRestrictionsEvaluator = null,
-    ) {
-        $this->requestRestrictionsEvaluator = $requestRestrictionsEvaluator ?? new RequestRestrictionsEvaluator;
-    }
+    ) {}
 
     /**
      * The failed-attempt brake takes its slot before the token is evaluated
@@ -160,7 +153,8 @@ final class ApiKeyAuthenticator
             throw ApiKeyRejection::invalidToken('The API key has expired.');
         }
 
-        if (! in_array($matched->tokenVersion(), self::KNOWN_TOKEN_VERSIONS, true)) {
+        // Token versions this package can verify: 0 legacy, 1 canonical, 2 canonical with checksum.
+        if (! in_array($matched->tokenVersion(), [0, 1, 2], true)) {
             throw ApiKeyRejection::invalidToken();
         }
 
@@ -173,8 +167,7 @@ final class ApiKeyAuthenticator
             );
         }
 
-        // Cast keeps a strict string for IpAllowlist; empty fallback is for null IP only.
-        if (! $this->ipAllowlist->allows((string) ($clientIp ?? ''), $matched->rawIpAllowlist())) {
+        if (! $this->ipAllowlist->allows($clientIp, $matched->rawIpAllowlist())) {
             throw ApiKeyRejection::ipNotAllowed();
         }
 
@@ -183,7 +176,7 @@ final class ApiKeyAuthenticator
             throw ApiKeyRejection::requestNotAllowed();
         }
 
-        if (! $this->requestRestrictionsEvaluator->allows($restrictions->request, $context)) {
+        if (! (new RequestRestrictionsEvaluator)->allows($restrictions->request, $context)) {
             throw ApiKeyRejection::requestNotAllowed();
         }
 
@@ -332,24 +325,20 @@ final class ApiKeyAuthenticator
     }
 
     /**
+     * The row's windows; a limit of 0 or below is skipped by {@see enforceRateLimits()}.
+     *
      * @return list<RateLimitDecision>
      */
     private function defaultRateLimits(ApiKeyRecord $record): array
     {
-        $decisions = [];
-        $minute = $record->rateLimitPerMinute() ?? $this->defaultRateLimitPerMinute;
-
-        // Decrement of the 0 literal is equivalent: maxAttempts<=0 still skips the bucket.
-        if ($minute > 0) {
-            $decisions[] = new RateLimitDecision(
-                bucketKey: 'api-key:'.$record->id(),
-                maxAttempts: $minute,
-                decaySeconds: 60,
-            );
-        }
+        $decisions = [new RateLimitDecision(
+            bucketKey: 'api-key:'.$record->id(),
+            maxAttempts: $record->rateLimitPerMinute() ?? $this->defaultRateLimitPerMinute,
+            decaySeconds: 60,
+        )];
 
         $day = $record->rateLimitPerDay();
-        if ($day !== null && $day > 0) {
+        if ($day !== null) {
             $decisions[] = new RateLimitDecision(
                 bucketKey: 'api-key:'.$record->id().':day',
                 maxAttempts: $day,
@@ -358,7 +347,7 @@ final class ApiKeyAuthenticator
         }
 
         $month = $record->rateLimitPerMonth();
-        if ($month !== null && $month > 0) {
+        if ($month !== null) {
             $decisions[] = new RateLimitDecision(
                 bucketKey: 'api-key:'.$record->id().':month',
                 maxAttempts: $month,

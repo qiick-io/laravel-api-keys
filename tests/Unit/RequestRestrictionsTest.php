@@ -58,7 +58,7 @@ it('accepts the patterns the evaluator understands', function (): void {
     $restrictions = new RequestRestrictions(
         methods: ['GET', 'post'],
         routeNames: ['api.*', 'api.items.index'],
-        origins: ['https://app.example.com', 'https://app.example.com/', 'https://*.example.com', 'http://localhost:8080'],
+        origins: ['https://app.example.com', 'https://app.example.com/', 'https://*.example.com', 'https://*.x', 'http://localhost:8080'],
         referrers: [
             'https://app.example.com',
             'https://app.example.com/exact/page',
@@ -68,7 +68,7 @@ it('accepts the patterns the evaluator understands', function (): void {
     );
 
     expect($restrictions->isUnrestricted())->toBeFalse()
-        ->and($restrictions->origins)->toHaveCount(4)
+        ->and($restrictions->origins)->toHaveCount(5)
         ->and((new RequestRestrictions)->isUnrestricted())->toBeTrue();
 });
 

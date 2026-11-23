@@ -53,8 +53,7 @@ final readonly class Scope
             return true;
         }
 
-        // Only write may stand in for read (same resource already checked).
-        // After the guards above, AND→OR on this line is behaviourally equivalent.
-        return $this->action === 'write' && $required->action === 'read';
+        // The actions differ and are only ever read or write: a write may stand in for the read.
+        return $this->action === 'write';
     }
 }

@@ -83,6 +83,11 @@ it('denies malformed request sections', function (mixed $request): void {
     'origin empty string' => [['origins' => ['']]],
     'referrer empty string' => [['referrers' => ['']]],
     'methods null entry' => [['methods' => [null]]],
+    'methods not an array' => [['methods' => 'GET']],
+    'route names not an array' => [['route_names' => 'api.*']],
+    'origins not an array' => [['origins' => 'https://app.example.com']],
+    'referrers not an array' => [['referrers' => 'https://app.example.com/*']],
+    'numeric key' => [[0 => ['GET']]],
 ]);
 
 it('denies malformed resources sections', function (mixed $resources): void {

@@ -39,6 +39,7 @@ final class FakeAttemptLimiter implements AttemptLimiter
     public function decrement(string $key, int $decaySeconds = 60): void
     {
         $this->hits[$key] = ($this->hits[$key] ?? 0) - 1;
+        $this->lastDecaySeconds[$key] = $decaySeconds;
     }
 
     public function availableIn(string $key): int

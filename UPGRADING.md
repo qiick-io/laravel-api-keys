@@ -31,6 +31,9 @@ pre-1.0 additions versus the 0.1.0 sketch:
 - `LegacyFormatWarningGate`: `claim(string $key, int $leaseSeconds)`,
   `release(string $key)` and `markSent(string $key)`. Only custom gates need
   changes; the default cache gate is updated.
+- `new RequestRestrictions(...)` validates its lists and patterns and throws
+  `InvalidArgumentException`; `ApiKeyAuthenticator` no longer takes a
+  `requestRestrictionsEvaluator` argument.
 - `api-keys.max_lifetime_days` is now enforced on rotation by default, and a
   value that is not a whole number >= 1 fails at boot. Unset it to keep the
   previous (unenforced) behaviour.

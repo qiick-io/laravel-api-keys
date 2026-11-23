@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ConfigLifetimePolicy` unless the product binds its own `LifetimePolicy`,
   and an invalid value fails at boot instead of being cast with `(int)`.
 
+- `RequestRestrictionsEvaluator` no longer allows an exact referrer pattern
+  that does not parse against a referer that does not parse either (both
+  canonicalised to null and compared equal). `RequestRestrictions` now
+  validates its lists on construction, so hand-built instances are checked
+  like parsed ones.
+- Origin wildcards (`*.example.com`) refuse request hosts with an empty label
+  (`a..example.com`, `.a.example.com`).
+
 ### Changed (breaking)
 
 - `AttemptLimiter`: `hit()` returns `int`; `decrement()` added;
@@ -29,6 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tooManyAttempts()` / `hit()`.
 - `LegacyFormatWarningGate`: `claim($key, $leaseSeconds)`, plus `release()`
   and `markSent()`.
+- `RequestRestrictions` throws `InvalidArgumentException` for an invalid list
+  or pattern; `ApiKeyAuthenticator` drops its unused `requestRestrictionsEvaluator`
+  constructor argument; `IpAllowlist::allows()` accepts a null client IP (denied
+  against a non-empty allowlist).
+
+### Tests
+
+- Mutation testing no longer relies on blanket `@pest-mutate-ignore`
+  annotations: the remaining ones mark equivalent or uncoverable mutants, each
+  with a one-line reason. `RequestRestrictions` joins the per-class 95% gate.
 
 ## [0.2.0] - 2026-11-22
 

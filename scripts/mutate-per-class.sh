@@ -20,6 +20,7 @@ CLASSES=(
   'Qiick\ApiKeys\Http\BearerTokenExtractor'
   'Qiick\ApiKeys\KeyRestrictions'
   'Qiick\ApiKeys\RequestRestrictionsEvaluator'
+  'Qiick\ApiKeys\RequestRestrictions'
 )
 
 MIN="${MUTATE_MIN:-95}"

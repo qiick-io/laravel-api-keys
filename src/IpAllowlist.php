@@ -21,7 +21,7 @@ final class IpAllowlist
 {
     private const string MAPPED_PREFIX = "\0\0\0\0\0\0\0\0\0\0\xff\xff";
 
-    public function allows(string $ip, mixed $allowlist): bool
+    public function allows(?string $ip, mixed $allowlist): bool
     {
         if ($allowlist === null || $allowlist === []) {
             return true;
@@ -37,7 +37,8 @@ final class IpAllowlist
             }
         }
 
-        if (str_contains($ip, '%')) {
+        // An unknown client cannot be inside a non-empty allowlist.
+        if ($ip === null || str_contains($ip, '%')) {
             return false;
         }
 
@@ -74,10 +75,10 @@ final class IpAllowlist
             $binary = substr($binary, 12);
         }
 
-        // inet_ntop only fails on a malformed binary; inet_pton output never is one.
+        // Equivalent mutant: inet_ntop() only fails on a malformed binary and inet_pton() output never is one.
         $rendered = inet_ntop($binary);
 
-        return $rendered === false ? null : $rendered;
+        return $rendered === false ? null : $rendered; // @pest-mutate-ignore: FalseToTrue
     }
 
     private function isIpv4Mapped(string $ip): bool

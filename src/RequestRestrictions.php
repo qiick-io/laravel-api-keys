@@ -105,9 +105,10 @@ final readonly class RequestRestrictions
 
     private static function isValidOriginPattern(string $pattern): bool
     {
+        // parse_url() returns false on a seriously malformed URL, and isset() on false is false.
         $parts = parse_url($pattern);
 
-        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
+        if (! isset($parts['scheme'], $parts['host'])) {
             return false;
         }
 
@@ -134,8 +135,7 @@ final readonly class RequestRestrictions
         if (! str_ends_with($pattern, '*')) {
             $parts = parse_url($pattern);
 
-            return $parts !== false
-                && isset($parts['scheme'], $parts['host'])
+            return isset($parts['scheme'], $parts['host'])
                 && ! isset($parts['user'])
                 && ! isset($parts['query'])
                 && ! isset($parts['fragment'])
@@ -145,7 +145,7 @@ final readonly class RequestRestrictions
         $prefix = substr($pattern, 0, -1);
         $parts = parse_url($prefix);
 
-        if ($parts === false || ! isset($parts['scheme'], $parts['host']) || str_contains($prefix, '*')) {
+        if (! isset($parts['scheme'], $parts['host']) || str_contains($prefix, '*')) {
             return false;
         }
 

@@ -15,9 +15,25 @@ mutates(CacheAttemptLimiter::class);
 it('refuses cache stores that cannot count atomically across workers', function (string $store): void {
     config(['cache.stores.file.path' => sys_get_temp_dir()]);
 
+    $storeClass = get_class(Cache::store($store)->getStore());
+
     expect(fn () => new CacheAttemptLimiter(Cache::store($store)))
-        ->toThrow(InvalidArgumentException::class, 'cannot increment atomically');
+        ->toThrow(
+            InvalidArgumentException::class,
+            'CacheAttemptLimiter needs a redis, memcached or array cache store; '.$storeClass.' cannot increment atomically across workers.',
+        );
 })->with(['database', 'file']);
+
+it('opens a 60-second window by default and reports nothing for an unknown bucket', function (): void {
+    $limiter = new CacheAttemptLimiter(Cache::store('array'));
+
+    expect($limiter->availableIn('unknown'))->toBe(0)
+        ->and($limiter->hit('bucket'))->toBe(1)
+        ->and($limiter->availableIn('bucket'))->toBe(60)
+        ->and($limiter->hit('bucket'))->toBe(2)
+        ->and($limiter->hit('bucket'))->toBe(3)
+        ->and($limiter->remaining('bucket', 2))->toBe(0);
+});
 
 it('counts hits in a window that its first hit opens', function (): void {
     $limiter = new CacheAttemptLimiter(Cache::store('array'));

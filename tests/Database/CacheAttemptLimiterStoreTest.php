@@ -80,6 +80,11 @@ it('never decrements below zero, and ignores a counter that does not exist', fun
     expect($limiter->remaining('bucket', 5))->toBe(5);
 
     $limiter->hit('bucket', 60);
+    $limiter->hit('bucket', 60);
+    $limiter->decrement('bucket');
+
+    expect($limiter->remaining('bucket', 5))->toBe(4);
+
     $limiter->decrement('bucket');
     $limiter->decrement('bucket');
 
@@ -113,3 +118,41 @@ it('refuses a window shorter than one second instead of opening the limit', func
     expect(fn () => $limiter->hit('bucket', 0))->toThrow(InvalidArgumentException::class)
         ->and(fn () => $limiter->hit('bucket', -5))->toThrow(InvalidArgumentException::class);
 })->with('limiter stores');
+
+it('opens a 60-second window by default, reports nothing for an unknown bucket and never a negative remainder', function (?string $storeName): void {
+    $limiter = new CacheAttemptLimiter(realLimiterStore((string) $storeName));
+
+    expect($limiter->availableIn('bucket'))->toBe(0)
+        ->and($limiter->hit('bucket'))->toBe(1)
+        ->and($limiter->availableIn('bucket'))->toBeGreaterThan(55)->toBeLessThanOrEqual(60)
+        ->and($limiter->hit('bucket'))->toBe(2)
+        ->and($limiter->hit('bucket'))->toBe(3)
+        ->and($limiter->remaining('bucket', 2))->toBe(0);
+})->with('limiter stores');
+
+it('keeps counting a window one second past 30 days', function (?string $storeName): void {
+    $limiter = new CacheAttemptLimiter(realLimiterStore((string) $storeName));
+
+    expect($limiter->hit('bucket', 2_592_001))->toBe(1)
+        ->and($limiter->hit('bucket', 2_592_001))->toBe(2);
+})->with('limiter stores');
+
+it('fails loudly when memcached cannot be reached', function (): void {
+    if (! in_array('memcached', limiterStoresUnderTest(), true)) {
+        $this->markTestSkipped('Runs with the memcached store.');
+    }
+
+    $unreachable = new Repository(new MemcachedStore(
+        (new MemcachedConnector)->connect([['host' => '127.0.0.1', 'port' => 1, 'weight' => 100]]),
+        'api-keys-limiter-store-test:',
+    ));
+
+    try {
+        (new CacheAttemptLimiter($unreachable))->hit('bucket');
+        $this->fail('expected the unreachable server to be reported');
+    } catch (RuntimeException $exception) {
+        // The prefix, then memcached's own reason.
+        expect($exception->getMessage())->toStartWith('Memcached could not count an attempt: ')
+            ->and(strlen($exception->getMessage()))->toBeGreaterThan(strlen('Memcached could not count an attempt: '));
+    }
+});

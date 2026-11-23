@@ -34,6 +34,8 @@ it('refuses a pattern list that the parser would deny', function (array $argumen
     'mid-host star' => [['origins' => ['https://app.*.com']]],
     'star after the host' => [['origins' => ['https://app.example.com:*']]],
     'empty subdomain suffix' => [['origins' => ['https://*.']]],
+    'wildcard on a top-level domain' => [['origins' => ['https://*.com']]],
+    'wildcard on a single label' => [['origins' => ['https://*.x']]],
     'bare star origin' => [['origins' => ['*']]],
     'empty referrer' => [['referrers' => ['']]],
     'non-string referrer' => [['referrers' => [1.5]]],
@@ -58,7 +60,7 @@ it('accepts the patterns the evaluator understands', function (): void {
     $restrictions = new RequestRestrictions(
         methods: ['GET', 'post'],
         routeNames: ['api.*', 'api.items.index'],
-        origins: ['https://app.example.com', 'https://app.example.com/', 'https://*.example.com', 'https://*.x', 'http://localhost:8080'],
+        origins: ['https://app.example.com', 'https://app.example.com/', 'https://*.example.com', 'https://*.a.co', 'http://localhost:8080'],
         referrers: [
             'https://app.example.com',
             'https://app.example.com/exact/page',

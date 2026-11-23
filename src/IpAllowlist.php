@@ -102,8 +102,8 @@ final class IpAllowlist
         }
 
         $address = $parts[0];
-        // Equivalent mutant: a digit string compares and subtracts like the int, and IpUtils reads "/024" as /24.
-        $prefixLength = (int) $parts[1]; // @pest-mutate-ignore: RemoveIntegerCast
+        // "00" must become 0: IpUtils treats only an integer-looking "0" as the match-all prefix.
+        $prefixLength = (int) $parts[1];
         $wasMapped = $this->isIpv4Mapped($address);
         $expanded = $this->expandMapped($address);
         if ($expanded === null) {

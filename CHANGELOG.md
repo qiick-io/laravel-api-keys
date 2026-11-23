@@ -27,7 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validates its lists on construction, so hand-built instances are checked
   like parsed ones.
 - Origin wildcards (`*.example.com`) refuse request hosts with an empty label
-  (`a..example.com`, `.a.example.com`).
+  (`a..example.com`, `.a.example.com`), and a wildcard over a single label
+  (`https://*.com`) is refused as a pattern. Multi-label public suffixes such
+  as `*.co.uk` are not detected (no public-suffix list).
 - Rate limits and the failed-attempt brake were still beatable through the
   README's `RateLimiter` adapter (Laravel recreates counters with a
   non-atomic `put()`, the database store is not atomic, and late decrements

@@ -14,7 +14,8 @@ namespace Qiick\ApiKeys;
  *
  * Pattern grammar:
  * - origin: `scheme://host[:port]` with an optional trailing `/`, or a
- *   host-label wildcard `scheme://*.example.com[:port]`; no userinfo, path,
+ *   host-label wildcard `scheme://*.example.com[:port]` over at least two
+ *   labels (never `*.com`); no userinfo, path,
  *   query or fragment, and no other `*`;
  * - referrer: an exact absolute URL without userinfo, query or fragment, or a
  *   path prefix `scheme://host[:port]/path*` with a single trailing `*` after
@@ -123,8 +124,9 @@ final readonly class RequestRestrictions
         $host = $parts['host'];
 
         // The only `*` allowed is the leading label of a host wildcard, `*.example.com`.
+        // A wildcard needs at least two labels after it: `*.com` would trust a whole top-level domain.
         if (str_starts_with($host, '*.')) {
-            return substr_count($pattern, '*') === 1 && strlen($host) > 2;
+            return substr_count($pattern, '*') === 1 && str_contains(substr($host, 2), '.');
         }
 
         return ! str_contains($pattern, '*');

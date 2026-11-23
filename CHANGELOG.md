@@ -27,9 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validates its lists on construction, so hand-built instances are checked
   like parsed ones.
 - Origin wildcards (`*.example.com`) refuse request hosts with an empty label
-  (`a..example.com`, `.a.example.com`), and a wildcard over a single label
-  (`https://*.com`) is refused as a pattern. Multi-label public suffixes such
-  as `*.co.uk` are not detected (no public-suffix list).
+  (`a..example.com`, `.a.example.com`), and a wildcard over a public suffix
+  is refused as a pattern: `*.com`, `*.co.uk` and private-section suffixes
+  such as `*.github.io` or `*.vercel.app`, checked against a bundled snapshot
+  of Mozilla's Public Suffix List (`resources/public_suffix_list.dat`,
+  MPL-2.0), as well as wildcards over IP literals or ending in a dot.
 - Rate limits and the failed-attempt brake were still beatable through the
   README's `RateLimiter` adapter (Laravel recreates counters with a
   non-atomic `put()`, the database store is not atomic, and late decrements

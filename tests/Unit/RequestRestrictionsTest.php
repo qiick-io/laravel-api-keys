@@ -36,6 +36,13 @@ it('refuses a pattern list that the parser would deny', function (array $argumen
     'empty subdomain suffix' => [['origins' => ['https://*.']]],
     'wildcard on a top-level domain' => [['origins' => ['https://*.com']]],
     'wildcard on a single label' => [['origins' => ['https://*.x']]],
+    'wildcard on an ICANN public suffix' => [['origins' => ['https://*.co.uk']]],
+    'wildcard on a private public suffix' => [['origins' => ['https://*.github.io']]],
+    'wildcard on a hosting suffix' => [['origins' => ['https://*.vercel.app']]],
+    'wildcard on a PSL wildcard rule' => [['origins' => ['https://*.foo.ck']]],
+    'wildcard on mixed-case public suffix' => [['origins' => ['https://*.Co.UK']]],
+    'wildcard on an IP literal' => [['origins' => ['https://*.0.0.1']]],
+    'wildcard ending in a dot' => [['origins' => ['https://*.example.com.']]],
     'bare star origin' => [['origins' => ['*']]],
     'empty referrer' => [['referrers' => ['']]],
     'non-string referrer' => [['referrers' => [1.5]]],
@@ -60,7 +67,7 @@ it('accepts the patterns the evaluator understands', function (): void {
     $restrictions = new RequestRestrictions(
         methods: ['GET', 'post'],
         routeNames: ['api.*', 'api.items.index'],
-        origins: ['https://app.example.com', 'https://app.example.com/', 'https://*.example.com', 'https://*.a.co', 'http://localhost:8080'],
+        origins: ['https://app.example.com', 'https://app.example.com/', 'https://*.example.com', 'https://*.example.co.uk', 'https://*.myapp.github.io', 'https://*.www.ck', 'http://localhost:8080'],
         referrers: [
             'https://app.example.com',
             'https://app.example.com/exact/page',
@@ -70,7 +77,7 @@ it('accepts the patterns the evaluator understands', function (): void {
     );
 
     expect($restrictions->isUnrestricted())->toBeFalse()
-        ->and($restrictions->origins)->toHaveCount(5)
+        ->and($restrictions->origins)->toHaveCount(7)
         ->and((new RequestRestrictions)->isUnrestricted())->toBeTrue();
 });
 

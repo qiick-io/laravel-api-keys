@@ -1423,3 +1423,22 @@ it('does not count a request refused by the per-key limit against that limit', f
 
     expect($limiter->hitsFor('api-key:42'))->toBe(1);
 });
+
+it('gives back the hits it took on earlier windows when a later window refuses', function (): void {
+    $limiter = new FakeAttemptLimiter;
+    $fixture = authenticator([
+        'limiter' => $limiter,
+        'authorizer' => (new FakeKeyAuthorizer)->withRateLimits([
+            new RateLimitDecision('minute-bucket', 5, 60),
+            new RateLimitDecision('day-bucket', 1, 86_400),
+        ]),
+    ]);
+
+    $fixture['auth']->authenticate($fixture['token'], keyContext());
+
+    expect(fn () => $fixture['auth']->authenticate($fixture['token'], keyContext()))
+        ->toThrow(ApiKeyRejection::class);
+
+    expect($limiter->hitsFor('minute-bucket'))->toBe(1)
+        ->and($limiter->hitsFor('day-bucket'))->toBe(1);
+});

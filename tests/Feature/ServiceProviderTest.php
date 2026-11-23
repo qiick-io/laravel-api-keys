@@ -222,6 +222,9 @@ it('fails boot when api-keys.max_lifetime_days is not a whole number of days >= 
     'zero' => '0',
     'negative' => -5,
     'fraction' => '1.5',
+    'leading space' => ' 30',
+    'explicit plus sign' => '+30',
+    'leading zero' => '030',
 ]);
 
 it('boots with max_lifetime_days unset and allows any expiry', function (): void {

@@ -29,7 +29,7 @@ use Qiick\ApiKeys\Contracts\AttemptLimiter;
  *   `increment`; `decrement` is a no-op on a missing key and floors at zero.
  * - Array: a single process cannot race; for tests and local development.
  *
- * A window is fixed from its first hit. A decrement that arrives after the
+ * Windows last at least one second (shorter ones throw). A window is fixed from its first hit. A decrement that arrives after the
  * window expired finds no counter and does nothing, so counts never go negative.
  */
 final class CacheAttemptLimiter implements AttemptLimiter
@@ -66,10 +66,15 @@ final class CacheAttemptLimiter implements AttemptLimiter
         }
     }
 
+    /**
+     * @throws \InvalidArgumentException when the window is shorter than one second:
+     *                                   Redis would expire the counter at once and open the limit
+     */
     public function hit(string $key, int $decaySeconds = 60): int
     {
-        // Only feeds Retry-After; add() keeps the first window's end.
-        $this->cache->add($key.':timer', Carbon::now()->getTimestamp() + $decaySeconds, $decaySeconds);
+        if ($decaySeconds < 1) {
+            throw new \InvalidArgumentException('An attempt window must last at least one second.');
+        }
 
         $store = $this->cache->getStore();
 
@@ -78,6 +83,9 @@ final class CacheAttemptLimiter implements AttemptLimiter
 
             return is_numeric($hits) ? (int) $hits : throw new \RuntimeException('Redis did not return an attempt count.');
         }
+
+        // Redis reads the window from the counter's own TTL; the other stores keep its end beside it.
+        $this->cache->add($key.':timer', Carbon::now()->getTimestamp() + $decaySeconds, $decaySeconds);
 
         if ($store instanceof MemcachedStore) {
             return $this->memcachedHit($store, $key, $decaySeconds);
@@ -112,9 +120,19 @@ final class CacheAttemptLimiter implements AttemptLimiter
 
     public function availableIn(string $key): int
     {
+        $store = $this->cache->getStore();
+
+        if ($store instanceof RedisStore) {
+            // TTL is -2 for a missing counter; a counter without TTL cannot exist (see REDIS_HIT).
+            $secondsLeft = $this->redisConnection($store)->ttl($store->getPrefix().$key);
+
+            return is_int($secondsLeft) ? max(0, $secondsLeft) : 0;
+        }
+
+        // Stores may hand numbers back as numeric strings.
         $windowEndsAt = $this->cache->get($key.':timer');
 
-        return is_int($windowEndsAt) ? max(0, $windowEndsAt - Carbon::now()->getTimestamp()) : 0;
+        return is_numeric($windowEndsAt) ? max(0, (int) $windowEndsAt - Carbon::now()->getTimestamp()) : 0;
     }
 
     public function remaining(string $key, int $maxAttempts): int
@@ -159,9 +177,11 @@ final class CacheAttemptLimiter implements AttemptLimiter
     {
         $memcached = $store->getMemcached();
         $prefixedKey = $store->getPrefix().$key;
+        // Memcached reads an expiry above 30 days as a Unix timestamp, not a duration.
+        $expiry = $decaySeconds > 2_592_000 ? Carbon::now()->getTimestamp() + $decaySeconds : $decaySeconds;
 
         foreach ([1, 2] as $attempt) {
-            $memcached->add($prefixedKey, 0, $decaySeconds);
+            $memcached->add($prefixedKey, 0, $expiry);
             $hits = $memcached->increment($prefixedKey);
 
             if (is_int($hits)) {

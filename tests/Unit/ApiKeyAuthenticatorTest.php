@@ -1487,3 +1487,33 @@ it('gives back the hits it took on earlier windows when a later window refuses',
     expect($limiter->hitsFor('minute-bucket'))->toBe(1)
         ->and($limiter->hitsFor('day-bucket'))->toBe(1);
 });
+
+it('answers rate_limited, never the real outcome, once the failed-attempt bucket is full', function (): void {
+    $failures = new FakeAttemptLimiter;
+    $fixture = authenticator([
+        'failedLimiter' => new FailedAttemptLimiter($failures, maxPerMinute: 2),
+        'defaultRate' => 0,
+    ]);
+    $outcome = function (string $token) use ($fixture): string {
+        try {
+            $fixture['auth']->authenticate($token, keyContext('203.0.113.10'));
+
+            return 'authenticated';
+        } catch (ApiKeyRejection $rejection) {
+            return $rejection->errorCode();
+        }
+    };
+
+    expect($outcome($fixture['token']))->toBe('authenticated')
+        ->and($outcome('bad-1'))->toBe('invalid_token')
+        ->and($outcome('bad-2'))->toBe('invalid_token')
+        ->and($outcome('bad-3'))->toBe('rate_limit_exceeded')
+        // A correct key is not revealed while the bucket is full.
+        ->and($outcome($fixture['token']))->toBe('rate_limit_exceeded')
+        ->and($failures->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(2);
+});
+
+it('refuses a rate-limit window shorter than one second', function (int $decaySeconds): void {
+    expect(fn () => new RateLimitDecision('bucket', 10, $decaySeconds))
+        ->toThrow(InvalidArgumentException::class, 'decaySeconds');
+})->with([0, -5]);

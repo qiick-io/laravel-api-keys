@@ -23,6 +23,17 @@ CLASSES=(
   'Qiick\ApiKeys\RequestRestrictions'
 )
 
+# CacheAttemptLimiter's Redis and Memcached branches only run against live
+# servers: the CI "mutate (cache limiter)" job starts both and sets
+# API_KEYS_LIMITER_STORE=both; elsewhere the class is skipped, not scored low.
+if [[ "${API_KEYS_LIMITER_STORE:-}" == "both" ]]; then
+  CLASSES+=('Qiick\ApiKeys\CacheAttemptLimiter')
+fi
+
+if [[ -n "${MUTATE_ONLY:-}" ]]; then
+  CLASSES=("${MUTATE_ONLY}")
+fi
+
 MIN="${MUTATE_MIN:-95}"
 FAILED=0
 

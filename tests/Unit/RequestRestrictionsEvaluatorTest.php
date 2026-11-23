@@ -74,6 +74,7 @@ it('matches exact origins on scheme, host and port', function (string $pattern, 
 })->with([
     'same origin' => ['https://app.example.com', 'https://app.example.com', true],
     'trailing slash on either side' => ['https://app.example.com/', 'https://app.example.com', true],
+    'trailing slash on the request' => ['https://app.example.com', 'https://app.example.com/', true],
     'case-insensitive scheme and host' => ['https://app.example.com', 'HTTPS://APP.Example.COM', true],
     'other scheme' => ['https://app.example.com', 'http://app.example.com', false],
     'other host' => ['https://app.example.com', 'https://api.example.com', false],

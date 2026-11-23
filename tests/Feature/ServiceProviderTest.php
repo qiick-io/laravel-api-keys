@@ -2,8 +2,12 @@
 
 declare(strict_types=1);
 
+use Qiick\ApiKeys\ConfigLifetimePolicy;
+use Qiick\ApiKeys\Contracts\LifetimePolicy;
 use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\RotationService;
+use Qiick\ApiKeys\Testing\FixedClock;
+use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\Tests\Support\RegexLegacyTokenMatcher;
 use Qiick\ApiKeys\TokenCodec;
 
@@ -164,4 +168,54 @@ it('boots when accept_until is an absolute DATE_ATOM timestamp', function (): vo
 
     expect(fn () => $provider->boot())->not->toThrow(RuntimeException::class)
         ->and(app(TokenCodec::class))->toBeInstanceOf(TokenCodec::class);
+});
+
+it('enforces api-keys.max_lifetime_days on rotation without a product binding', function (): void {
+    config(['api-keys.max_lifetime_days' => '30']);
+    app()->forgetInstance(RotationService::class);
+
+    $now = new DateTimeImmutable('2026-01-15T12:00:00+00:00');
+    $codec = app(TokenCodec::class);
+    $issued = $codec->issue();
+    $record = (new InMemoryApiKeyRecord(
+        keyPrefix: $issued->keyPrefix,
+        keyHash: $issued->keyHash,
+        scopes: ['items:read'],
+    ))->withExpiresAt($now->modify('+365 days'));
+
+    expect(app(LifetimePolicy::class))->toBeInstanceOf(ConfigLifetimePolicy::class)
+        ->and(fn () => app(RotationService::class)->rotate($record, $codec, new FixedClock($now), 0))
+        ->toThrow(InvalidArgumentException::class, 'lifetime policy');
+});
+
+it('keeps a product LifetimePolicy binding over the config default', function (): void {
+    config(['api-keys.max_lifetime_days' => '30']);
+    $productPolicy = new ConfigLifetimePolicy(null);
+    app()->instance(LifetimePolicy::class, $productPolicy);
+    app()->forgetInstance(RotationService::class);
+
+    expect(app(LifetimePolicy::class))->toBe($productPolicy);
+});
+
+it('fails boot when api-keys.max_lifetime_days is not a whole number of days >= 1', function (mixed $configured): void {
+    config(['api-keys.max_lifetime_days' => $configured]);
+
+    $provider = app()->getProvider(ApiKeysServiceProvider::class);
+
+    expect(fn () => $provider->boot())
+        ->toThrow(InvalidArgumentException::class, 'API_KEYS_MAX_LIFETIME_DAYS');
+})->with([
+    'trailing garbage' => '30abc',
+    'not a number' => 'thirty',
+    'zero' => '0',
+    'negative' => -5,
+    'fraction' => '1.5',
+]);
+
+it('boots with max_lifetime_days unset and allows any expiry', function (): void {
+    config(['api-keys.max_lifetime_days' => null]);
+
+    app()->getProvider(ApiKeysServiceProvider::class)->boot();
+
+    expect(app(LifetimePolicy::class)->allowsExpiry(null, new DateTimeImmutable))->toBeTrue();
 });

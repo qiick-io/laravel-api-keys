@@ -305,3 +305,12 @@ it('reports an invalid setting from api-keys:check', function (): void {
         ->expectsOutputToContain('API_KEYS_FAILED_ATTEMPTS_PER_MINUTE')
         ->assertFailed();
 });
+
+it('fails api-keys:check when the application timezone is not UTC', function (): void {
+    useDefaultCacheStore('array');
+    config(['app.timezone' => 'Europe/Rome']);
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain('app.timezone must be UTC')
+        ->assertFailed();
+});

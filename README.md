@@ -139,8 +139,43 @@ rotation by the default `ConfigLifetimePolicy`: `RotationService` refuses an
 expiry later than now + that many days, or no expiry at all. Unset disables
 it. Any other value must be a whole number >= 1; anything else (`0`, `30abc`,
 `thirty`) fails at boot instead of being silently cast. Bind your own
-`Contracts\LifetimePolicy` to replace the default, and call it from your
-issuance code too: issuance is product-owned.
+`Contracts\LifetimePolicy` to replace the default.
+
+Issuance is product-owned (`TokenCodec::issue()` persists nothing), so check the
+policy before inserting a new key; the same refusal is used on rotation:
+
+```php
+$expiresAt = $request->date('expires_at')?->toImmutable();
+
+LifetimeAssertion::assertAllows(app(LifetimePolicy::class), $expiresAt, $clock->now());
+
+$token = $codec->issue();
+ApiKey::create([/* ... */ 'expires_at' => $expiresAt, 'key_hash' => $token->keyHash]);
+```
+
+## Exposed keys
+
+`Contracts\CompromisedKeyRevoker` is the seam for automatic revocation when a
+key is reported exposed (a secret-scanning partner callback, a manual report).
+The package ships no scanner adapter (dated decision in `docs/decisions`): the
+product verifies the scanner's request, then revokes and announces it:
+
+```php
+final class RevokeExposedKey implements CompromisedKeyRevoker
+{
+    public function revokeExposed(ApiKeyRecord $record, string $exposureSource, DateTimeImmutable $exposedAt): void
+    {
+        ApiKey::query()->whereKey($record->id())->update([
+            'exposed_at' => $exposedAt,
+            'exposure_source' => $exposureSource,
+            'revoked_at' => $exposedAt,
+            'revoked_reason' => RevocationReason::Exposure->value,
+        ]);
+
+        event(new ApiKeyExposed($record->publicId(), $exposureSource, $exposedAt));
+    }
+}
+```
 
 ## Rotation (product persistence)
 
@@ -292,6 +327,23 @@ Pest helpers (`assertTokenAbsentFrom`, `assertInvalidToken`, `assertInsufficient
 `assertIpNotAllowed`, `assertLegacyTokenUsed`) ship under `Qiick\ApiKeys\Testing\` via
 **autoload-dev** only. Consumer apps should `require` `vendor/qiick/laravel-api-keys/src/Testing/functions.php`
 from their `Pest.php` (do not put them on production `autoload.files`).
+
+## Public API and deprecation policy
+
+The frozen public surface (classes, config keys, env names, commands, events and
+wire formats) is listed in [docs/public-api.md](./docs/public-api.md); anything
+else in `src/` is `@internal`. This package follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html):
+
+- **Deprecation in minor releases:** a deprecated public API (class, method,
+  interface, config key or environment variable) is marked `@deprecated` with
+  its replacement, recorded under "Deprecated" in `CHANGELOG.md` and in
+  `UPGRADING.md`, and keeps working for at least one minor release. A renamed
+  config key or env name is still read as a fallback until removal.
+- **Removal in major releases only:** nothing deprecated is removed within the
+  same major version; removals happen at the next major (`2.0.0`).
+- **Pre-1.0:** in `0.x`, breaking changes are recorded in `UPGRADING.md` before
+  each tagged release. From `1.0.0` the public API above is frozen.
 
 ## Development
 

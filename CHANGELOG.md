@@ -66,6 +66,13 @@ Public Suffix List: first snapshot (2026-11-24).
 
 ### Added
 
+- `LifetimeAssertion::assertAllows()`: the lifetime policy check products call
+  before inserting a new key (issuance is product-owned); rotation uses it too.
+- `api-keys:check` also fails when `app.timezone` is not UTC.
+- `docs/public-api.md` lists the frozen public API, guarded by
+  `tests/Arch/PublicApiTest.php`; the README has a deprecation policy.
+- `docs/decisions/2026-11-24-one-point-zero-checklist.md`.
+
 - `php artisan api-keys:check`: fails (exit 1) when the settings are invalid
   or the cache store cannot back the attempt limiter. Run it in the deploy
   pipeline: boot does not check the store, so artisan keeps working.
@@ -75,6 +82,11 @@ Public Suffix List: first snapshot (2026-11-24).
 - `CacheAttemptLimiter`, bound to `AttemptLimiter` unless the product binds one.
 
 ### Changed (breaking)
+
+- `RequestRestrictionsEvaluator`, `AppEnvironmentResolver` and
+  `RandomBytesSource` are `@internal`: they may change in any release.
+- A rotation refused by the lifetime policy now reads "The API key expiry
+  exceeds the lifetime policy." (same `InvalidArgumentException`).
 
 - `AttemptLimiter`: `hit()` returns `int`; `decrement(string $key)` added
   (no-op on a missing counter, never below zero); `tooManyAttempts()` removed.

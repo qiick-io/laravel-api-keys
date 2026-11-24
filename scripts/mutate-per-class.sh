@@ -22,6 +22,7 @@ CLASSES=(
   'Qiick\ApiKeys\RequestRestrictionsEvaluator'
   'Qiick\ApiKeys\RequestRestrictions'
   'Qiick\ApiKeys\PublicSuffixList'
+  'Qiick\ApiKeys\LifetimeAssertion'
 )
 
 # CacheAttemptLimiter's Redis and Memcached branches only run against live

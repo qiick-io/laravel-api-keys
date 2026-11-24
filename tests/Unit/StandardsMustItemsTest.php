@@ -231,7 +231,11 @@ it('L1/L2: day and month buckets are enforced and rateLimit returns a list', fun
 
     $auth->authenticate($issued->plainText, new KeyContext('203.0.113.10'));
     expect($limiter->hitsFor('api-key:quota-1:day'))->toBe(1)
-        ->and($limiter->hitsFor('api-key:quota-1:month'))->toBe(1);
+        ->and($limiter->hitsFor('api-key:quota-1:month'))->toBe(1)
+        ->and($limiter->lastDecaySeconds)->toBe([
+            'api-key:quota-1:day' => 86_400,
+            'api-key:quota-1:month' => 2_592_000,
+        ]);
 
     $authorizer = (new FakeKeyAuthorizer)->withRateLimits([
         new RateLimitDecision('custom:bucket', 1, 60),

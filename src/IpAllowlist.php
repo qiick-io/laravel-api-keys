@@ -21,7 +21,7 @@ final class IpAllowlist
 {
     private const string MAPPED_PREFIX = "\0\0\0\0\0\0\0\0\0\0\xff\xff";
 
-    public function allows(string $ip, mixed $allowlist): bool
+    public function allows(?string $ip, mixed $allowlist): bool
     {
         if ($allowlist === null || $allowlist === []) {
             return true;
@@ -37,7 +37,8 @@ final class IpAllowlist
             }
         }
 
-        if (str_contains($ip, '%')) {
+        // An unknown client cannot be inside a non-empty allowlist.
+        if ($ip === null || str_contains($ip, '%')) {
             return false;
         }
 
@@ -71,12 +72,13 @@ final class IpAllowlist
         }
 
         if (strlen($binary) === 16 && str_starts_with($binary, self::MAPPED_PREFIX)) {
-            // inet_ntop cannot fail for a 4-byte slice from a successful inet_pton.
-            return (string) inet_ntop(substr($binary, 12)); // @pest-mutate-ignore: RemoveStringCast
+            $binary = substr($binary, 12);
         }
 
-        // inet_ntop cannot fail for a binary from a successful inet_pton.
-        return (string) inet_ntop($binary); // @pest-mutate-ignore: RemoveStringCast
+        // Equivalent mutant: inet_ntop() only fails on a malformed binary and inet_pton() output never is one.
+        $rendered = inet_ntop($binary);
+
+        return $rendered === false ? null : $rendered; // @pest-mutate-ignore: FalseToTrue
     }
 
     private function isIpv4Mapped(string $ip): bool
@@ -100,7 +102,8 @@ final class IpAllowlist
         }
 
         $address = $parts[0];
-        $prefixLength = (int) $parts[1]; // @pest-mutate-ignore: RemoveIntegerCast
+        // "00" must become 0: IpUtils treats only an integer-looking "0" as the match-all prefix.
+        $prefixLength = (int) $parts[1];
         $wasMapped = $this->isIpv4Mapped($address);
         $expanded = $this->expandMapped($address);
         if ($expanded === null) {

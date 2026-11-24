@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Exceptions;
 use Qiick\ApiKeys\ApiKeyAuthenticator;
 use Qiick\ApiKeys\AuthorizationDecision;
 use Qiick\ApiKeys\Contracts\ApiKeyRecord;
@@ -1258,6 +1259,7 @@ it('does not invoke the exception reporter when usageSideEffect is null', functi
 });
 
 it('reports usage failures via the Laravel report() helper when no reporter is wired', function (): void {
+    Exceptions::fake();
     $fixture = authenticator(['defaultRate' => 0]);
 
     $matching = authenticator([
@@ -1311,6 +1313,7 @@ it('reports usage failures via the Laravel report() helper when no reporter is w
     // No exceptionReporter — exercise the function_exists('report') fallback.
     $result = $matching['auth']->authenticate($fixture['token'], keyContext());
     expect($result->record->id())->toBe('42');
+    Exceptions::assertReported(fn (RuntimeException $exception): bool => $exception->getMessage() === 'usage write failed');
 });
 
 it('asserts remaining=0 on the pre-auth failed-attempt 429', function (): void {
@@ -1423,6 +1426,48 @@ it('does not count a request refused by the per-key limit against that limit', f
 
     expect($limiter->hitsFor('api-key:42'))->toBe(1);
 });
+
+it('accepts exactly the token versions it can verify', function (int $tokenVersion, bool $isAccepted): void {
+    $fixture = authenticator(['defaultRate' => 0]);
+    $versioned = authenticator([
+        'record' => $fixture['record']->withTokenVersion($tokenVersion),
+        'defaultRate' => 0,
+    ]);
+
+    $outcome = fn () => $versioned['auth']->authenticate($versioned['token'], keyContext());
+
+    if ($isAccepted) {
+        expect($outcome()->record->tokenVersion())->toBe($tokenVersion);
+
+        return;
+    }
+
+    expect($outcome)->toThrow(ApiKeyRejection::class, 'The API key is not valid.');
+})->with([
+    'legacy 0' => [0, true],
+    'canonical 1' => [1, true],
+    'checksummed 2' => [2, true],
+    'unknown 3' => [3, false],
+    'negative' => [-1, false],
+]);
+
+it('skips row windows that are unset or not positive', function (?int $perDay, ?int $perMonth): void {
+    $limiter = new FakeAttemptLimiter;
+    $fixture = authenticator(['limiter' => $limiter, 'defaultRate' => 0]);
+    $windowed = authenticator([
+        'limiter' => $limiter,
+        'defaultRate' => 0,
+        'record' => $fixture['record']->withRateLimitPerDay($perDay)->withRateLimitPerMonth($perMonth),
+    ]);
+
+    $windowed['auth']->authenticate($windowed['token'], keyContext());
+
+    expect($limiter->lastDecaySeconds)->toBe([]);
+})->with([
+    'unset' => [null, null],
+    'zero' => [0, 0],
+    'negative' => [-1, -1],
+]);
 
 it('gives back the hits it took on earlier windows when a later window refuses', function (): void {
     $limiter = new FakeAttemptLimiter;

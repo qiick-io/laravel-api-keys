@@ -79,33 +79,20 @@ final class FailedAttemptLimiter
      */
     public function bucketKey(?string $clientIp): ?string
     {
-        if ($clientIp === null || $clientIp === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
-            return null;
-        }
+        $canonical = $clientIp === null ? null : $this->ipAllowlist->expandMapped($clientIp);
 
-        $canonical = $this->ipAllowlist->expandMapped($clientIp);
         if ($canonical === null) {
             return null;
         }
 
-        // expandMapped only returns addresses inet_pton already accepted.
-        $binary = @inet_pton($canonical);
-        if ($binary === false) { // @pest-mutate-ignore: FalseToTrue
-            return null; // @pest-mutate-ignore: RemoveEarlyReturn
-        }
-
-        if (strlen($binary) === 4) {
+        if (! str_contains($canonical, ':')) {
             return 'api-key-failures:v4:'.$canonical;
         }
 
-        // IPv6 /64: keep the first 64 bits, zero the rest.
-        $network = substr($binary, 0, 8).str_repeat("\0", 8);
-        $rendered = inet_ntop($network);
-        // inet_ntop only fails on corrupt binary; our 16-byte network is always valid.
-        if ($rendered === false) { // @pest-mutate-ignore: FalseToTrue
-            return null; // @pest-mutate-ignore: RemoveEarlyReturn
-        }
+        // IPv6 /64: keep the first 64 bits, zero the rest. Equivalent mutant: inet_pton()
+        // cannot fail on an address expandMapped() returned, so the cast never changes the value.
+        $network = substr((string) inet_pton($canonical), 0, 8).str_repeat("\0", 8); // @pest-mutate-ignore: RemoveStringCast
 
-        return 'api-key-failures:v6:'.$rendered;
+        return 'api-key-failures:v6:'.inet_ntop($network);
     }
 }

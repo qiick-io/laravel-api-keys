@@ -20,6 +20,8 @@ CLASSES=(
   'Qiick\ApiKeys\Http\BearerTokenExtractor'
   'Qiick\ApiKeys\KeyRestrictions'
   'Qiick\ApiKeys\RequestRestrictionsEvaluator'
+  'Qiick\ApiKeys\RequestRestrictions'
+  'Qiick\ApiKeys\PublicSuffixList'
 )
 
 # CacheAttemptLimiter's Redis and Memcached branches only run against live

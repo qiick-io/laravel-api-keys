@@ -92,3 +92,13 @@ it('fail-closes when a prefix is out of range for the address family', function 
         ->and(allowlist()->allows('2001:db8::1', ['2001:db8::1', '2001:db8::/129']))->toBeFalse()
         ->and(allowlist()->allows('10.0.0.5', ['10.0.0.5', '::ffff:10.0.0.0/129']))->toBeFalse();
 });
+
+it('reads a zero-padded CIDR prefix as its number', function (): void {
+    $allowlist = new IpAllowlist;
+
+    // '::/00' is /0: every IPv6 address. Kept as the string "00", IpUtils would not see a zero prefix.
+    expect($allowlist->allows('2001:db8::1', ['::/00']))->toBeTrue()
+        ->and($allowlist->allows('fe80::1', ['::/00']))->toBeTrue()
+        ->and($allowlist->allows('203.0.113.10', ['203.0.113.0/024']))->toBeTrue()
+        ->and($allowlist->allows('203.0.114.10', ['203.0.113.0/024']))->toBeFalse();
+});

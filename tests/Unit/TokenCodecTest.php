@@ -35,8 +35,6 @@ function codecNow(): DateTimeImmutable
 }
 
 it('pins ID_LENGTH and SECRET_LENGTH to the fleet sizes (A1)', function (): void {
-    // Public consts are the @api names; operational lengths live in private
-    // methods (typed class-const lines are not coverage-attributed by Pest mutate).
     expect(TokenCodec::ID_LENGTH)->toBe(8)
         ->and(TokenCodec::SECRET_LENGTH)->toBe(32)
         ->and(TokenCodec::CHECKSUM_LENGTH)->toBe(6)
@@ -370,4 +368,49 @@ it('runs a dummy compare when asked and when match returns none', function (): v
 it('refuses a product prefix that is not three lowercase letters', function (): void {
     expect(fn () => codec(product: 'EXT'))->toThrow(InvalidArgumentException::class)
         ->and(fn () => codec(product: 'ab'))->toThrow(InvalidArgumentException::class);
+});
+
+it('computes the GitHub-style base62 CRC32 checksum, most significant digit first', function (): void {
+    // Reference values from an independent implementation (Python zlib.crc32).
+    expect(codec()->checksumFor('hello'))->toBe('A9X58C')
+        ->and(codec()->checksumFor('tst_test_ABCDEFGH'.str_repeat('a', 32)))->toBe('BPbqju');
+});
+
+it('parses the secret out of a version 1 token', function (): void {
+    $codec = codec();
+    $token = $codec->issue(tokenVersion: 1);
+    $parsed = $codec->parse($token->plainText);
+
+    expect($parsed?->secret)->toBe(substr($token->plainText, -TokenCodec::SECRET_LENGTH))
+        ->and($parsed?->keyPrefix)->toBe($token->keyPrefix);
+});
+
+it('accepts only token versions 1 and 2 as the default to issue', function (int $tokenVersion, bool $isAccepted): void {
+    $build = fn () => new TokenCodec(
+        productPrefix: 'tst',
+        environment: new FixedEnvironment(TokenEnvironment::Test),
+        random: new FixedRandomSource('fixed-seed-for-deterministic-api-key-tests!!'),
+        defaultTokenVersion: $tokenVersion,
+    );
+
+    if ($isAccepted) {
+        expect($build()->issue()->tokenVersion)->toBe($tokenVersion);
+
+        return;
+    }
+
+    expect($build)->toThrow(InvalidArgumentException::class, 'must be 1 or 2');
+})->with([
+    'legacy 0' => [0, false],
+    'canonical 1' => [1, true],
+    'checksummed 2' => [2, true],
+    'unknown 3' => [3, false],
+]);
+
+it('keeps a 20-character secret floor even when a matcher declares a shorter secret', function (): void {
+    $matcher = new RecordingLegacyTokenMatcher('ek_SHORT', new DateTimeImmutable('2099-01-01T00:00:00Z'), secretLength: 5);
+    $codec = codec(legacyMatchers: [$matcher]);
+
+    expect($codec->prefixOf('ek_SHORT'.str_repeat('y', 19), codecNow()))->toBeNull()
+        ->and($codec->prefixOf('ek_SHORT'.str_repeat('y', 20), codecNow()))->toBe('ek_SHORT');
 });

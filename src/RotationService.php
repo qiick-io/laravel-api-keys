@@ -27,6 +27,7 @@ use Qiick\ApiKeys\Contracts\LifetimePolicy;
  */
 final class RotationService
 {
+    // Pest gives constant declarations no line coverage; RotationServiceTest pins the value.
     public const int DEFAULT_MAX_GRACE_HOURS = 168; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
 
     public function __construct(
@@ -113,7 +114,7 @@ final class RotationService
             return 0;
         }
 
-        // min_range 0 is intentional: grace of exactly 0 must parse as int 0, not false.
+        // Equivalent mutant: min_range 1 rejects 0 as false, which also normalises to 0.
         $parsed = filter_var(
             $configValue,
             FILTER_VALIDATE_INT,

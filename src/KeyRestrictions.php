@@ -12,6 +12,7 @@ namespace Qiick\ApiKeys;
  */
 final readonly class KeyRestrictions
 {
+    // Pest gives constant declarations no line coverage; KeyRestrictionsTest pins the value.
     public const int VERSION = 1; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
 
     private function __construct(
@@ -53,6 +54,8 @@ final readonly class KeyRestrictions
             }
 
             try {
+                // Equivalent mutant: a document deeper than the schema is denied by the shape checks
+                // anyway; the depth only caps decoder work on stored data.
                 $decoded = json_decode($raw, true, 32, JSON_THROW_ON_ERROR); // @pest-mutate-ignore: IncrementInteger,DecrementInteger
             } catch (\JsonException) {
                 return self::denied();
@@ -77,13 +80,8 @@ final readonly class KeyRestrictions
             return self::denied();
         }
 
-        // Values are unused; presence of the key is the allow-list (TrueToFalse is equivalent).
-        $allowedKeys = ['v' => true, 'request' => true, 'resources' => true]; // @pest-mutate-ignore: TrueToFalse
-
-        foreach (array_keys($raw) as $key) {
-            if (! is_string($key) || ! array_key_exists($key, $allowedKeys)) {
-                return self::denied();
-            }
+        if (! self::hasOnlyKeys($raw, ['v', 'request', 'resources'])) {
+            return self::denied();
         }
 
         $request = self::parseRequest($raw['request'] ?? null);
@@ -116,166 +114,30 @@ final readonly class KeyRestrictions
             return null;
         }
 
-        // Values unused; key presence is the allow-list.
-        $allowedKeys = [
-            'methods' => true, // @pest-mutate-ignore: TrueToFalse
-            'route_names' => true, // @pest-mutate-ignore: TrueToFalse
-            'origins' => true, // @pest-mutate-ignore: TrueToFalse
-            'referrers' => true, // @pest-mutate-ignore: TrueToFalse
-        ];
-
-        foreach (array_keys($raw) as $key) {
-            if (! is_string($key) || ! array_key_exists($key, $allowedKeys)) {
-                return null;
-            }
-        }
-
-        $methods = self::stringList($raw['methods'] ?? []);
-        $routeNames = self::stringList($raw['route_names'] ?? []);
-        $origins = self::originPatternList($raw['origins'] ?? []);
-        $referrers = self::referrerPatternList($raw['referrers'] ?? []);
-
-        if ($methods === null || $routeNames === null || $origins === null || $referrers === null) {
+        if (! self::hasOnlyKeys($raw, ['methods', 'route_names', 'origins', 'referrers'])) {
             return null;
         }
 
-        return new RequestRestrictions(
-            methods: $methods,
-            routeNames: $routeNames,
-            origins: $origins,
-            referrers: $referrers,
-        );
-    }
+        $methods = $raw['methods'] ?? [];
+        $routeNames = $raw['route_names'] ?? [];
+        $origins = $raw['origins'] ?? [];
+        $referrers = $raw['referrers'] ?? [];
 
-    /**
-     * Exact origin or `scheme://*.example.com[:port]`. Any other `*` is rejected.
-     *
-     * @return list<string>|null
-     */
-    private static function originPatternList(mixed $raw): ?array
-    {
-        $values = self::stringList($raw);
-
-        if ($values === null) {
+        if (! is_array($methods) || ! is_array($routeNames) || ! is_array($origins) || ! is_array($referrers)) {
             return null;
         }
 
-        foreach ($values as $pattern) {
-            if (! self::isValidOriginPattern($pattern)) {
-                return null;
-            }
-        }
-
-        return $values;
-    }
-
-    /**
-     * Exact referer, or path prefix after an exact origin (`https://app.example.com/*`).
-     *
-     * @return list<string>|null
-     */
-    private static function referrerPatternList(mixed $raw): ?array
-    {
-        $values = self::stringList($raw);
-
-        if ($values === null) {
+        // RequestRestrictions owns the list and pattern grammar; a refusal there is a malformed document.
+        try {
+            return new RequestRestrictions(
+                methods: $methods,
+                routeNames: $routeNames,
+                origins: $origins,
+                referrers: $referrers,
+            );
+        } catch (\InvalidArgumentException) {
             return null;
         }
-
-        foreach ($values as $pattern) {
-            if (! self::isValidReferrerPattern($pattern)) {
-                return null;
-            }
-        }
-
-        return $values;
-    }
-
-    private static function isValidOriginPattern(string $pattern): bool
-    {
-        // >1 and >0 are equivalent: a single mid-host `*` still fails the host-shape checks below.
-        if (substr_count($pattern, '*') > 1) { // @pest-mutate-ignore: IncrementInteger
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
-        }
-
-        $parts = parse_url($pattern);
-
-        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) { // @pest-mutate-ignore: BooleanOrToBooleanAnd,FalseToTrue
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
-        }
-
-        if (isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) { // @pest-mutate-ignore: BooleanOrToBooleanAnd
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
-        }
-
-        $path = $parts['path'] ?? null; // @pest-mutate-ignore: CoalesceRemoveLeft
-
-        if ($path !== null && $path !== '' && $path !== '/') { // @pest-mutate-ignore: NotIdenticalToIdentical,EmptyStringToNotEmpty
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
-        }
-
-        $host = $parts['host'];
-
-        if (str_contains($host, '*')) {
-            $suffix = substr($host, 2); // @pest-mutate-ignore: DecrementInteger,IncrementInteger
-
-            // Host-label subdomain wildcards only: `*.example.com`.
-            return str_starts_with($host, '*.')
-                && $suffix !== '' // @pest-mutate-ignore: EmptyStringToNotEmpty
-                && ! str_contains($suffix, '*'); // @pest-mutate-ignore: BooleanAndToBooleanOr
-        }
-
-        return ! str_contains($pattern, '*');
-    }
-
-    private static function isValidReferrerPattern(string $pattern): bool
-    {
-        if (! str_contains($pattern, '*')) {
-            $parts = parse_url($pattern);
-
-            // Exact referer: absolute URL with scheme+host; path allowed; no userinfo/query/fragment.
-            return $parts !== false // @pest-mutate-ignore: BooleanAndToBooleanOr,FalseToTrue
-                && isset($parts['scheme'], $parts['host'])
-                && ! isset($parts['user'])
-                && ! isset($parts['pass'])
-                && ! isset($parts['query'])
-                && ! isset($parts['fragment']);
-        }
-
-        if (! str_ends_with($pattern, '*') || substr_count($pattern, '*') !== 1) { // @pest-mutate-ignore: BooleanOrToBooleanAnd
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
-        }
-
-        $prefix = substr($pattern, 0, -1); // @pest-mutate-ignore: IncrementInteger,UnwrapSubstr
-        $parts = parse_url($prefix);
-
-        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) { // @pest-mutate-ignore: BooleanOrToBooleanAnd,FalseToTrue
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
-        }
-
-        // Unreachable when the pattern has a single trailing `*` (that star is stripped
-        // before parse); kept as defence in depth if the star-count guard changes.
-        if (str_contains((string) $parts['host'], '*')) { // @pest-mutate-ignore: RemoveStringCast
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
-        }
-
-        $origin = $parts['scheme'].'://'.$parts['host'];
-
-        if (isset($parts['port'])) {
-            $origin .= ':'.$parts['port']; // @pest-mutate-ignore: ConcatEqualToEqual,ConcatRemoveLeft,ConcatRemoveRight,ConcatSwitchSides
-        }
-
-        // Userinfo makes rebuilt origin miss the literal prefix (`https://user@host/...`).
-        if (! str_starts_with($prefix, $origin)) {
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
-        }
-
-        if (isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) { // @pest-mutate-ignore: BooleanOrToBooleanAnd
-            return false; // @pest-mutate-ignore: FalseToTrue,RemoveEarlyReturn
-        }
-
-        // Require `/…` after the exact origin so `https://app.example.com*` is rejected.
-        return strlen($prefix) > strlen($origin) && $prefix[strlen($origin)] === '/';
     }
 
     /**
@@ -302,13 +164,8 @@ final readonly class KeyRestrictions
                 return null;
             }
 
-            // Values unused; key presence is the allow-list.
-            $allowedKeys = ['type' => true, 'values' => true, 'mode' => true]; // @pest-mutate-ignore: TrueToFalse
-
-            foreach (array_keys($entry) as $key) {
-                if (! is_string($key) || ! array_key_exists($key, $allowedKeys)) {
-                    return null;
-                }
+            if (! self::hasOnlyKeys($entry, ['type', 'values', 'mode'])) {
+                return null;
             }
 
             if (! isset($entry['type'], $entry['values']) || ! is_string($entry['type']) || $entry['type'] === '') {
@@ -333,6 +190,23 @@ final readonly class KeyRestrictions
         }
 
         return new ResourceRestrictions($entries);
+    }
+
+    /**
+     * Unknown keys make a section malformed (fail closed); integer keys never match.
+     *
+     * @param  array<mixed>  $section
+     * @param  list<string>  $allowedKeys
+     */
+    private static function hasOnlyKeys(array $section, array $allowedKeys): bool
+    {
+        foreach (array_keys($section) as $key) {
+            if (! in_array($key, $allowedKeys, true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

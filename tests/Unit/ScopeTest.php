@@ -127,3 +127,12 @@ it('dedupes granted scopes when write demotes onto an already-kept read', functi
     expect($narrowed->values())->toBe(['users:read'])
         ->and($narrowed->collapsed()->values())->toBe(['users:read']);
 });
+
+it('names the expected pattern when a scope atom is invalid', function (): void {
+    try {
+        new Scope('Items', 'read');
+        $this->fail('expected an invalid scope atom');
+    } catch (InvalidArgumentException $exception) {
+        expect($exception->getMessage())->toBe('Scope atom must match '.Scope::PATTERN);
+    }
+});

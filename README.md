@@ -201,7 +201,12 @@ Extract the bearer first (`BearerTokenExtractor`: no trim; case-insensitive
 7. IP allowlist →
 8. Request restrictions (`KeyRestrictions` / `RequestRestrictionsEvaluator`;
    malformed or denied → `403 request_not_allowed`; scheme/host compared
-   case-insensitively) →
+   case-insensitively). Origin wildcards must sit on a registrable domain:
+   `*.example.com` yes; `*.com`, `*.co.uk`, `*.github.io` (anyone can register
+   a sibling there) no, per a bundled snapshot of the Public Suffix List.
+   `new RequestRestrictions(...)` validates its own lists
+   and throws `InvalidArgumentException` on a pattern the evaluator would not
+   understand, so a hand-built instance cannot fail open →
 9. Scopes: expand → owner ceiling via `scopesCreatorMayGrant` on the **record**
    (C1: the product decides ownerless/creator-less keys; write may demote to
    read) → collapse highest-per-resource → required scope / `authorizeScopes` →

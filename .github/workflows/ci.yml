@@ -47,8 +47,7 @@ jobs:
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
         with:
           php-version: ${{ matrix.php }}
-          # pcov required for the mutate cell (pest --mutate needs a coverage driver).
-          coverage: ${{ (matrix.php == '8.4' && matrix.laravel == '12' && matrix.dependency-version == 'stable') && 'pcov' || 'none' }}
+          coverage: none
           tools: composer:v2
 
       - name: Validate composer.json
@@ -89,10 +88,36 @@ jobs:
       - name: Pest
         run: vendor/bin/pest
 
-      # Mutation targets from the design §6. Enforce >=95% per class (a combined
-      # CSV can hide a weak class behind a high overall score).
-      - name: Pest mutate (security-critical classes, per-class min 95)
-        if: matrix.php == '8.4' && matrix.laravel == '12' && matrix.dependency-version == 'stable'
+  # Every runtime class at >=95%, per class (docs/decisions/2026-11-24-one-point-zero-checklist.md),
+  # split into shards so the gate stays within the job timeout as classes grow.
+  mutation:
+    name: mutate (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout
+        # actions/checkout@v4.1.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Setup PHP
+        # shivammathur/setup-php@2.40.0
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
+        with:
+          php-version: '8.4'
+          # pest --mutate needs a coverage driver.
+          coverage: pcov
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer update --no-interaction --prefer-dist
+
+      - name: Pest mutate (per-class min 95)
+        env:
+          MUTATE_SHARD: ${{ matrix.shard }}/4
         run: bash scripts/mutate-per-class.sh
 
   # Expiry-notice claim CAS on SQLite / MySQL / MariaDB / PostgreSQL.
@@ -260,6 +285,22 @@ jobs:
           API_KEYS_LIMITER_STORE: both
           MUTATE_ONLY: Qiick\ApiKeys\CacheAttemptLimiter
         run: bash scripts/mutate-per-class.sh
+
+  # The one required check for mutation: green only when every shard and the
+  # cache limiter job passed.
+  mutation-gate:
+    name: Mutation (per-class ≥95%)
+    if: always()
+    needs: [mutation, mutate-cache-limiter]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every mutation job passed
+        run: |
+          if [ "${{ needs.mutation.result }}" != "success" ] || [ "${{ needs.mutate-cache-limiter.result }}" != "success" ]; then
+            echo "Mutation shards: ${{ needs.mutation.result }}; cache limiter: ${{ needs.mutate-cache-limiter.result }}" >&2
+            exit 1
+          fi
 
   # Prefer SHA pin when the reusable workflow is addressable; app-ui publishes
   # drift-check under tags, so @v0.11.0 matches qiick-standards.json "ref".

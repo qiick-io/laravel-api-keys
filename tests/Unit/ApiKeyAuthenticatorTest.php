@@ -222,7 +222,7 @@ it('authenticates a real Externa ek_+9+31 legacy token', function (): void {
         ->toThrow(ApiKeyRejection::class);
 });
 
-it('accepts the previous secret inside the grace window', function (): void {
+it('accepts the previous secret inside the grace window (A3)', function (): void {
     $codec = makeCodec();
     $first = $codec->issue();
     $second = $codec->reissueForPrefix($first->keyPrefix);
@@ -269,7 +269,7 @@ it('returns identical invalid_token for format-miss and hash-miss (A2b)', functi
     }
 });
 
-it('rejects with invalid_token when the prefix has no candidates', function (): void {
+it('rejects with invalid_token and a dummy compare when the prefix has no candidates (A2)', function (): void {
     $fixture = authenticator([
         'repository' => new FakeApiKeyRepository([]),
         'defaultRate' => 0,

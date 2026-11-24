@@ -17,6 +17,11 @@ Public Suffix List: first snapshot (2026-11-24).
 
 ### Fixed
 
+- `api-keys.failed_attempts_per_minute` now sizes a bound `FailedAttemptLimiter`
+  (it was read by nothing), and `api-keys:check` fails on an unusable codec
+  setting (empty product prefix, token version other than 1 or 2, unknown
+  environment).
+
 - A config published before a nested key existed (`expiry.*`, `legacy.*`) now
   reads that key's package default instead of null: `mergeConfigFrom()` merges
   only the top level, so the provider fills the missing nested keys.

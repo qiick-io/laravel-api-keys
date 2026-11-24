@@ -28,7 +28,8 @@ if (! function_exists('idn_to_ascii')) {
 
 $rules = [];
 
-foreach (preg_split('/\R/', $list) ?: [] as $line) {
+// The u flag matters: byte-wise, \R also breaks on 0x85, a byte inside many CJK characters.
+foreach (preg_split('/\R/u', $list) ?: [] as $line) {
     // A rule is the first whitespace-delimited token; comments start with `//`.
     $rule = strtok(trim($line), " \t");
 

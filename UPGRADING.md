@@ -4,6 +4,17 @@ This package is **pre-release** (`0.x`). Breaking changes are allowed between
 minor versions while the major is `0`, and each break is recorded here before a
 tagged release.
 
+## Every release: Public Suffix List refresh
+
+Origin wildcards are checked against a bundled snapshot of the Public Suffix
+List (`resources/public_suffix_list.php`), refreshed by a monthly pull request.
+Patterns are re-validated on every request, so a refresh that lists a new
+suffix makes stored origin wildcards over it (for example a new hosting
+platform's `https://*.platform.example`) parse as denied: those keys stop
+authenticating after you upgrade, with no migration. Each CHANGELOG entry says
+whether the list changed; before upgrading, search stored `restrictions` for
+wildcards over the suffixes it names.
+
 ## From 0.1.0 toward 1.0.0
 
 ### Reference schema
@@ -38,8 +49,9 @@ pre-1.0 additions versus the 0.1.0 sketch:
   `InvalidArgumentException`. Stored `restrictions` rows holding a pattern that
   is now invalid (for example `https://*.com`, `https://*.github.io` or
   `https://*.co.uk`) parse as denied, so those keys stop authenticating after
-  the upgrade (fail closed): narrow the pattern to your own domain first. `ApiKeyAuthenticator` no longer takes a
-  `requestRestrictionsEvaluator` argument.
+  the upgrade (fail closed): narrow the pattern to your own domain first.
+  `ApiKeyAuthenticator` no longer takes a `requestRestrictionsEvaluator`
+  argument.
 - `api-keys.max_lifetime_days` is now enforced on rotation by default, and a
   value that is not a whole number >= 1 fails at boot. Unset it to keep the
   previous (unenforced) behaviour.

@@ -6,7 +6,7 @@ namespace Qiick\ApiKeys;
 
 use Qiick\ApiKeys\Contracts\RandomSource;
 
-/** @api Production CSPRNG: random_bytes. */
+/** @internal Production CSPRNG: random_bytes. */
 final class RandomBytesSource implements RandomSource
 {
     public function bytes(int $length): string

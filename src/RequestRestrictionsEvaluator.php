@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Qiick\ApiKeys;
 
 /**
- * @api Evaluates {@see RequestRestrictions} against a {@see KeyContext}.
+ * @internal Evaluates {@see RequestRestrictions} against a {@see KeyContext}.
  *
  * Fail closed: when a dimension is non-empty, the context value must match.
  * Missing or unparseable context for a constrained dimension denies.

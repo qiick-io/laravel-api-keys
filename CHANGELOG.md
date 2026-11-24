@@ -206,5 +206,5 @@ First pre-release. The API may still change before 1.0.0; see UPGRADING.md.
   --strict`, `composer audit`, and SHA-pinned Actions.
 
 [Unreleased]: https://github.com/qiick-io/laravel-api-keys/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/qiick-io/laravel-api-keys/releases/tag/v0.2.0
+[0.2.0]: https://github.com/qiick-io/laravel-api-keys/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/qiick-io/laravel-api-keys/releases/tag/v0.1.0

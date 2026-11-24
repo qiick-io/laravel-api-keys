@@ -16,22 +16,7 @@ authenticating after you upgrade, with no migration. Each CHANGELOG entry says
 whether the list changed; before upgrading, search stored `restrictions` for
 wildcards over the suffixes it names.
 
-## From 0.1.0 toward 1.0.0
-
-### Reference schema
-
-`docs/reference-schema.md` is the normative column list products adopt. Notable
-pre-1.0 additions versus the 0.1.0 sketch:
-
-- `key_prefix` is **unique** (`string(32)`); `key_hash` stays unique.
-- New columns: `token_version`, `hash_algorithm`, `previous_key_prefix`,
-  `credential_kind`, `oauth_client_id`, `description`, `metadata`,
-  `restrictions`, `rate_limit_per_day` / `rate_limit_per_month`,
-  `last_used_user_agent`, `last_rotated_at`, `expiry_notified_at`,
-  `expiry_notice_claimed_at`, `exposed_at` / `exposure_source`,
-  `revoked_by` / `revoked_reason` / `revocation_note`.
-- No `owner_kind` or `oauth_grant_uuid` column (principal kind; grant id is
-  `uuid`).
+## From 0.2.0 to the next release (0.3.0)
 
 ### Contract breaks
 
@@ -39,8 +24,8 @@ pre-1.0 additions versus the 0.1.0 sketch:
   increment and return the new count; add `decrement(string $key)` (no-op on
   a missing counter, never below zero); `tooManyAttempts()` is gone. Delete any
   adapter over Laravel's `RateLimiter` (it is not atomic) and use the bound
-  `CacheAttemptLimiter`, which needs a Redis or Memcached default cache store. `FailedAttemptLimiter`
-  now exposes `isBlocked()` / `countFailure()` instead of `tooManyAttempts()` / `hit()`;
+  `CacheAttemptLimiter`, which needs a Redis or Memcached default cache store.
+  `FailedAttemptLimiter` now exposes `isBlocked()` / `countFailure()` instead of `tooManyAttempts()` / `hit()`;
   `RateLimitDecision` refuses `decaySeconds` below 1.
 - `LegacyFormatWarningGate`: `claim(string $key, int $leaseSeconds): ?string`
   returns an owner token; `release(string $key, string $ownerToken)` and
@@ -63,6 +48,25 @@ pre-1.0 additions versus the 0.1.0 sketch:
 - `api-keys.max_lifetime_days` is now enforced on rotation by default, and a
   value that is not a whole number >= 1 fails at boot. Unset it to keep the
   previous (unenforced) behaviour.
+
+## From 0.1.0 to 0.2.0
+
+### Reference schema
+
+`docs/reference-schema.md` is the normative column list products adopt. Notable
+pre-1.0 additions versus the 0.1.0 sketch:
+
+- `key_prefix` is **unique** (`string(32)`); `key_hash` stays unique.
+- New columns: `token_version`, `hash_algorithm`, `previous_key_prefix`,
+  `credential_kind`, `oauth_client_id`, `description`, `metadata`,
+  `restrictions`, `rate_limit_per_day` / `rate_limit_per_month`,
+  `last_used_user_agent`, `last_rotated_at`, `expiry_notified_at`,
+  `expiry_notice_claimed_at`, `exposed_at` / `exposure_source`,
+  `revoked_by` / `revoked_reason` / `revocation_note`.
+- No `owner_kind` or `oauth_grant_uuid` column (principal kind; grant id is
+  `uuid`).
+
+### Contract breaks
 
 - `ApiKeyRecord`: add `publicId()`, version/hash/credential/restrictions/quota
   and attribution methods (see interface).
@@ -91,9 +95,10 @@ pre-1.0 additions versus the 0.1.0 sketch:
 - New denial: `ApiKeyRejection::requestNotAllowed()` → `403 request_not_allowed`.
 - Runtime deps: `illuminate/console`, `illuminate/notifications`.
 - New Artisan command: `api-keys:notify-expiring` (bind `ExpiryRecipientResolver`).
-- Day/month quotas (`rate_limit_per_day` / `rate_limit_per_month`) are **rolling
-  windows** via Laravel's `RateLimiter` (decay seconds 86_400 / 2_592_000), not
-  calendar day/month buckets. Durable calendar quotas remain LATER.
+- Day/month quotas (`rate_limit_per_day` / `rate_limit_per_month`) are windows of
+  86_400 / 2_592_000 seconds, not calendar day/month buckets. Durable calendar
+  quotas remain LATER. (Since the next release they are counted by
+  `CacheAttemptLimiter`, see above.)
 - Origin/referrer restriction patterns are structured: exact origin,
   `scheme://*.example.com[:port]` on the host-label boundary, and referrer path
   prefix only after an exact origin. Raw trailing `*` (e.g.

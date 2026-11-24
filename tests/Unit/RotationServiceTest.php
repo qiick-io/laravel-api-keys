@@ -270,6 +270,8 @@ it('redacts plaintext and hashes in Rotation debug, JSON, and serialize output',
     expect(json_encode($rotation))->not->toContain($rotation->newPlainText)
         ->and(json_encode($rotation))->toContain('[REDACTED]')
         ->and(serialize($rotation))->not->toContain($rotation->newPlainText)
+        ->and(serialize($rotation))->toContain('[REDACTED]')
+        ->and(serialize($rotation))->toContain($rotation->newKeyPrefix)
         ->and($rotation->__debugInfo()['newPlainText'])->toBe('[REDACTED]');
 
     expect(fn () => unserialize(serialize($rotation)))->toThrow(LogicException::class);

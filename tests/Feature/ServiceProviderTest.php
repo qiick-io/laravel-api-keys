@@ -13,6 +13,8 @@ use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\Tests\Support\RegexLegacyTokenMatcher;
 use Qiick\ApiKeys\TokenCodec;
 
+mutates(ApiKeysServiceProvider::class);
+
 it('merges the package defaults into the api-keys config', function (): void {
     expect(config('api-keys'))->toMatchArray([
         'product_prefix' => 'tst',

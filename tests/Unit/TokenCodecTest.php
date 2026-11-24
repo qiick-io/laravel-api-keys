@@ -372,7 +372,9 @@ it('refuses a product prefix that is not three lowercase letters', function (): 
 
 it('computes the GitHub-style base62 CRC32 checksum, most significant digit first', function (): void {
     // Reference values from an independent implementation (Python zlib.crc32).
+    // 'a' has an odd CRC32 (3904355907), so the mask's lowest bit matters too.
     expect(codec()->checksumFor('hello'))->toBe('A9X58C')
+        ->and(codec()->checksumFor('a'))->toBe('EQORUX')
         ->and(codec()->checksumFor('tst_test_ABCDEFGH'.str_repeat('a', 32)))->toBe('BPbqju');
 });
 

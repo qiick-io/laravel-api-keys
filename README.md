@@ -76,6 +76,9 @@ See [docs/reference-schema.md](./docs/reference-schema.md) for the full column l
 `rate_limit_per_minute`, `rate_limit_per_day`, and `rate_limit_per_month` are
 enforced as **fixed windows** opened by their first hit (decay 60 s /
 86_400 s / 2_592_000 s). They are not calendar day or calendar month buckets.
+A refusal carries `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`
+and `X-RateLimit-Reset`; `X-RateLimit-Reset` is the number of **seconds** until
+the window resets (like `Retry-After`), not an epoch timestamp.
 Durable calendar quotas are LATER (standards review L4).
 
 Limits hold under concurrency: the authenticator counts a request first with
@@ -316,7 +319,7 @@ if ($result->legacyMatcherClass !== null) {
     ));
 }
 event(new ApiKeyAuthenticated(
-    $result->record->id(),
+    $result->record->publicId(), // the public UUID, never the internal row id
     $result->record->keyPrefix(),
     $result->usedPreviousSecret,
     $context->ip,

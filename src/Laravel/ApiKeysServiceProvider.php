@@ -221,20 +221,6 @@ final class ApiKeysServiceProvider extends ServiceProvider
         }
     }
 
-    /**
-     * Only a missing key takes its default; a value the product set, even null, stays.
-     */
-    private function fillMissingNestedDefaults(): void
-    {
-        $config = $this->config($this->app);
-
-        foreach (self::nestedDefaults() as $path => $default) {
-            if (! $config->has('api-keys.'.$path)) {
-                $config->set('api-keys.'.$path, $default);
-            }
-        }
-    }
-
     private function config(Application $app): ConfigRepository
     {
         return $app->make(ConfigRepository::class);

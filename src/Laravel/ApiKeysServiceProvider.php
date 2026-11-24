@@ -21,6 +21,8 @@ use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
 use Qiick\ApiKeys\Contracts\RandomSource;
 use Qiick\ApiKeys\LegacyTokenMatcher;
+use Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification;
+use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
 use Qiick\ApiKeys\RandomBytesSource;
 use Qiick\ApiKeys\RotationService;
 use Qiick\ApiKeys\SystemClock;
@@ -37,9 +39,34 @@ use Qiick\ApiKeys\TokenEnvironment;
  */
 final class ApiKeysServiceProvider extends ServiceProvider
 {
+    /**
+     * @internal Defaults of the keys nested one level down, by path under `api-keys.`.
+     *
+     * mergeConfigFrom() merges only the top level, so a config a product published
+     * before one of these keys existed would read it as null. Constants, not the
+     * config file evaluated again: under `config:cache` the environment is not
+     * loaded. PublishedConfigDefaultsTest keeps them equal to the file's values
+     * with no env vars set.
+     *
+     * @return array<string, mixed>
+     */
+    public static function nestedDefaults(): array
+    {
+        return [
+            'expiry.notice_days' => 7,
+            'expiry.claim_lease_seconds' => 900,
+            'expiry.recipients' => ['owner', 'issuer'],
+            'expiry.notification' => ApiKeyExpiringNotification::class,
+            'legacy.accept_until' => null,
+            'legacy.warn_days_before' => 90,
+            'legacy.warning_notification' => ApiKeyLegacyFormatWarningNotification::class,
+        ];
+    }
+
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../../config/api-keys.php', 'api-keys');
+        $this->fillMissingNestedDefaults();
 
         $this->app->singleton(Clock::class, SystemClock::class);
         $this->app->singleton(RandomSource::class, RandomBytesSource::class);
@@ -150,6 +177,20 @@ final class ApiKeysServiceProvider extends ServiceProvider
         $this->validatedMaxLifetimeDays();
         $this->assertWholeNumberAtLeast('api-keys.failed_attempts_per_minute', 'API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 0);
         $this->assertWholeNumberAtLeast('api-keys.expiry.claim_lease_seconds', 'API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 1);
+    }
+
+    /**
+     * Only a missing key takes its default; a value the product set, even null, stays.
+     */
+    private function fillMissingNestedDefaults(): void
+    {
+        $config = $this->config($this->app);
+
+        foreach (self::nestedDefaults() as $path => $default) {
+            if (! $config->has('api-keys.'.$path)) {
+                $config->set('api-keys.'.$path, $default);
+            }
+        }
     }
 
     private function config(Application $app): ConfigRepository

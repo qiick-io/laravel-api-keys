@@ -49,3 +49,11 @@ it('keeps every nested value the product set, null and empty lists included', fu
         ->and(config('api-keys.legacy.warn_days_before'))->toBe(0)
         ->and(config('api-keys.legacy.warning_notification'))->toBeNull();
 });
+
+it('keeps the nested defaults equal to the shipped config file with no env vars set', function (): void {
+    $shipped = require dirname(__DIR__, 2).'/config/api-keys.php';
+
+    foreach (ApiKeysServiceProvider::nestedDefaults() as $path => $default) {
+        expect(data_get($shipped, $path))->toBe($default, "api-keys.{$path}");
+    }
+});

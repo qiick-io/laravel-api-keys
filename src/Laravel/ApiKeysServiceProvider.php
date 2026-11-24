@@ -121,6 +121,12 @@ final class ApiKeysServiceProvider extends ServiceProvider
     {
         $this->validatedLegacyAcceptUntil();
         $this->validatedMaxLifetimeDays();
+        $this->assertWholeNumberAtLeast('api-keys.failed_attempts_per_minute', 'API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 0);
+        $this->assertWholeNumberAtLeast('api-keys.expiry.claim_lease_seconds', 'API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 1);
+
+        // Resolve the limiter now: an unsupported cache store (Laravel's default is `database`)
+        // must fail the deploy, not the first API request.
+        $this->app->make(AttemptLimiter::class);
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
@@ -185,12 +191,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
             return null;
         }
 
-        // Digits only: filter_var() would also accept " 30" and "+30".
-        $days = match (true) {
-            is_int($configured) => $configured,
-            is_string($configured) && preg_match('/^[1-9][0-9]*$/D', $configured) === 1 => (int) $configured,
-            default => 0,
-        };
+        $days = $this->wholeNumber($configured) ?? 0;
 
         if ($days < 1) {
             throw new \InvalidArgumentException(
@@ -199,6 +200,34 @@ final class ApiKeysServiceProvider extends ServiceProvider
         }
 
         return $days;
+    }
+
+    /**
+     * A setting read raw from the environment must be a whole number of at
+     * least `$minimum`; a typo such as `twenty` would otherwise be cast to 0
+     * and silently switch the setting off.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function assertWholeNumberAtLeast(string $key, string $envName, int $minimum): void
+    {
+        $value = $this->wholeNumber($this->config($this->app)->get($key));
+
+        if ($value === null || $value < $minimum) {
+            throw new \InvalidArgumentException("{$key} ({$envName}) must be a whole number >= {$minimum}.");
+        }
+    }
+
+    /**
+     * Digits only: filter_var() would also accept " 30" and "+30".
+     */
+    private function wholeNumber(mixed $configured): ?int
+    {
+        return match (true) {
+            is_int($configured) => $configured,
+            is_string($configured) && preg_match('/^(0|[1-9][0-9]*)$/D', $configured) === 1 => (int) $configured,
+            default => null,
+        };
     }
 
     /**

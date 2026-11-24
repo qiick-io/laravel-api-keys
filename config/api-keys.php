@@ -52,9 +52,10 @@ return [
 
     /*
      * Pre-auth per-IP brake for unknown/invalid tokens. 0 disables.
-     * Recipes should leave this on (20/min).
+     * Recipes should leave this on (20/min). Not cast: anything but digits
+     * fails at boot, so a typo cannot silently switch the brake off.
      */
-    'failed_attempts_per_minute' => (int) env('API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 20),
+    'failed_attempts_per_minute' => env('API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 20),
 
     /*
      * Optional organisation max lifetime in days, enforced on rotation by the
@@ -78,9 +79,10 @@ return [
          * (expiry_notice_claimed_at). Keep this above worst-case send latency:
          * an in-flight send longer than the lease can be reclaimed by another
          * worker and produce a second notice. Workers must share NTP-synced
-         * UTC; skew can reclaim a live claim early.
+         * UTC; skew can reclaim a live claim early. Digits only, >= 1, or the
+         * app fails at boot.
          */
-        'claim_lease_seconds' => (int) env('API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 900),
+        'claim_lease_seconds' => env('API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 900),
 
         /*
          * Roles resolved by ExpiryRecipientResolver: owner, issuer, organisation.

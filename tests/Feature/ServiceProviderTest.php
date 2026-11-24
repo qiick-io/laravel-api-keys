@@ -264,6 +264,7 @@ it('boots with digit-only brake and lease settings from the environment', functi
 
 it('fails boot when the default cache store cannot back the attempt limiter', function (): void {
     config(['cache.default' => 'database']);
+    app()->forgetInstance('cache.store');
     app()->forgetInstance(AttemptLimiter::class);
 
     expect(fn () => app()->getProvider(ApiKeysServiceProvider::class)->boot())

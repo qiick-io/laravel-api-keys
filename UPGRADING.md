@@ -52,6 +52,11 @@ pre-1.0 additions versus the 0.1.0 sketch:
   the upgrade (fail closed): narrow the pattern to your own domain first.
   `ApiKeyAuthenticator` no longer takes a `requestRestrictionsEvaluator`
   argument.
+- Boot now fails when the default cache store cannot back the attempt
+  limiter (anything but Redis, Memcached or array), and when
+  `API_KEYS_FAILED_ATTEMPTS_PER_MINUTE` or `API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS`
+  is not digits only. Set `CACHE_STORE=redis` (or bind your own
+  `AttemptLimiter`) before upgrading.
 - `api-keys.max_lifetime_days` is now enforced on rotation by default, and a
   value that is not a whole number >= 1 fails at boot. Unset it to keep the
   previous (unenforced) behaviour.

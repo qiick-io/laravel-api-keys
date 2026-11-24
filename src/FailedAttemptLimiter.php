@@ -17,6 +17,10 @@ use Qiick\ApiKeys\Contracts\AttemptLimiter;
  *
  * `maxPerMinute` ≤ 0 disables. Recipes should leave the default (20) on — see
  * README for NAT / shared-egress lockout risk.
+ *
+ * Optional second tier: `maxPerMinutePerIpv6Slash48` (0, the default, is off) also caps failures across
+ * a whole IPv6 /48, the usual size of a single allocation. Without it, an
+ * attacker holding a /48 gets 65,536 separate /64 buckets.
  */
 final class FailedAttemptLimiter
 {
@@ -24,40 +28,51 @@ final class FailedAttemptLimiter
         private AttemptLimiter $limiter,
         private int $maxPerMinute = 20,
         private IpAllowlist $ipAllowlist = new IpAllowlist,
+        private int $maxPerMinutePerIpv6Slash48 = 0,
     ) {}
 
     /**
-     * True once the client's bucket holds `maxPerMinute` failed guesses. Only
-     * reads the counter: a request that is still being verified takes no slot.
+     * True once any of the client's buckets holds its limit of failed guesses.
+     * Only reads the counters: a request still being verified takes no slot.
      */
     public function isBlocked(?string $clientIp): bool
     {
-        $bucket = $this->enabledBucketKey($clientIp);
+        foreach ($this->limitsByBucketKey($clientIp) as $bucket => $maxAttempts) {
+            if ($this->limiter->remaining($bucket, $maxAttempts) === 0) {
+                return true;
+            }
+        }
 
-        return $bucket !== null && $this->limiter->remaining($bucket, $this->maxPerMinute) === 0;
+        return false;
     }
 
     /**
-     * Counts a failed guess with one atomic increment and returns false when it
-     * went over the limit; the caller then answers `rate_limited` instead of
-     * `invalid_token`, so guesses past the limit teach an attacker nothing
-     * even when they race.
+     * Counts a failed guess in every bucket of the client with one atomic
+     * increment each, and returns false when any went over its limit; the
+     * caller then answers `rate_limited` instead of `invalid_token`, so
+     * guesses past the limit teach an attacker nothing even when they race.
      */
     public function countFailure(?string $clientIp): bool
     {
-        $bucket = $this->enabledBucketKey($clientIp);
+        $isWithinLimits = true;
 
-        return $bucket === null || $this->limiter->hit($bucket, 60) <= $this->maxPerMinute;
+        foreach ($this->limitsByBucketKey($clientIp) as $bucket => $maxAttempts) {
+            // Every tier counts, even once another tier is over.
+            $isWithinLimits = $this->limiter->hit($bucket, 60) <= $maxAttempts && $isWithinLimits;
+        }
+
+        return $isWithinLimits;
     }
 
     public function availableIn(?string $clientIp): int
     {
-        $bucket = $this->bucketKey($clientIp);
-        if ($bucket === null) {
-            return 0;
+        $secondsLeft = 0;
+
+        foreach (array_keys($this->limitsByBucketKey($clientIp)) as $bucket) {
+            $secondsLeft = max($secondsLeft, $this->limiter->availableIn($bucket));
         }
 
-        return $this->limiter->availableIn($bucket);
+        return $secondsLeft;
     }
 
     public function maxPerMinute(): int
@@ -65,13 +80,24 @@ final class FailedAttemptLimiter
         return $this->maxPerMinute;
     }
 
-    private function enabledBucketKey(?string $clientIp): ?string
+    /**
+     * @return array<string, int> the limit of each bucket that applies to the client
+     */
+    private function limitsByBucketKey(?string $clientIp): array
     {
-        if ($this->maxPerMinute <= 0) {
-            return null;
+        $bucket = $this->maxPerMinute > 0 ? $this->bucketKey($clientIp) : null;
+
+        if ($bucket === null) {
+            return [];
         }
 
-        return $this->bucketKey($clientIp);
+        $limitsByBucketKey = [$bucket => $this->maxPerMinute];
+
+        if ($this->maxPerMinutePerIpv6Slash48 > 0 && str_starts_with($bucket, 'api-key-failures:v6:')) {
+            $limitsByBucketKey[$this->ipv6NetworkKey($clientIp, 6, 'v6-48')] = $this->maxPerMinutePerIpv6Slash48;
+        }
+
+        return $limitsByBucketKey;
     }
 
     /**
@@ -89,10 +115,18 @@ final class FailedAttemptLimiter
             return 'api-key-failures:v4:'.$canonical;
         }
 
-        // IPv6 /64: keep the first 64 bits, zero the rest. Equivalent mutant: inet_pton()
-        // cannot fail on an address expandMapped() returned, so the cast never changes the value.
-        $network = substr((string) inet_pton($canonical), 0, 8).str_repeat("\0", 8); // @pest-mutate-ignore: RemoveStringCast
+        return $this->ipv6NetworkKey($canonical, 8, 'v6');
+    }
 
-        return 'api-key-failures:v6:'.inet_ntop($network);
+    /**
+     * Keeps the first `$networkBytes` bytes of an IPv6 address and zeroes the rest.
+     */
+    private function ipv6NetworkKey(?string $address, int $networkBytes, string $tier): string
+    {
+        // Equivalent mutants: bucketKey() already accepted this address, so it is set and inet_pton() succeeds.
+        $binary = (string) inet_pton((string) $this->ipAllowlist->expandMapped((string) $address)); // @pest-mutate-ignore: RemoveStringCast
+        $network = substr($binary, 0, $networkBytes).str_repeat("\0", 16 - $networkBytes);
+
+        return 'api-key-failures:'.$tier.':'.inet_ntop($network);
     }
 }

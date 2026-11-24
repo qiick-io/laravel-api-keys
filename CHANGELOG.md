@@ -17,6 +17,17 @@ Public Suffix List: first snapshot (2026-11-24).
 
 ### Fixed
 
+- The bound `CacheAttemptLimiter` is resolved at boot, so an unsupported
+  cache store fails the deploy rather than the first API request.
+- `api-keys.failed_attempts_per_minute` and `api-keys.expiry.claim_lease_seconds`
+  are no longer cast with `(int)`: anything but digits (and below 0 or 1
+  respectively) fails at boot, so a typo cannot silently switch the brake off.
+
+### Added
+
+- `FailedAttemptLimiter` takes an optional `maxPerMinutePerIpv6Slash48`, a
+  second tier capping failures across a whole IPv6 /48 (off by default).
+
 - Rate limits and the failed-attempt brake are atomic: the authenticator counts
   first with `AttemptLimiter::hit()` (which now returns the count) and refuses
   over the limit, so concurrent requests can no longer all pass a check made

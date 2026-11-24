@@ -58,8 +58,8 @@ pre-1.0 additions versus the 0.1.0 sketch:
   `CACHE_STORE=redis` (or bind your own `AttemptLimiter`) and add
   `php artisan api-keys:check` to the deploy pipeline, which fails on an
   unsupported store. Boot itself fails when
-  `API_KEYS_FAILED_ATTEMPTS_PER_MINUTE` or `API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS`
-  is not digits only.
+  `API_KEYS_FAILED_ATTEMPTS_PER_MINUTE`, `API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS`
+  or `API_KEYS_LEGACY_WARN_DAYS_BEFORE` is not digits only.
 - `api-keys.max_lifetime_days` is now enforced on rotation by default, and a
   value that is not a whole number >= 1 fails at boot. Unset it to keep the
   previous (unenforced) behaviour.

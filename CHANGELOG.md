@@ -17,8 +17,8 @@ Public Suffix List: first snapshot (2026-11-24).
 
 ### Fixed
 
-- `api-keys.failed_attempts_per_minute` and `api-keys.expiry.claim_lease_seconds`
-  are no longer cast with `(int)`: anything but digits (and below 0 or 1
+- `api-keys.failed_attempts_per_minute`, `api-keys.expiry.claim_lease_seconds`
+  and `api-keys.legacy.warn_days_before` are no longer cast with `(int)`: anything but digits (and below 0 or 1
   respectively) fails at boot, so a typo cannot silently switch the brake off.
 - Rate limits and the failed-attempt brake are atomic: the authenticator counts
   first with `AttemptLimiter::hit()` (which now returns the count) and refuses

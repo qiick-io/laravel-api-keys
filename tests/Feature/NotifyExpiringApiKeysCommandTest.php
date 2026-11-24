@@ -230,17 +230,27 @@ it('warns from the first second of the window until just before the cut-off', fu
     'at the cut-off' => ['2026-12-01T00:00:00+00:00', 0],
 ]);
 
-it('sends no legacy warning when the window is off or invalid', function (mixed $warnDays): void {
+it('sends no legacy warning when the window is zero days', function (): void {
     Notification::fake();
     $legacy = commandRecord('e2', tokenVersion: 0);
     bindCommand(new ScriptedApiKeyRepository(activeLegacy: [$legacy]), new RecordingRecipientResolver([$legacy->publicId() => [commandNotifiable(1)]]));
     enableLegacyWarning();
-    config(['api-keys.legacy.warn_days_before' => $warnDays]);
+    config(['api-keys.legacy.warn_days_before' => '0']);
 
     $this->artisan(NotifyExpiringApiKeysCommand::class)
         ->expectsOutputToContain('Legacy-format warnings sent: 0')
         ->assertSuccessful();
-})->with(['zero' => [0], 'negative' => [-1], 'typo' => ['ninety']]);
+});
+
+it('refuses a warning window changed after boot to something other than a whole number', function (mixed $warnDays): void {
+    $legacy = commandRecord('e4', tokenVersion: 0);
+    bindCommand(new ScriptedApiKeyRepository(activeLegacy: [$legacy]), new RecordingRecipientResolver([$legacy->publicId() => [commandNotifiable(1)]]));
+    enableLegacyWarning();
+    config(['api-keys.legacy.warn_days_before' => $warnDays]);
+
+    expect(fn () => $this->artisan(NotifyExpiringApiKeysCommand::class)->run())
+        ->toThrow(InvalidArgumentException::class, 'api-keys.legacy.warn_days_before must be a whole number >= 0.');
+})->with(['negative' => [-1], 'typo' => ['ninety']]);
 
 it('reports a legacy warning notification that is not a class, after sending the expiry notices', function (mixed $notification): void {
     Notification::fake();

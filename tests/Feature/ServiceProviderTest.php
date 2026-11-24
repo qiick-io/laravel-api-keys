@@ -249,6 +249,8 @@ it('fails boot when a brake or lease setting is not a whole number', function (s
     'brake empty' => ['api-keys.failed_attempts_per_minute', ''],
     'lease zero' => ['api-keys.expiry.claim_lease_seconds', '0'],
     'lease typo' => ['api-keys.expiry.claim_lease_seconds', '15min'],
+    'warning window negative' => ['api-keys.legacy.warn_days_before', '-1'],
+    'warning window typo' => ['api-keys.legacy.warn_days_before', 'ninety'],
 ]);
 
 it('boots with digit-only brake and lease settings from the environment', function (): void {

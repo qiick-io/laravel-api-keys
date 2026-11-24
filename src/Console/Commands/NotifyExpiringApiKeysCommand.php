@@ -14,6 +14,7 @@ use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSent;
 use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSent;
 use Qiick\ApiKeys\ExpiryRecipient;
+use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\LegacyCutoff;
 
 /**
@@ -152,13 +153,11 @@ final class NotifyExpiringApiKeysCommand extends Command
             return 0;
         }
 
-        $warnDays = filter_var(config('api-keys.legacy.warn_days_before'), FILTER_VALIDATE_INT);
-        if (! is_int($warnDays)) {
-            return 0;
-        }
+        /** @var ApiKeysServiceProvider $provider registers this command, so it is loaded */
+        $provider = $this->laravel->getProvider(ApiKeysServiceProvider::class);
 
-        // 0 leaves an empty window and a negative value one that starts after the cut-off: both warn nobody.
-        $windowStart = $acceptUntil->modify(sprintf('%+d days', -$warnDays));
+        // 0 (validated >= 0 at boot) leaves an empty window, which warns nobody.
+        $windowStart = $acceptUntil->modify('-'.$provider->wholeNumberSetting('api-keys.legacy.warn_days_before', 0).' days');
         if ($now < $windowStart || $now >= $acceptUntil) {
             return 0;
         }

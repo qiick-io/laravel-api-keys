@@ -151,6 +151,23 @@ final class ApiKeysServiceProvider extends ServiceProvider
         $this->validatedMaxLifetimeDays();
         $this->assertWholeNumberAtLeast('api-keys.failed_attempts_per_minute', 'API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 0);
         $this->assertWholeNumberAtLeast('api-keys.expiry.claim_lease_seconds', 'API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 1);
+        $this->assertWholeNumberAtLeast('api-keys.legacy.warn_days_before', 'API_KEYS_LEGACY_WARN_DAYS_BEFORE', 0);
+    }
+
+    /**
+     * A whole-number setting that boot already validated against the same minimum.
+     *
+     * @throws \InvalidArgumentException when it was changed to something else after boot
+     */
+    public function wholeNumberSetting(string $key, int $minimum): int
+    {
+        $value = $this->wholeNumber($this->config($this->app)->get($key));
+
+        if ($value === null || $value < $minimum) {
+            throw new \InvalidArgumentException("{$key} must be a whole number >= {$minimum}.");
+        }
+
+        return $value;
     }
 
     private function config(Application $app): ConfigRepository
@@ -217,9 +234,9 @@ final class ApiKeysServiceProvider extends ServiceProvider
      */
     private function assertWholeNumberAtLeast(string $key, string $envName, int $minimum): void
     {
-        $value = $this->wholeNumber($this->config($this->app)->get($key));
-
-        if ($value === null || $value < $minimum) {
+        try {
+            $this->wholeNumberSetting($key, $minimum);
+        } catch (\InvalidArgumentException) {
             throw new \InvalidArgumentException("{$key} ({$envName}) must be a whole number >= {$minimum}.");
         }
     }

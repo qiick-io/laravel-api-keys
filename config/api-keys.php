@@ -116,7 +116,7 @@ return [
         /*
          * Warn this many days before accept_until (legacy format EOL). 0 disables.
          */
-        'warn_days_before' => (int) env('API_KEYS_LEGACY_WARN_DAYS_BEFORE', 90),
+        'warn_days_before' => env('API_KEYS_LEGACY_WARN_DAYS_BEFORE', 90),
 
         /*
          * Notification class for the T−90 legacy-format warning (N2).

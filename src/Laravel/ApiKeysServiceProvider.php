@@ -82,7 +82,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
                 $legacyMatchers = [];
             }
 
-            $legacyAcceptUntil = $this->validatedLegacyAcceptUntil($app);
+            $legacyAcceptUntil = $this->validatedLegacyAcceptUntil();
             $tokenVersion = $this->config($app)->get('api-keys.token_version', TokenCodec::DEFAULT_TOKEN_VERSION);
             if (! is_int($tokenVersion) || ($tokenVersion !== 1 && $tokenVersion !== 2)) {
                 throw new \InvalidArgumentException(
@@ -115,7 +115,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
         // A product's own policy (bound before this provider, or after it) wins.
         $this->app->singletonIf(
             LifetimePolicy::class,
-            fn (Application $app): LifetimePolicy => new ConfigLifetimePolicy($this->validatedMaxLifetimeDays($app)),
+            fn (): LifetimePolicy => new ConfigLifetimePolicy($this->validatedMaxLifetimeDays()),
         );
     }
 
@@ -180,15 +180,14 @@ final class ApiKeysServiceProvider extends ServiceProvider
      *
      * A bad value fails during boot rather than lazily on first TokenCodec resolve.
      */
-    private function validatedLegacyAcceptUntil(?Application $app = null): ?\DateTimeImmutable
+    private function validatedLegacyAcceptUntil(): ?\DateTimeImmutable
     {
-        $application = $app ?? $this->app;
-        $legacyMatchers = $this->config($application)->get('api-keys.legacy_matchers', []);
+        $legacyMatchers = $this->config($this->app)->get('api-keys.legacy_matchers', []);
         if (! is_array($legacyMatchers)) {
             $legacyMatchers = [];
         }
 
-        $acceptUntil = LegacyCutoff::parse($this->config($application)->get('api-keys.legacy.accept_until'));
+        $acceptUntil = LegacyCutoff::parse($this->config($this->app)->get('api-keys.legacy.accept_until'));
 
         if ($acceptUntil === null && $legacyMatchers !== []) {
             throw new \RuntimeException(
@@ -206,17 +205,17 @@ final class ApiKeysServiceProvider extends ServiceProvider
      * number of days >= 1: a typo such as `30abc` or `thirty` would otherwise
      * be cast to 30 or to 0 and silently change or switch off enforcement.
      */
-    private function validatedMaxLifetimeDays(?Application $app = null): ?int
+    private function validatedMaxLifetimeDays(): ?int
     {
-        $configured = $this->config($app ?? $this->app)->get('api-keys.max_lifetime_days');
+        $configured = $this->config($this->app)->get('api-keys.max_lifetime_days');
 
         if ($configured === null || $configured === '') {
             return null;
         }
 
-        $days = $this->wholeNumber($configured) ?? 0;
+        $days = $this->wholeNumber($configured);
 
-        if ($days < 1) {
+        if ($days === null || $days < 1) {
             throw new \InvalidArgumentException(
                 'api-keys.max_lifetime_days (API_KEYS_MAX_LIFETIME_DAYS) must be a whole number of days >= 1, or unset to disable.',
             );

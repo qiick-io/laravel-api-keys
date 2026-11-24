@@ -48,7 +48,8 @@ it('lets an app publish the config file', function (): void {
         $this->artisan('vendor:publish', ['--tag' => 'api-keys-config', '--force' => true])
             ->assertSuccessful();
 
-        expect($published)->toBeFile();
+        expect($published)->toBeFile()
+            ->and(file_get_contents($published))->toBe(file_get_contents(dirname(__DIR__, 2).'/config/api-keys.php'));
     } finally {
         // A mutated provider can publish a directory here; leaving it behind would
         // break every later run that loads Testbench's config directory.
@@ -237,13 +238,13 @@ it('fails boot when api-keys.max_lifetime_days is not a whole number of days >= 
     'leading zero' => '030',
 ]);
 
-it('boots with max_lifetime_days unset and allows any expiry', function (): void {
-    config(['api-keys.max_lifetime_days' => null]);
+it('boots with max_lifetime_days unset and allows any expiry', function (mixed $unset): void {
+    config(['api-keys.max_lifetime_days' => $unset]);
 
     app()->getProvider(ApiKeysServiceProvider::class)->boot();
 
     expect(app(LifetimePolicy::class)->allowsExpiry(null, new DateTimeImmutable))->toBeTrue();
-});
+})->with(['null' => [null], 'empty' => ['']]);
 
 it('fails boot when a brake or lease setting is not a whole number', function (string $key, mixed $configured): void {
     config([$key => $configured]);
@@ -254,23 +255,27 @@ it('fails boot when a brake or lease setting is not a whole number', function (s
     'brake typo' => ['api-keys.failed_attempts_per_minute', 'twenty'],
     'brake trailing garbage' => ['api-keys.failed_attempts_per_minute', '20abc'],
     'brake negative' => ['api-keys.failed_attempts_per_minute', '-1'],
+    'brake negative integer' => ['api-keys.failed_attempts_per_minute', -1],
     'brake padded' => ['api-keys.failed_attempts_per_minute', ' 20'],
     'brake empty' => ['api-keys.failed_attempts_per_minute', ''],
     'lease zero' => ['api-keys.expiry.claim_lease_seconds', '0'],
     'lease typo' => ['api-keys.expiry.claim_lease_seconds', '15min'],
     'warning window negative' => ['api-keys.legacy.warn_days_before', '-1'],
+    'warning window negative integer' => ['api-keys.legacy.warn_days_before', -1],
     'warning window typo' => ['api-keys.legacy.warn_days_before', 'ninety'],
 ]);
 
-it('boots with digit-only brake and lease settings from the environment', function (): void {
+it('boots with digit-only brake, lease and warning settings at their smallest values', function (): void {
     config([
         'api-keys.failed_attempts_per_minute' => '0',
-        'api-keys.expiry.claim_lease_seconds' => '600',
+        'api-keys.expiry.claim_lease_seconds' => '1',
+        'api-keys.legacy.warn_days_before' => '0',
+        'api-keys.max_lifetime_days' => '1',
     ]);
 
     app()->getProvider(ApiKeysServiceProvider::class)->boot();
 
-    expect(true)->toBeTrue();
+    expect(app()->getProvider(ApiKeysServiceProvider::class)->wholeNumberSetting('api-keys.expiry.claim_lease_seconds', 1))->toBe(1);
 });
 
 /**

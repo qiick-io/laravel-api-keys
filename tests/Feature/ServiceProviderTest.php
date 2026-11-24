@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Qiick\ApiKeys\ConfigLifetimePolicy;
+use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
 use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\RotationService;
@@ -233,4 +234,38 @@ it('boots with max_lifetime_days unset and allows any expiry', function (): void
     app()->getProvider(ApiKeysServiceProvider::class)->boot();
 
     expect(app(LifetimePolicy::class)->allowsExpiry(null, new DateTimeImmutable))->toBeTrue();
+});
+
+it('fails boot when a brake or lease setting is not a whole number', function (string $key, mixed $configured): void {
+    config([$key => $configured]);
+
+    expect(fn () => app()->getProvider(ApiKeysServiceProvider::class)->boot())
+        ->toThrow(InvalidArgumentException::class, $key);
+})->with([
+    'brake typo' => ['api-keys.failed_attempts_per_minute', 'twenty'],
+    'brake trailing garbage' => ['api-keys.failed_attempts_per_minute', '20abc'],
+    'brake negative' => ['api-keys.failed_attempts_per_minute', '-1'],
+    'brake padded' => ['api-keys.failed_attempts_per_minute', ' 20'],
+    'brake empty' => ['api-keys.failed_attempts_per_minute', ''],
+    'lease zero' => ['api-keys.expiry.claim_lease_seconds', '0'],
+    'lease typo' => ['api-keys.expiry.claim_lease_seconds', '15min'],
+]);
+
+it('boots with digit-only brake and lease settings from the environment', function (): void {
+    config([
+        'api-keys.failed_attempts_per_minute' => '0',
+        'api-keys.expiry.claim_lease_seconds' => '600',
+    ]);
+
+    app()->getProvider(ApiKeysServiceProvider::class)->boot();
+
+    expect(true)->toBeTrue();
+});
+
+it('fails boot when the default cache store cannot back the attempt limiter', function (): void {
+    config(['cache.default' => 'database']);
+    app()->forgetInstance(AttemptLimiter::class);
+
+    expect(fn () => app()->getProvider(ApiKeysServiceProvider::class)->boot())
+        ->toThrow(InvalidArgumentException::class, 'cannot increment atomically');
 });

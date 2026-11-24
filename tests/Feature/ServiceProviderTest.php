@@ -5,7 +5,9 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\File;
 use Qiick\ApiKeys\ConfigLifetimePolicy;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
+use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
+use Qiick\ApiKeys\FailedAttemptLimiter;
 use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\RotationService;
 use Qiick\ApiKeys\Testing\FixedClock;
@@ -330,3 +332,39 @@ it('fails api-keys:check when the application timezone is not UTC', function ():
         ->expectsOutputToContain('app.timezone must be UTC')
         ->assertFailed();
 });
+
+it('reports an unusable codec setting from api-keys:check', function (string $key, mixed $value, string $message): void {
+    useDefaultCacheStore('array');
+    config([$key => $value]);
+    app()->forgetInstance(TokenCodec::class);
+    app()->forgetInstance(EnvironmentResolver::class);
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain($message)
+        ->assertFailed();
+})->with([
+    'empty product prefix' => ['api-keys.product_prefix', '', 'api-keys.product_prefix must be set'],
+    'unknown token version' => ['api-keys.token_version', 3, 'api-keys.token_version must be 1 or 2.'],
+    'unknown environment' => ['api-keys.environment', 'foo', 'api-keys.environment must be "live" or "test" when set.'],
+]);
+
+it('builds the failed-attempt brake from api-keys.failed_attempts_per_minute', function (mixed $configured, int $blockedAfter): void {
+    config(['api-keys.failed_attempts_per_minute' => $configured, 'cache.default' => 'array']);
+    app()->forgetInstance('cache.store');
+    app()->forgetInstance(AttemptLimiter::class);
+    app()->forgetInstance(FailedAttemptLimiter::class);
+
+    $brake = app(FailedAttemptLimiter::class);
+    $countedBeforeBlock = 0;
+
+    while (! $brake->isBlocked('203.0.113.10') && $countedBeforeBlock < 10) {
+        $brake->countFailure('203.0.113.10');
+        $countedBeforeBlock++;
+    }
+
+    expect($brake->maxPerMinute())->toBe((int) $configured)
+        ->and($countedBeforeBlock)->toBe($blockedAfter);
+})->with([
+    'off' => ['0', 10],
+    'five' => ['5', 5],
+]);

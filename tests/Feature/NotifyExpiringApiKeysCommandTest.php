@@ -13,6 +13,7 @@ use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSent;
 use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSent;
 use Qiick\ApiKeys\ExpiryRecipient;
+use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification;
 use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
 use Qiick\ApiKeys\Testing\FakeLegacyFormatWarningGate;
@@ -301,3 +302,15 @@ it('warns with a one-day window from exactly one day before the cut-off', functi
     'a second before' => ['2026-11-29T23:59:59+00:00', 0],
     'one day before' => ['2026-11-30T00:00:00+00:00', 1],
 ]);
+
+it('runs on a config published before the nested expiry and legacy keys existed', function (): void {
+    Notification::fake();
+    $record = commandRecord('h1');
+    bindCommand(new ScriptedApiKeyRepository([$record]), new RecordingRecipientResolver([$record->publicId() => [commandNotifiable(1)]]));
+    config(['api-keys.expiry' => ['notice_days' => 7], 'api-keys.legacy' => []]);
+    app()->getProvider(ApiKeysServiceProvider::class)->register();
+
+    $this->artisan(NotifyExpiringApiKeysCommand::class)
+        ->expectsOutputToContain('Expiry notices sent: 1')
+        ->assertSuccessful();
+});

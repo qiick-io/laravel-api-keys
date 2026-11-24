@@ -27,16 +27,18 @@ final class FakeAttemptLimiter implements AttemptLimiter
         self::ensureTestingEnvironment();
     }
 
-    public function tooManyAttempts(string $key, int $maxAttempts): bool
-    {
-        return ($this->hits[$key] ?? 0) >= $maxAttempts;
-    }
-
-    public function hit(string $key, int $decaySeconds = 60): void
+    public function hit(string $key, int $decaySeconds = 60): int
     {
         $this->hits[$key] = ($this->hits[$key] ?? 0) + 1;
         $this->availableIn[$key] = $decaySeconds;
         $this->lastDecaySeconds[$key] = $decaySeconds;
+
+        return $this->hits[$key];
+    }
+
+    public function decrement(string $key, int $decaySeconds = 60): void
+    {
+        $this->hits[$key] = ($this->hits[$key] ?? 0) - 1;
     }
 
     public function availableIn(string $key): int

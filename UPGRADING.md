@@ -23,6 +23,21 @@ pre-1.0 additions versus the 0.1.0 sketch:
 
 ### Contract breaks
 
+- `AttemptLimiter` (red-team fix, atomic limits): `hit()` must atomically
+  increment and return the new count; add `decrement(string $key)` (no-op on
+  a missing counter, never below zero); `tooManyAttempts()` is gone. Delete any
+  adapter over Laravel's `RateLimiter` (it is not atomic) and use the bound
+  `CacheAttemptLimiter`, which needs a Redis or Memcached default cache store. `FailedAttemptLimiter`
+  now exposes `isBlocked()` / `countFailure()` instead of `tooManyAttempts()` / `hit()`;
+  `RateLimitDecision` refuses `decaySeconds` below 1.
+- `LegacyFormatWarningGate`: `claim(string $key, int $leaseSeconds): ?string`
+  returns an owner token; `release(string $key, string $ownerToken)` and
+  `markSent(string $key, string $ownerToken)`. Only custom gates need
+  changes; the default cache gate is updated.
+- `api-keys.max_lifetime_days` is now enforced on rotation by default, and a
+  value that is not a whole number >= 1 fails at boot. Unset it to keep the
+  previous (unenforced) behaviour.
+
 - `ApiKeyRecord`: add `publicId()`, version/hash/credential/restrictions/quota
   and attribution methods (see interface).
 - `ApiKeyRepository::recordUsage(..., ?string $userAgent, ...)`; add

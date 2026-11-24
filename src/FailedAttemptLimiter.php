@@ -26,32 +26,28 @@ final class FailedAttemptLimiter
         private IpAllowlist $ipAllowlist = new IpAllowlist,
     ) {}
 
-    public function tooManyAttempts(?string $clientIp): bool
+    /**
+     * True once the client's bucket holds `maxPerMinute` failed guesses. Only
+     * reads the counter: a request that is still being verified takes no slot.
+     */
+    public function isBlocked(?string $clientIp): bool
     {
-        if ($this->maxPerMinute <= 0) {
-            return false;
-        }
+        $bucket = $this->enabledBucketKey($clientIp);
 
-        $bucket = $this->bucketKey($clientIp);
-        if ($bucket === null) {
-            return false;
-        }
-
-        return $this->limiter->tooManyAttempts($bucket, $this->maxPerMinute);
+        return $bucket !== null && $this->limiter->remaining($bucket, $this->maxPerMinute) === 0;
     }
 
-    public function hit(?string $clientIp): void
+    /**
+     * Counts a failed guess with one atomic increment and returns false when it
+     * went over the limit; the caller then answers `rate_limited` instead of
+     * `invalid_token`, so guesses past the limit teach an attacker nothing
+     * even when they race.
+     */
+    public function countFailure(?string $clientIp): bool
     {
-        if ($this->maxPerMinute <= 0) {
-            return;
-        }
+        $bucket = $this->enabledBucketKey($clientIp);
 
-        $bucket = $this->bucketKey($clientIp);
-        if ($bucket === null) {
-            return;
-        }
-
-        $this->limiter->hit($bucket, 60);
+        return $bucket === null || $this->limiter->hit($bucket, 60) <= $this->maxPerMinute;
     }
 
     public function availableIn(?string $clientIp): int
@@ -67,6 +63,15 @@ final class FailedAttemptLimiter
     public function maxPerMinute(): int
     {
         return $this->maxPerMinute;
+    }
+
+    private function enabledBucketKey(?string $clientIp): ?string
+    {
+        if ($this->maxPerMinute <= 0) {
+            return null;
+        }
+
+        return $this->bucketKey($clientIp);
     }
 
     /**

@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Rate limits and the failed-attempt brake are atomic: the authenticator counts
+  first with `AttemptLimiter::hit()` (which now returns the count) and refuses
+  over the limit, so concurrent requests can no longer all pass a check made
+  before any of them counted. A refused or non-failure attempt is handed back
+  with `AttemptLimiter::decrement()`.
+- The legacy-format warning no longer consumes its idempotency claim before
+  resolving recipients and sending: it follows the expiry-notice protocol
+  (resolve, lease claim, send, mark sent or release) with the same lease.
+- `api-keys.max_lifetime_days` is enforced by default: the provider binds
+  `ConfigLifetimePolicy` unless the product binds its own `LifetimePolicy`,
+  and an invalid value fails at boot instead of being cast with `(int)`.
+
+- Rate limits and the failed-attempt brake were still beatable through the
+  README's `RateLimiter` adapter (Laravel recreates counters with a
+  non-atomic `put()`, the database store is not atomic, and late decrements
+  left negative counters). New `CacheAttemptLimiter`, bound by default, counts
+  with atomic store primitives (Lua on Redis, `add`/`increment` on Memcached)
+  and refuses other stores; it is raced across real processes on Redis and
+  Memcached in CI.
+- A request refused by a later window gives back the hits it took on the
+  earlier windows.
+- On Redis, `CacheAttemptLimiter::availableIn()` reads the counter's TTL, so
+  `Retry-After` is no longer always 0; on Memcached a window longer than 30
+  days is sent as an absolute expiry.
+- The legacy-format warning lease is a cache lock with an owner token, so a
+  late worker cannot release a lease another worker took over.
+- `api-keys.max_lifetime_days` accepts digits only (` 30`, `+30` and `030`
+  fail at boot).
+
+### Added
+
+- `CacheAttemptLimiter`, bound to `AttemptLimiter` unless the product binds one.
+
+### Changed (breaking)
+
+- `AttemptLimiter`: `hit()` returns `int`; `decrement(string $key)` added
+  (no-op on a missing counter, never below zero); `tooManyAttempts()` removed.
+- `FailedAttemptLimiter`: `isBlocked()` / `countFailure()` replace
+  `tooManyAttempts()` / `hit()`. It counts failed guesses only, so valid
+  requests in flight never take a slot.
+- `RateLimitDecision` and `CacheAttemptLimiter::hit()` throw for a window
+  shorter than one second.
+- `LegacyFormatWarningGate`: `claim($key, $leaseSeconds)` returns an owner
+  token or null; `release($key, $ownerToken)` and `markSent($key, $ownerToken)`.
+
 ## [0.2.0] - 2026-11-22
 
 Pre-1.0 completeness for the standards review (Luca §7): contracts, schema,

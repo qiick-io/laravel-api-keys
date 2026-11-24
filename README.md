@@ -48,7 +48,7 @@ Set `API_KEYS_PRODUCT_PREFIX` (three-letter product code) before issuing tokens.
 | --- | --- |
 | Proxies | `KeyContext::ip` / `ClientIp::from` MUST use `Request::ip()` only after `TrustProxies` is configured correctly. Never pass raw `X-Forwarded-For` / `X-Real-IP` from untrusted clients. |
 | Enumeration | Format-miss and hash-miss return the **same** `401 invalid_token` body/headers. A dummy `hash_equals` runs when no candidates match. Pre-auth `FailedAttemptLimiter` is default-on in recipes. The public `key_prefix` is non-secret by design. |
-| Failed-attempt brake | Buckets IPv4 by `/32` and IPv6 by `/64`. IPv4-mapped (`::ffff:a.b.c.d`) expands to dotted IPv4 before bucketing (same path as `IpAllowlist`). Null/empty/unparseable client IPs **skip** the brake (never share one bucket — that would lock out everyone behind a misconfigured proxy). Repository/infra exceptions are **not** counted. Shared egress / NAT: many clients behind one public IP share one bucket and can lock each other out; keep the recipe default **on** (20/min) and raise only with a clear threat model. Wire after `TrustProxies` so `KeyContext::ip` is the real client, not the LB. |
+| Failed-attempt brake | Buckets IPv4 by `/32` and IPv6 by `/64`. IPv4-mapped (`::ffff:a.b.c.d`) expands to dotted IPv4 before bucketing (same path as `IpAllowlist`). Null/empty/unparseable client IPs **skip** the brake (never share one bucket — that would lock out everyone behind a misconfigured proxy). Repository/infra exceptions are **not** counted. The brake counts only failed guesses (one atomic `AttemptLimiter::hit` each), so valid requests in flight never take a slot. Once the bucket is full, a guess over the limit **and** a correct key are both answered `429 rate_limit_exceeded`, so racing guesses reveal at most the limit's worth of outcomes per window. Shared egress / NAT: many clients behind one public IP share one bucket and can lock each other out; keep the recipe default **on** (20/min) and raise only with a clear threat model. Wire after `TrustProxies` so `KeyContext::ip` is the real client, not the LB. |
 | Redaction | Presented tokens / Bearer values MUST NEVER appear in exception messages, JSON bodies, logs, telemetry, activity properties, or `__debugInfo`. |
 | Scopes | Fail-closed: whitespace, wrong case, duplicates, or non-vocabulary values → empty set → `403 insufficient_scope` (never 401). |
 | Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint; lowercase UUID; rejects non-UUID, nil UUID, and a conflicting existing `api_key_id`). |
@@ -74,9 +74,40 @@ See [docs/reference-schema.md](./docs/reference-schema.md) for the full column l
 ## Quotas (minute / day / month)
 
 `rate_limit_per_minute`, `rate_limit_per_day`, and `rate_limit_per_month` are
-enforced as **rolling windows** through Laravel's `RateLimiter` (decay 60 s /
+enforced as **fixed windows** opened by their first hit (decay 60 s /
 86_400 s / 2_592_000 s). They are not calendar day or calendar month buckets.
 Durable calendar quotas are LATER (standards review L4).
+
+Limits hold under concurrency: the authenticator counts a request first with
+`AttemptLimiter::hit()`, one atomic increment that returns the new count, and
+refuses it when that count is over the limit. A refused request hands back the
+hits it took on every window, so it counts against none of them. It never
+checks and then counts in two steps.
+
+The package binds `CacheAttemptLimiter` on your default cache store. It
+accepts only stores that can count atomically across workers and throws
+otherwise:
+
+| Store | How it stays atomic |
+| --- | --- |
+| Redis | One Lua script per call: `INCR` plus `EXPIRE` on the first hit; `DECR` only on an existing counter above zero. |
+| Memcached | Atomic `add` (with the window as TTL) then `increment`; `decrement` is a no-op on a missing key and floors at zero. |
+| Array | Single process only: tests and local development. |
+| Database, file, others | Refused: their `add` / `increment` are not atomic. |
+
+A decrement that arrives after its window expired finds no counter and does
+nothing, so counts never go negative; if another request already opened the
+next window, the late decrement lands there (at most the refunds in flight
+across the boundary). Windows must last at least one second:
+`RateLimitDecision` and `hit()` refuse shorter ones, which would open the limit
+on Redis. Do **not** adapt Laravel's
+`RateLimiter` instead: its `increment()` recreates counters with a non-atomic
+`put()` and its decrement can leave negative counters, so parallel requests
+overshoot the limit. To use a store other than the default, bind your own:
+
+```php
+$this->app->singleton(AttemptLimiter::class, fn () => new CacheAttemptLimiter(Cache::store('redis')));
+```
 
 ## Expiry notices (claim lease)
 
@@ -92,6 +123,24 @@ Two operational risks (accepted as documented nits after #18):
 2. **Send longer than the lease.** If delivery (mail, queue, webhook) exceeds
    `api-keys.expiry.claim_lease_seconds` (default **900**), another worker can
    win the CAS and send a second notice. Raise the lease, or keep sends short.
+
+The legacy-format T−90 warning follows the same protocol with the same lease,
+through `LegacyFormatWarningGate` (cache-backed by default): recipients are
+resolved first, so a key with no recipient yet stays claimable; a failed send
+releases the lease (only its owner can: the lease is a cache lock with an
+owner token) and the next run retries; a worker that dies mid-send
+leaves a lease that lapses after `claim_lease_seconds`; a sent warning is
+marked permanently and never repeats. The cache must be shared by all workers.
+
+## Max key lifetime
+
+`api-keys.max_lifetime_days` (`API_KEYS_MAX_LIFETIME_DAYS`) is enforced on
+rotation by the default `ConfigLifetimePolicy`: `RotationService` refuses an
+expiry later than now + that many days, or no expiry at all. Unset disables
+it. Any other value must be a whole number >= 1; anything else (`0`, `30abc`,
+`thirty`) fails at boot instead of being silently cast. Bind your own
+`Contracts\LifetimePolicy` to replace the default, and call it from your
+issuance code too: issuance is product-owned.
 
 ## Rotation (product persistence)
 
@@ -139,13 +188,16 @@ Extract the bearer first (`BearerTokenExtractor`: no trim; case-insensitive
 `Bearer`), then call
 `ApiKeyAuthenticator::authenticate($presentedToken, $context, $requiredScope)`:
 
-1. Pre-auth `FailedAttemptLimiter` (IPv4 `/32`, IPv6 `/64`; default 20/min in recipes) →
+1. Pre-auth `FailedAttemptLimiter` (IPv4 `/32`, IPv6 `/64`; default 20/min in
+   recipes): a full bucket refuses at once; an `invalid_token` outcome is
+   counted, and answered `429` when it goes over the limit →
 2. Token format (`TokenCodec::prefixOf`, including legacy matchers when configured) →
 3. Lookup by `key_prefix` / in-grace `previous_key_prefix` + `hash_equals`
    (dummy compare on miss; row `hash_algorithm`) →
 4. Refuse `credential_kind = oauth_grant` as `401 invalid_token` →
 5. Revoked / expired / unknown `token_version` →
-6. Actor (`KeyAuthorizer::authorizeActor`) →
+6. Actor (`KeyAuthorizer::authorizeActor`); then, the credential being valid,
+   a full failed-attempt bucket still answers `429` →
 7. IP allowlist →
 8. Request restrictions (`KeyRestrictions` / `RequestRestrictionsEvaluator`;
    malformed or denied → `403 request_not_allowed`; scheme/host compared
@@ -164,7 +216,7 @@ Extract the bearer first (`BearerTokenExtractor`: no trim; case-insensitive
 
 ```php
 $failedAttempts = new FailedAttemptLimiter(
-    limiter: $attemptLimiter, // your RateLimiter adapter
+    limiter: app(AttemptLimiter::class), // CacheAttemptLimiter by default
     maxPerMinute: 20,         // ≤0 disables; leave ON unless you have a reason
 );
 

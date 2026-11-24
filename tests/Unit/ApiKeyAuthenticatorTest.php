@@ -1381,3 +1381,94 @@ it('does not count repository exceptions as failed attempts', function (): void 
         expect($limiter->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(0);
     }
 });
+
+it('hands the brake slot back when the key authenticates or is refused for a non-credential reason', function (): void {
+    $bucket = 'api-key-failures:v4:203.0.113.10';
+    $limiter = new FakeAttemptLimiter;
+    $fixture = authenticator([
+        'failedLimiter' => new FailedAttemptLimiter($limiter, maxPerMinute: 1),
+        'defaultRate' => 0,
+    ]);
+
+    $fixture['auth']->authenticate($fixture['token'], keyContext('203.0.113.10'));
+    $fixture['auth']->authenticate($fixture['token'], keyContext('203.0.113.10'));
+
+    expect($limiter->hitsFor($bucket))->toBe(0);
+
+    $allowlisted = authenticator([
+        'record' => $fixture['record']->withIpAllowlist(['198.51.100.0/24']),
+        'failedLimiter' => new FailedAttemptLimiter($limiter, maxPerMinute: 1),
+        'defaultRate' => 0,
+    ]);
+
+    try {
+        $allowlisted['auth']->authenticate($allowlisted['token'], keyContext('203.0.113.10'));
+        $this->fail('expected ip_not_allowed');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->errorCode())->toBe('ip_not_allowed')
+            ->and($limiter->hitsFor($bucket))->toBe(0);
+    }
+});
+
+it('does not count a request refused by the per-key limit against that limit', function (): void {
+    $limiter = new FakeAttemptLimiter;
+    $fixture = authenticator(['limiter' => $limiter, 'defaultRate' => 1]);
+
+    $fixture['auth']->authenticate($fixture['token'], keyContext());
+
+    foreach (range(1, 3) as $refusedAttempt) {
+        expect(fn () => $fixture['auth']->authenticate($fixture['token'], keyContext()))
+            ->toThrow(ApiKeyRejection::class);
+    }
+
+    expect($limiter->hitsFor('api-key:42'))->toBe(1);
+});
+
+it('gives back the hits it took on earlier windows when a later window refuses', function (): void {
+    $limiter = new FakeAttemptLimiter;
+    $fixture = authenticator([
+        'limiter' => $limiter,
+        'authorizer' => (new FakeKeyAuthorizer)->withRateLimits([
+            new RateLimitDecision('minute-bucket', 5, 60),
+            new RateLimitDecision('day-bucket', 1, 86_400),
+        ]),
+    ]);
+
+    $fixture['auth']->authenticate($fixture['token'], keyContext());
+
+    expect(fn () => $fixture['auth']->authenticate($fixture['token'], keyContext()))
+        ->toThrow(ApiKeyRejection::class);
+
+    expect($limiter->hitsFor('minute-bucket'))->toBe(1)
+        ->and($limiter->hitsFor('day-bucket'))->toBe(1);
+});
+
+it('answers rate_limited, never the real outcome, once the failed-attempt bucket is full', function (): void {
+    $failures = new FakeAttemptLimiter;
+    $fixture = authenticator([
+        'failedLimiter' => new FailedAttemptLimiter($failures, maxPerMinute: 2),
+        'defaultRate' => 0,
+    ]);
+    $outcome = function (string $token) use ($fixture): string {
+        try {
+            $fixture['auth']->authenticate($token, keyContext('203.0.113.10'));
+
+            return 'authenticated';
+        } catch (ApiKeyRejection $rejection) {
+            return $rejection->errorCode();
+        }
+    };
+
+    expect($outcome($fixture['token']))->toBe('authenticated')
+        ->and($outcome('bad-1'))->toBe('invalid_token')
+        ->and($outcome('bad-2'))->toBe('invalid_token')
+        ->and($outcome('bad-3'))->toBe('rate_limit_exceeded')
+        // A correct key is not revealed while the bucket is full.
+        ->and($outcome($fixture['token']))->toBe('rate_limit_exceeded')
+        ->and($failures->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(2);
+});
+
+it('refuses a rate-limit window shorter than one second', function (int $decaySeconds): void {
+    expect(fn () => new RateLimitDecision('bucket', 10, $decaySeconds))
+        ->toThrow(InvalidArgumentException::class, 'decaySeconds');
+})->with([0, -5]);

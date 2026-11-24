@@ -60,8 +60,8 @@ final class RotationService
         }
 
         $expiresAt = $newExpiresAt ?? $record->expiresAt();
-        if ($this->lifetimePolicy !== null && ! $this->lifetimePolicy->allowsExpiry($expiresAt, $now)) {
-            throw new \InvalidArgumentException('Cannot rotate: expiry exceeds the lifetime policy.');
+        if ($this->lifetimePolicy !== null) {
+            LifetimeAssertion::assertAllows($this->lifetimePolicy, $expiresAt, $now);
         }
 
         $keyPrefix = $record->keyPrefix();

@@ -29,7 +29,7 @@ use Qiick\ApiKeys\TokenCodec;
 use Qiick\ApiKeys\TokenEnvironment;
 
 /**
- * Registers the package in a Laravel app. Auto-discovered through
+ * @api Registers the package in a Laravel app. Auto-discovered through
  * `extra.laravel.providers` in composer.json.
  *
  * Products bind ApiKeyRepository, KeyAuthorizer, ScopeVocabulary and

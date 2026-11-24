@@ -18,19 +18,25 @@ use Qiick\ApiKeys\Contracts\AttemptLimiter;
  * `maxPerMinute` ≤ 0 disables. Recipes should leave the default (20) on — see
  * README for NAT / shared-egress lockout risk.
  *
- * Optional second tier: `maxPerMinutePerIpv6Slash48` (0, the default, is off) also caps failures across
- * a whole IPv6 /48, the usual size of a single allocation. Without it, an
+ * Optional second tier: `maxPerMinutePerIpv6Slash48` (null, the default, is
+ * off; otherwise at least 1) also caps failures across a whole IPv6 /48, the usual size of a single allocation. Without it, an
  * attacker holding a /48 gets 65,536 separate /64 buckets.
  */
 final class FailedAttemptLimiter
 {
+    /**
+     * @throws \InvalidArgumentException when the /48 limit is below one (leave it null to turn the tier off)
+     */
     public function __construct(
         private AttemptLimiter $limiter,
         private int $maxPerMinute = 20,
         private IpAllowlist $ipAllowlist = new IpAllowlist,
-        // Equivalent mutant: any default <= 0 means the tier is off.
-        private int $maxPerMinutePerIpv6Slash48 = 0, // @pest-mutate-ignore: DecrementInteger
-    ) {}
+        private ?int $maxPerMinutePerIpv6Slash48 = null,
+    ) {
+        if ($maxPerMinutePerIpv6Slash48 !== null && $maxPerMinutePerIpv6Slash48 < 1) {
+            throw new \InvalidArgumentException('maxPerMinutePerIpv6Slash48 must be at least 1, or null to turn the /48 tier off.');
+        }
+    }
 
     /**
      * True once any of the client's buckets holds its limit of failed guesses.
@@ -86,16 +92,16 @@ final class FailedAttemptLimiter
      */
     private function limitsByBucketKey(?string $clientIp): array
     {
-        $bucket = $this->maxPerMinute > 0 ? $this->bucketKey($clientIp) : null;
+        $binary = $this->maxPerMinute > 0 ? $this->packedClientIp($clientIp) : null;
 
-        if ($bucket === null) {
+        if ($binary === null) {
             return [];
         }
 
-        $limitsByBucketKey = [$bucket => $this->maxPerMinute];
+        $limitsByBucketKey = [$this->bucketKeyFor($binary) => $this->maxPerMinute];
 
-        if ($this->maxPerMinutePerIpv6Slash48 > 0 && str_starts_with($bucket, 'api-key-failures:v6:')) {
-            $limitsByBucketKey[$this->ipv6NetworkKey($clientIp, 6, 'v6-48')] = $this->maxPerMinutePerIpv6Slash48;
+        if ($this->maxPerMinutePerIpv6Slash48 !== null && strlen($binary) === 16) {
+            $limitsByBucketKey[$this->networkKey($binary, 6, 'v6-48')] = $this->maxPerMinutePerIpv6Slash48;
         }
 
         return $limitsByBucketKey;
@@ -106,27 +112,30 @@ final class FailedAttemptLimiter
      */
     public function bucketKey(?string $clientIp): ?string
     {
-        $canonical = $clientIp === null ? null : $this->ipAllowlist->expandMapped($clientIp);
+        $binary = $this->packedClientIp($clientIp);
 
-        if ($canonical === null) {
-            return null;
-        }
+        return $binary === null ? null : $this->bucketKeyFor($binary);
+    }
 
-        if (! str_contains($canonical, ':')) {
-            return 'api-key-failures:v4:'.$canonical;
-        }
-
-        return $this->ipv6NetworkKey($canonical, 8, 'v6');
+    private function packedClientIp(?string $clientIp): ?string
+    {
+        return $clientIp === null ? null : $this->ipAllowlist->packed($clientIp);
     }
 
     /**
-     * Keeps the first `$networkBytes` bytes of an IPv6 address and zeroes the rest.
+     * IPv4 by full address, IPv6 by /64.
      */
-    private function ipv6NetworkKey(?string $address, int $networkBytes, string $tier): string
+    private function bucketKeyFor(string $binary): string
     {
-        // Equivalent mutants: bucketKey() already accepted this address, so it is set and inet_pton() succeeds.
-        $binary = (string) inet_pton((string) $this->ipAllowlist->expandMapped((string) $address)); // @pest-mutate-ignore: RemoveStringCast
-        $network = substr($binary, 0, $networkBytes).str_repeat("\0", 16 - $networkBytes);
+        return strlen($binary) === 4 ? $this->networkKey($binary, 4, 'v4') : $this->networkKey($binary, 8, 'v6');
+    }
+
+    /**
+     * Keeps the first `$networkBytes` bytes of the address and zeroes the rest.
+     */
+    private function networkKey(string $binary, int $networkBytes, string $tier): string
+    {
+        $network = substr($binary, 0, $networkBytes).str_repeat("\0", strlen($binary) - $networkBytes);
 
         return 'api-key-failures:'.$tier.':'.inet_ntop($network);
     }

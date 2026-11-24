@@ -7,7 +7,8 @@ tagged release.
 ## Every release: Public Suffix List refresh
 
 Origin wildcards are checked against a bundled snapshot of the Public Suffix
-List (`resources/public_suffix_list.php`), refreshed by a monthly pull request.
+List (`resources/public_suffix_list.php`); a monthly workflow opens an issue
+when the upstream list changed, and a maintainer refreshes it by pull request.
 Patterns are re-validated on every request, so a refresh that lists a new
 suffix makes stored origin wildcards over it (for example a new hosting
 platform's `https://*.platform.example`) parse as denied: those keys stop
@@ -52,11 +53,13 @@ pre-1.0 additions versus the 0.1.0 sketch:
   the upgrade (fail closed): narrow the pattern to your own domain first.
   `ApiKeyAuthenticator` no longer takes a `requestRestrictionsEvaluator`
   argument.
-- Boot now fails when the default cache store cannot back the attempt
-  limiter (anything but Redis, Memcached or array), and when
+- The bound attempt limiter needs Redis or Memcached (array in tests): on any
+  other default cache store, the first authentication throws. Set
+  `CACHE_STORE=redis` (or bind your own `AttemptLimiter`) and add
+  `php artisan api-keys:check` to the deploy pipeline, which fails on an
+  unsupported store. Boot itself fails when
   `API_KEYS_FAILED_ATTEMPTS_PER_MINUTE` or `API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS`
-  is not digits only. Set `CACHE_STORE=redis` (or bind your own
-  `AttemptLimiter`) before upgrading.
+  is not digits only.
 - `api-keys.max_lifetime_days` is now enforced on rotation by default, and a
   value that is not a whole number >= 1 fails at boot. Unset it to keep the
   previous (unenforced) behaviour.

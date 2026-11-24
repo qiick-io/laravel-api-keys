@@ -12,6 +12,7 @@ use Qiick\ApiKeys\AppEnvironmentResolver;
 use Qiick\ApiKeys\CacheAttemptLimiter;
 use Qiick\ApiKeys\CacheLegacyFormatWarningGate;
 use Qiick\ApiKeys\ConfigLifetimePolicy;
+use Qiick\ApiKeys\Console\Commands\CheckApiKeysConfigurationCommand;
 use Qiick\ApiKeys\Console\Commands\NotifyExpiringApiKeysCommand;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\Clock;
@@ -119,14 +120,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->validatedLegacyAcceptUntil();
-        $this->validatedMaxLifetimeDays();
-        $this->assertWholeNumberAtLeast('api-keys.failed_attempts_per_minute', 'API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 0);
-        $this->assertWholeNumberAtLeast('api-keys.expiry.claim_lease_seconds', 'API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 1);
-
-        // Resolve the limiter now: an unsupported cache store (Laravel's default is `database`)
-        // must fail the deploy, not the first API request.
-        $this->app->make(AttemptLimiter::class);
+        $this->validateConfiguration();
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
@@ -135,8 +129,27 @@ final class ApiKeysServiceProvider extends ServiceProvider
 
             $this->commands([
                 NotifyExpiringApiKeysCommand::class,
+                CheckApiKeysConfigurationCommand::class,
             ]);
         }
+    }
+
+    /**
+     * Fails fast on settings that would otherwise be read wrong at runtime.
+     * Runs at boot and from `api-keys:check`. The cache store behind the
+     * attempt limiter is deliberately not checked here: an unsupported store
+     * must not break every artisan command (package:discover, migrations,
+     * product tests); it fails when the limiter is first resolved, and
+     * `api-keys:check` reports it for deploy pipelines.
+     *
+     * @throws \InvalidArgumentException|\RuntimeException
+     */
+    public function validateConfiguration(): void
+    {
+        $this->validatedLegacyAcceptUntil();
+        $this->validatedMaxLifetimeDays();
+        $this->assertWholeNumberAtLeast('api-keys.failed_attempts_per_minute', 'API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 0);
+        $this->assertWholeNumberAtLeast('api-keys.expiry.claim_lease_seconds', 'API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 1);
     }
 
     private function config(Application $app): ConfigRepository

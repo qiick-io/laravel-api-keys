@@ -66,19 +66,27 @@ final class IpAllowlist
      */
     public function expandMapped(string $ip): ?string
     {
+        $binary = $this->packed($ip);
+
+        // inet_ntop() only fails on a malformed binary, and packed() never returns one.
+        return $binary === null ? null : (inet_ntop($binary) ?: null);
+    }
+
+    /**
+     * The address in network byte order: 4 bytes for IPv4 (IPv4-mapped IPv6
+     * unwrapped), 16 for IPv6; null when it does not parse.
+     */
+    public function packed(string $ip): ?string
+    {
         $binary = @inet_pton($ip);
+
         if ($binary === false) {
             return null;
         }
 
-        if (strlen($binary) === 16 && str_starts_with($binary, self::MAPPED_PREFIX)) {
-            $binary = substr($binary, 12);
-        }
-
-        // Equivalent mutant: inet_ntop() only fails on a malformed binary and inet_pton() output never is one.
-        $rendered = inet_ntop($binary);
-
-        return $rendered === false ? null : $rendered; // @pest-mutate-ignore: FalseToTrue
+        return strlen($binary) === 16 && str_starts_with($binary, self::MAPPED_PREFIX)
+            ? substr($binary, 12)
+            : $binary;
     }
 
     private function isIpv4Mapped(string $ip): bool

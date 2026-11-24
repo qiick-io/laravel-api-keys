@@ -110,3 +110,46 @@ it('defaults maxPerMinute to 20 and uses the exact v6 bucket prefix', function (
     expect($limiter->bucketKey($sameNetworkFirst))->toBe('api-key-failures:v6:2001:db8:1:2::')
         ->and($limiter->bucketKey($sameNetworkSecond))->toBe('api-key-failures:v6:2001:db8:1:2::');
 });
+
+it('can cap failures across a whole IPv6 /48 as a second tier', function (): void {
+    $inner = new FakeAttemptLimiter;
+    $limiter = new FailedAttemptLimiter($inner, maxPerMinute: 20, maxPerMinutePerIpv6Slash48: 2);
+
+    expect($limiter->countFailure('2001:db8:1:1::1'))->toBeTrue()
+        ->and($limiter->countFailure('2001:db8:1:2::1'))->toBeTrue()
+        // A third /64 in the same /48 is already blocked, and one more guess goes over.
+        ->and($limiter->isBlocked('2001:db8:1:3::1'))->toBeTrue()
+        ->and($limiter->countFailure('2001:db8:1:3::1'))->toBeFalse()
+        ->and($limiter->isBlocked('2001:db8:2:1::1'))->toBeFalse()
+        ->and($inner->hitsFor('api-key-failures:v6-48:2001:db8:1::'))->toBe(3)
+        // IPv4 has no second tier.
+        ->and($limiter->countFailure('203.0.113.10'))->toBeTrue()
+        ->and($limiter->isBlocked('203.0.113.10'))->toBeFalse();
+});
+
+it('leaves the /48 tier off by default', function (): void {
+    $inner = new FakeAttemptLimiter;
+    $limiter = new FailedAttemptLimiter($inner, maxPerMinute: 1);
+
+    $limiter->countFailure('2001:db8:1:1::1');
+
+    expect($limiter->isBlocked('2001:db8:1:2::1'))->toBeFalse()
+        ->and($inner->hitsFor('api-key-failures:v6-48:2001:db8:1::'))->toBe(0);
+});
+
+it('keeps exactly 48 bits for the second tier and 64 for the first', function (): void {
+    $inner = new FakeAttemptLimiter;
+    $limiter = new FailedAttemptLimiter($inner, maxPerMinute: 5, maxPerMinutePerIpv6Slash48: 1);
+
+    // These two /64s differ in the seventh byte, still inside one /48.
+    expect($limiter->countFailure('2001:db8:1:100::1'))->toBeTrue()
+        ->and($limiter->isBlocked('2001:db8:1:200::1'))->toBeTrue()
+        // Same /64, differing in the ninth byte: one first-tier bucket.
+        ->and($limiter->bucketKey('2001:db8:1:2:100::1'))->toBe($limiter->bucketKey('2001:db8:1:2:200::1'))
+        ->and($limiter->bucketKey('2001:db8:1:2:100::1'))->toBe('api-key-failures:v6:2001:db8:1:2::');
+});
+
+it('refuses a /48 limit below one; leave it out to turn the tier off', function (int $maxPerMinutePerIpv6Slash48): void {
+    expect(fn () => new FailedAttemptLimiter(new FakeAttemptLimiter, maxPerMinutePerIpv6Slash48: $maxPerMinutePerIpv6Slash48))
+        ->toThrow(InvalidArgumentException::class, 'maxPerMinutePerIpv6Slash48');
+})->with([0, -1]);

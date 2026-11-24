@@ -1,13 +1,12 @@
 name: Public Suffix List refresh
 
-# Monthly: regenerate resources/public_suffix_list.php from publicsuffix.org and
-# open a pull request against develop when it changed. A refresh can deny
-# stored origin patterns that sit on a newly listed suffix, so every refresh
-# goes through review and is named in the CHANGELOG.
-#
-# Pull requests opened with GITHUB_TOKEN do not trigger other workflows: push an
-# empty commit (or close and reopen the PR) to run CI before merging. The repo
-# setting "Allow GitHub Actions to create and approve pull requests" must be on.
+# Monthly: regenerate resources/public_suffix_list.php from publicsuffix.org and,
+# when the rules changed, open an issue listing the added and removed rules.
+# A maintainer then runs `php scripts/update-public-suffix-list.php` and opens
+# the pull request. A refresh can deny stored origin patterns that sit on a
+# newly listed suffix, so every refresh goes through review and is named in the
+# CHANGELOG. An issue needs only issues: write: no repository setting to change,
+# and the workflow never pushes.
 
 on:
   schedule:
@@ -15,8 +14,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  issues: write
 
 concurrency:
   group: public-suffix-list
@@ -24,7 +23,7 @@ concurrency:
 
 jobs:
   refresh:
-    name: Refresh the Public Suffix List snapshot
+    name: Check the Public Suffix List snapshot
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -40,38 +39,53 @@ jobs:
         with:
           php-version: '8.4'
           coverage: none
-          tools: composer:v2
           extensions: intl
-
-      - name: Install dependencies
-        run: composer install --no-interaction --prefer-dist
 
       - name: Regenerate the snapshot
         run: |
+          git show HEAD:resources/public_suffix_list.php > "$RUNNER_TEMP/public_suffix_list.before.php"
           php scripts/update-public-suffix-list.php
-          vendor/bin/pint resources
 
-      - name: Open a pull request when the rules changed
+      - name: List the changed rules
+        id: changes
+        run: |
+          php -r '
+            $before = array_keys(require $argv[1]);
+            $after = array_keys(require $argv[2]);
+            $added = array_values(array_diff($after, $before));
+            $removed = array_values(array_diff($before, $after));
+            $lines = array_merge(
+                array_map(fn ($rule) => "- added `$rule`", $added),
+                array_map(fn ($rule) => "- removed `$rule`", $removed),
+            );
+            file_put_contents($argv[3], implode("\n", $lines));
+            echo count($lines), " rule(s) changed\n";
+          ' "$RUNNER_TEMP/public_suffix_list.before.php" resources/public_suffix_list.php "$RUNNER_TEMP/changes.md"
+          if [ -s "$RUNNER_TEMP/changes.md" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open an issue when the rules changed
+        if: steps.changes.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # The header carries the fetch date; only a change in the rules is worth a PR.
-          if git diff --quiet -I '^// Fetched: ' -- resources/public_suffix_list.php; then
-            echo "Public Suffix List unchanged."
+          title="chore(deps): refresh the public suffix list snapshot ($(date -u +%Y-%m))"
+
+          # One open issue per month, even when the workflow is run again by hand.
+          if gh issue list --state open --search "\"$title\" in:title" --json number --jq 'length' | grep -qv '^0$'; then
+            echo "An issue for this month is already open."
             exit 0
           fi
 
-          branch="chore/public-suffix-list-$(date -u +%Y-%m)"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git switch -c "$branch"
-          git add resources/public_suffix_list.php
-          git commit -m "chore(deps): refresh the public suffix list snapshot"
-          git push origin "$branch"
-          gh pr create --base develop --head "$branch" \
-            --title "chore(deps): refresh the public suffix list snapshot" \
-            --body "Monthly refresh of \`resources/public_suffix_list.php\` from https://publicsuffix.org/list/public_suffix_list.dat.
+          {
+            echo "The Public Suffix List changed upstream. Rules that differ from \`resources/public_suffix_list.php\` on develop:"
+            echo
+            cat "$RUNNER_TEMP/changes.md"
+            echo
+            echo "To refresh: \`php scripts/update-public-suffix-list.php && vendor/bin/pint resources\`, then open a pull request and name the refresh in the CHANGELOG."
+            echo
+            echo "Before releasing: an added suffix makes stored origin wildcards over it parse as denied, so keys using them stop authenticating after the upgrade (see UPGRADING.md)."
+          } > "$RUNNER_TEMP/issue.md"
 
-          Review before merging: a newly listed suffix makes stored origin wildcards over it (for example \`https://*.new-platform.example\`) parse as denied, so keys using them stop authenticating after the release. Name this refresh in the CHANGELOG.
-
-          CI does not start on pull requests opened by GITHUB_TOKEN: push an empty commit or close and reopen this PR to run it."
+          gh issue create --title "$title" --body-file "$RUNNER_TEMP/issue.md"

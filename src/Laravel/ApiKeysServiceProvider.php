@@ -12,6 +12,7 @@ use Qiick\ApiKeys\AppEnvironmentResolver;
 use Qiick\ApiKeys\CacheAttemptLimiter;
 use Qiick\ApiKeys\CacheLegacyFormatWarningGate;
 use Qiick\ApiKeys\ConfigLifetimePolicy;
+use Qiick\ApiKeys\Console\Commands\CheckApiKeysConfigurationCommand;
 use Qiick\ApiKeys\Console\Commands\NotifyExpiringApiKeysCommand;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\Clock;
@@ -119,8 +120,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->validatedLegacyAcceptUntil();
-        $this->validatedMaxLifetimeDays();
+        $this->validateConfiguration();
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
@@ -129,8 +129,27 @@ final class ApiKeysServiceProvider extends ServiceProvider
 
             $this->commands([
                 NotifyExpiringApiKeysCommand::class,
+                CheckApiKeysConfigurationCommand::class,
             ]);
         }
+    }
+
+    /**
+     * Fails fast on settings that would otherwise be read wrong at runtime.
+     * Runs at boot and from `api-keys:check`. The cache store behind the
+     * attempt limiter is deliberately not checked here: an unsupported store
+     * must not break every artisan command (package:discover, migrations,
+     * product tests); it fails when the limiter is first resolved, and
+     * `api-keys:check` reports it for deploy pipelines.
+     *
+     * @throws \InvalidArgumentException|\RuntimeException
+     */
+    public function validateConfiguration(): void
+    {
+        $this->validatedLegacyAcceptUntil();
+        $this->validatedMaxLifetimeDays();
+        $this->assertWholeNumberAtLeast('api-keys.failed_attempts_per_minute', 'API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 0);
+        $this->assertWholeNumberAtLeast('api-keys.expiry.claim_lease_seconds', 'API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 1);
     }
 
     private function config(Application $app): ConfigRepository
@@ -185,12 +204,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
             return null;
         }
 
-        // Digits only: filter_var() would also accept " 30" and "+30".
-        $days = match (true) {
-            is_int($configured) => $configured,
-            is_string($configured) && preg_match('/^[1-9][0-9]*$/D', $configured) === 1 => (int) $configured,
-            default => 0,
-        };
+        $days = $this->wholeNumber($configured) ?? 0;
 
         if ($days < 1) {
             throw new \InvalidArgumentException(
@@ -199,6 +213,34 @@ final class ApiKeysServiceProvider extends ServiceProvider
         }
 
         return $days;
+    }
+
+    /**
+     * A setting read raw from the environment must be a whole number of at
+     * least `$minimum`; a typo such as `twenty` would otherwise be cast to 0
+     * and silently switch the setting off.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function assertWholeNumberAtLeast(string $key, string $envName, int $minimum): void
+    {
+        $value = $this->wholeNumber($this->config($this->app)->get($key));
+
+        if ($value === null || $value < $minimum) {
+            throw new \InvalidArgumentException("{$key} ({$envName}) must be a whole number >= {$minimum}.");
+        }
+    }
+
+    /**
+     * Digits only: filter_var() would also accept " 30" and "+30".
+     */
+    private function wholeNumber(mixed $configured): ?int
+    {
+        return match (true) {
+            is_int($configured) => $configured,
+            is_string($configured) && preg_match('/^(0|[1-9][0-9]*)$/D', $configured) === 1 => (int) $configured,
+            default => null,
+        };
     }
 
     /**

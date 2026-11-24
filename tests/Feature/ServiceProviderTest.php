@@ -262,11 +262,46 @@ it('boots with digit-only brake and lease settings from the environment', functi
     expect(true)->toBeTrue();
 });
 
-it('fails boot when the default cache store cannot back the attempt limiter', function (): void {
-    config(['cache.default' => 'database']);
+/**
+ * Points the default cache store at `$store` and drops anything resolved from the old one.
+ */
+function useDefaultCacheStore(string $store): void
+{
+    config(['cache.default' => $store]);
     app()->forgetInstance('cache.store');
     app()->forgetInstance(AttemptLimiter::class);
+}
 
-    expect(fn () => app()->getProvider(ApiKeysServiceProvider::class)->boot())
+it('boots on an unsupported cache store, so artisan and package discovery keep working', function (): void {
+    useDefaultCacheStore('database');
+
+    app()->getProvider(ApiKeysServiceProvider::class)->boot();
+
+    expect(fn () => app(AttemptLimiter::class))
         ->toThrow(InvalidArgumentException::class, 'cannot increment atomically');
+});
+
+it('reports an unsupported cache store from api-keys:check, for deploy pipelines', function (): void {
+    useDefaultCacheStore('database');
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain('cannot increment atomically')
+        ->assertFailed();
+});
+
+it('passes api-keys:check when the limiter and the settings are usable', function (): void {
+    useDefaultCacheStore('array');
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain('API keys configuration is ready')
+        ->assertSuccessful();
+});
+
+it('reports an invalid setting from api-keys:check', function (): void {
+    useDefaultCacheStore('array');
+    config(['api-keys.failed_attempts_per_minute' => 'twenty']);
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain('API_KEYS_FAILED_ATTEMPTS_PER_MINUTE')
+        ->assertFailed();
 });

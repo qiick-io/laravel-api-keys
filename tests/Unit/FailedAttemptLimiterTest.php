@@ -148,3 +148,8 @@ it('keeps exactly 48 bits for the second tier and 64 for the first', function ()
         ->and($limiter->bucketKey('2001:db8:1:2:100::1'))->toBe($limiter->bucketKey('2001:db8:1:2:200::1'))
         ->and($limiter->bucketKey('2001:db8:1:2:100::1'))->toBe('api-key-failures:v6:2001:db8:1:2::');
 });
+
+it('refuses a /48 limit below one; leave it out to turn the tier off', function (int $maxPerMinutePerIpv6Slash48): void {
+    expect(fn () => new FailedAttemptLimiter(new FakeAttemptLimiter, maxPerMinutePerIpv6Slash48: $maxPerMinutePerIpv6Slash48))
+        ->toThrow(InvalidArgumentException::class, 'maxPerMinutePerIpv6Slash48');
+})->with([0, -1]);

@@ -136,3 +136,15 @@ it('leaves the /48 tier off by default', function (): void {
     expect($limiter->isBlocked('2001:db8:1:2::1'))->toBeFalse()
         ->and($inner->hitsFor('api-key-failures:v6-48:2001:db8:1::'))->toBe(0);
 });
+
+it('keeps exactly 48 bits for the second tier and 64 for the first', function (): void {
+    $inner = new FakeAttemptLimiter;
+    $limiter = new FailedAttemptLimiter($inner, maxPerMinute: 5, maxPerMinutePerIpv6Slash48: 1);
+
+    // These two /64s differ in the seventh byte, still inside one /48.
+    expect($limiter->countFailure('2001:db8:1:100::1'))->toBeTrue()
+        ->and($limiter->isBlocked('2001:db8:1:200::1'))->toBeTrue()
+        // Same /64, differing in the ninth byte: one first-tier bucket.
+        ->and($limiter->bucketKey('2001:db8:1:2:100::1'))->toBe($limiter->bucketKey('2001:db8:1:2:200::1'))
+        ->and($limiter->bucketKey('2001:db8:1:2:100::1'))->toBe('api-key-failures:v6:2001:db8:1:2::');
+});

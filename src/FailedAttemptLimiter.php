@@ -28,7 +28,8 @@ final class FailedAttemptLimiter
         private AttemptLimiter $limiter,
         private int $maxPerMinute = 20,
         private IpAllowlist $ipAllowlist = new IpAllowlist,
-        private int $maxPerMinutePerIpv6Slash48 = 0,
+        // Equivalent mutant: any default <= 0 means the tier is off.
+        private int $maxPerMinutePerIpv6Slash48 = 0, // @pest-mutate-ignore: DecrementInteger
     ) {}
 
     /**

@@ -25,6 +25,8 @@ it('refuses cache stores that cannot count atomically across workers', function 
 })->with(['database', 'file']);
 
 it('opens a 60-second window by default and reports nothing for an unknown bucket', function (): void {
+    // A second boundary between hit() and availableIn() would read 59.
+    $this->freezeTime();
     $limiter = new CacheAttemptLimiter(Cache::store('array'));
 
     expect($limiter->availableIn('unknown'))->toBe(0)
@@ -36,6 +38,7 @@ it('opens a 60-second window by default and reports nothing for an unknown bucke
 });
 
 it('counts hits in a window that its first hit opens', function (): void {
+    $this->freezeTime();
     $limiter = new CacheAttemptLimiter(Cache::store('array'));
 
     expect($limiter->hit('bucket', 60))->toBe(1)

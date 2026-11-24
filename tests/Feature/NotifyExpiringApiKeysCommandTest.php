@@ -251,6 +251,43 @@ it('reports a legacy warning notification that is not a class, after sending the
 
     $this->artisan(NotifyExpiringApiKeysCommand::class)
         ->expectsOutputToContain('api-keys.legacy.warning_notification must be a notification class.')
+        ->doesntExpectOutputToContain('Legacy-format warning failed')
         ->expectsOutputToContain('Legacy-format warnings sent: 0')
         ->assertSuccessful();
 })->with(['missing class' => ['App\\Notifications\\Missing'], 'not a string' => [42]]);
+
+it('notifies every recipient a resolver yields, even under repeated keys', function (): void {
+    Notification::fake();
+    $first = commandNotifiable(1);
+    $second = commandNotifiable(2);
+    $expiring = commandRecord('g1');
+    $legacy = commandRecord('g2', tokenVersion: 0);
+    bindCommand(
+        new ScriptedApiKeyRepository([$expiring], [$legacy]),
+        new RecordingRecipientResolver([$expiring->publicId() => [$first, $second], $legacy->publicId() => [$first, $second]], isYieldedOneByOne: true),
+    );
+    enableLegacyWarning();
+
+    $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
+
+    Notification::assertSentTo($second, ApiKeyExpiringNotification::class);
+    Notification::assertSentTo($first, ApiKeyExpiringNotification::class);
+    Notification::assertSentTo($second, ApiKeyLegacyFormatWarningNotification::class);
+    Notification::assertSentTo($first, ApiKeyLegacyFormatWarningNotification::class);
+});
+
+it('warns with a one-day window from exactly one day before the cut-off', function (string $now, int $expectedWarnings): void {
+    Notification::fake();
+    $legacy = commandRecord('g3', tokenVersion: 0);
+    bindCommand(new ScriptedApiKeyRepository(activeLegacy: [$legacy]), new RecordingRecipientResolver([$legacy->publicId() => [commandNotifiable(1)]]));
+    enableLegacyWarning();
+    config(['api-keys.legacy.warn_days_before' => '1']);
+    app()->instance(Clock::class, new FixedClock(new DateTimeImmutable($now)));
+
+    $this->artisan(NotifyExpiringApiKeysCommand::class)
+        ->expectsOutputToContain("Legacy-format warnings sent: {$expectedWarnings}")
+        ->assertSuccessful();
+})->with([
+    'a second before' => ['2026-11-29T23:59:59+00:00', 0],
+    'one day before' => ['2026-11-30T00:00:00+00:00', 1],
+]);

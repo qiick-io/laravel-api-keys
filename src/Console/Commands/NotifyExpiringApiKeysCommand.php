@@ -152,16 +152,13 @@ final class NotifyExpiringApiKeysCommand extends Command
             return 0;
         }
 
-        $warnDays = filter_var(
-            config('api-keys.legacy.warn_days_before'),
-            FILTER_VALIDATE_INT,
-            ['options' => ['min_range' => 0]],
-        );
-        if (! is_int($warnDays) || $warnDays === 0) {
+        $warnDays = filter_var(config('api-keys.legacy.warn_days_before'), FILTER_VALIDATE_INT);
+        if (! is_int($warnDays)) {
             return 0;
         }
 
-        $windowStart = $acceptUntil->sub(new \DateInterval('P'.$warnDays.'D'));
+        // 0 leaves an empty window and a negative value one that starts after the cut-off: both warn nobody.
+        $windowStart = $acceptUntil->modify(sprintf('%+d days', -$warnDays));
         if ($now < $windowStart || $now >= $acceptUntil) {
             return 0;
         }

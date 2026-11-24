@@ -229,11 +229,11 @@ final class ApiKeysServiceProvider extends ServiceProvider
      */
     private function wholeNumber(mixed $configured): ?int
     {
-        return match (true) {
-            is_int($configured) => $configured,
-            is_string($configured) && preg_match('/^(0|[1-9][0-9]*)$/D', $configured) === 1 => (int) $configured,
-            default => null,
-        };
+        if (is_int($configured)) {
+            return $configured;
+        }
+
+        return is_string($configured) && preg_match('/^(0|[1-9][0-9]*)$/D', $configured) === 1 ? (int) $configured : null;
     }
 
     /**

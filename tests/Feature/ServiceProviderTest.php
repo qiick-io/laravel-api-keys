@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\File;
 use Qiick\ApiKeys\ConfigLifetimePolicy;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
@@ -39,12 +40,18 @@ it('binds RotationService with config rotation_max_grace_hours', function (): vo
 });
 
 it('lets an app publish the config file', function (): void {
-    $this->artisan('vendor:publish', ['--tag' => 'api-keys-config', '--force' => true])
-        ->assertSuccessful();
+    $published = config_path('api-keys.php');
 
-    expect(config_path('api-keys.php'))->toBeFile();
+    try {
+        $this->artisan('vendor:publish', ['--tag' => 'api-keys-config', '--force' => true])
+            ->assertSuccessful();
 
-    unlink(config_path('api-keys.php'));
+        expect($published)->toBeFile();
+    } finally {
+        // A mutated provider can publish a directory here; leaving it behind would
+        // break every later run that loads Testbench's config directory.
+        is_dir($published) ? File::deleteDirectory($published) : @unlink($published);
+    }
 });
 
 it('fails boot when legacy_matchers is set without API_KEYS_LEGACY_ACCEPT_UNTIL', function (): void {

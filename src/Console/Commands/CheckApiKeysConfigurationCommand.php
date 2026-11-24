@@ -26,11 +26,10 @@ final class CheckApiKeysConfigurationCommand extends Command
     public function handle(): int
     {
         try {
+            // This provider registers the command, so it is always loaded here.
+            /** @var ApiKeysServiceProvider $provider */
             $provider = $this->laravel->getProvider(ApiKeysServiceProvider::class);
-
-            if ($provider instanceof ApiKeysServiceProvider) {
-                $provider->validateConfiguration();
-            }
+            $provider->validateConfiguration();
 
             $this->laravel->make(AttemptLimiter::class);
         } catch (\InvalidArgumentException|\RuntimeException $exception) {

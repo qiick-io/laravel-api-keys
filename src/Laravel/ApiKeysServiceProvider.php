@@ -20,6 +20,7 @@ use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
 use Qiick\ApiKeys\Contracts\RandomSource;
+use Qiick\ApiKeys\LegacyCutoff;
 use Qiick\ApiKeys\LegacyTokenMatcher;
 use Qiick\ApiKeys\RandomBytesSource;
 use Qiick\ApiKeys\RotationService;
@@ -65,7 +66,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
                 return new AppEnvironmentResolver($environment === TokenEnvironment::Live);
             }
 
-            return new AppEnvironmentResolver((bool) $app->environment('production'));
+            return new AppEnvironmentResolver($app->environment('production'));
         });
 
         $this->app->singleton(TokenCodec::class, function (Application $app): TokenCodec {
@@ -170,23 +171,15 @@ final class ApiKeysServiceProvider extends ServiceProvider
             $legacyMatchers = [];
         }
 
-        $acceptUntil = $this->config($application)->get('api-keys.legacy.accept_until');
+        $acceptUntil = LegacyCutoff::parse($this->config($application)->get('api-keys.legacy.accept_until'));
 
-        if ($acceptUntil === null || $acceptUntil === '') {
-            if ($legacyMatchers !== []) {
-                throw new \RuntimeException(
-                    'api-keys.legacy.accept_until (API_KEYS_LEGACY_ACCEPT_UNTIL) is required when legacy_matchers is non-empty.'
-                );
-            }
-
-            return null;
+        if ($acceptUntil === null && $legacyMatchers !== []) {
+            throw new \RuntimeException(
+                'api-keys.legacy.accept_until (API_KEYS_LEGACY_ACCEPT_UNTIL) is required when legacy_matchers is non-empty.'
+            );
         }
 
-        if (! is_string($acceptUntil)) {
-            throw $this->invalidLegacyAcceptUntilException();
-        }
-
-        return $this->parseAbsoluteAcceptUntil($acceptUntil);
+        return $acceptUntil;
     }
 
     /**
@@ -241,49 +234,6 @@ final class ApiKeysServiceProvider extends ServiceProvider
             is_string($configured) && preg_match('/^(0|[1-9][0-9]*)$/D', $configured) === 1 => (int) $configured,
             default => null,
         };
-    }
-
-    /**
-     * Absolute ISO-8601 with offset ({@see \DateTimeInterface::ATOM}) or UTC "Z".
-     * Relative strings (`now`, `tomorrow`, `+10 years`) and date-only values are rejected.
-     */
-    private function parseAbsoluteAcceptUntil(string $acceptUntil): \DateTimeImmutable
-    {
-        $parsed = $this->parseAbsoluteAcceptUntilFormat($acceptUntil, \DateTimeInterface::ATOM);
-        if ($parsed instanceof \DateTimeImmutable) {
-            return $parsed;
-        }
-
-        if (str_ends_with($acceptUntil, 'Z')) {
-            $normalized = substr($acceptUntil, 0, -1).'+00:00';
-            $parsedZulu = $this->parseAbsoluteAcceptUntilFormat($normalized, \DateTimeInterface::ATOM);
-            if ($parsedZulu instanceof \DateTimeImmutable) {
-                return $parsedZulu;
-            }
-        }
-
-        throw $this->invalidLegacyAcceptUntilException();
-    }
-
-    private function parseAbsoluteAcceptUntilFormat(string $acceptUntil, string $format): ?\DateTimeImmutable
-    {
-        $parsed = \DateTimeImmutable::createFromFormat($format, $acceptUntil);
-        $errors = \DateTimeImmutable::getLastErrors();
-        $hasErrors = is_array($errors)
-            && (($errors['warning_count'] ?? 0) > 0 || ($errors['error_count'] ?? 0) > 0);
-
-        if ($parsed === false || $hasErrors || $parsed->format($format) !== $acceptUntil) {
-            return null;
-        }
-
-        return $parsed;
-    }
-
-    private function invalidLegacyAcceptUntilException(): \RuntimeException
-    {
-        return new \RuntimeException(
-            'api-keys.legacy.accept_until (API_KEYS_LEGACY_ACCEPT_UNTIL) must be an absolute ISO-8601 timestamp with offset (DATE_ATOM) or UTC Z, e.g. 2027-01-01T00:00:00Z or 2027-01-01T00:00:00+00:00.',
-        );
     }
 
     /**

@@ -17,7 +17,7 @@ final readonly class GeneratedToken implements \JsonSerializable
         #[\SensitiveParameter] public string $plainText,
         public string $keyPrefix,
         #[\SensitiveParameter] public string $keyHash,
-        public int $tokenVersion = 2,
+        public int $tokenVersion = TokenCodec::DEFAULT_TOKEN_VERSION,
     ) {}
 
     /**

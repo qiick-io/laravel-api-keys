@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
+use Qiick\ApiKeys\CacheLegacyFormatWarningGate;
 use Qiick\ApiKeys\Console\Commands\NotifyExpiringApiKeysCommand;
 use Qiick\ApiKeys\Contracts\ApiKeyRepository;
 use Qiick\ApiKeys\Contracts\Clock;
@@ -17,6 +19,8 @@ use Qiick\ApiKeys\Testing\FakeExpiryRecipientResolver;
 use Qiick\ApiKeys\Testing\FixedClock;
 use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\Tests\Support\ThrowingLegacyFormatWarningNotification;
+
+mutates(CacheLegacyFormatWarningGate::class);
 
 /**
  * The legacy-format warning must follow the expiry-notice protocol: resolve
@@ -173,4 +177,22 @@ it('never grants a lease on a warning that was marked sent', function (): void {
     $this->travel(901)->seconds();
 
     expect($gate->claim($key, 900))->toBeNull();
+});
+
+it('holds the lease as a cache lock named after the warning, freed once sent or found sent', function (): void {
+    $gate = app(LegacyFormatWarningGate::class);
+    $key = legacyWarningIdempotencyKey();
+    $lease = fn () => Cache::lock($key.':lease', 900);
+
+    $owner = $gate->claim($key, 900);
+    expect($lease()->get())->toBeFalse();
+
+    $gate->markSent($key, $owner);
+    $probe = $lease();
+    expect($probe->get())->toBeTrue();
+    $probe->release();
+
+    // A claim on a sent warning takes the lease, sees the marker, and gives the lease back.
+    expect($gate->claim($key, 900))->toBeNull()
+        ->and($lease()->get())->toBeTrue();
 });

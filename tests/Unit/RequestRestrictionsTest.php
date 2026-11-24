@@ -57,6 +57,7 @@ it('refuses a pattern list that the parser would deny', function (array $argumen
     'referrer star in host' => [['referrers' => ['https://foo*bar.example.com/x*']]],
     'referrer prefix without path' => [['referrers' => ['https://app.example.com*']]],
     'referrer prefix relative' => [['referrers' => ['/admin/*']]],
+    'referrer prefix with a leading slash' => [['referrers' => ['/https://app.example.com/a*']]],
     'referrer prefix with user' => [['referrers' => ['https://user@app.example.com/admin*']]],
     'referrer prefix with query' => [['referrers' => ['https://app.example.com/path?q=1*']]],
     'referrer prefix with fragment' => [['referrers' => ['https://app.example.com/path#x*']]],

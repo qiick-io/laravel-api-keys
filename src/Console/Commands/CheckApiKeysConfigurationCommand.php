@@ -7,12 +7,14 @@ namespace Qiick\ApiKeys\Console\Commands;
 use Illuminate\Console\Command;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
+use Qiick\ApiKeys\TokenCodec;
 
 /**
  * @api Deploy-time check: `php artisan api-keys:check` fails (exit 1) when the
  * package cannot work as configured.
  *
- * It re-validates the settings, checks that `app.timezone` is UTC, and resolves the bound {@see AttemptLimiter},
+ * It re-validates the settings, checks that `app.timezone` is UTC, builds the
+ * {@see TokenCodec} (product prefix, token version, environment), and resolves the bound {@see AttemptLimiter},
  * which throws on a cache store that cannot count atomically (Laravel's
  * default `database` store among them). Boot deliberately skips that store
  * check so artisan keeps working; run this command in the deploy pipeline.
@@ -32,6 +34,8 @@ final class CheckApiKeysConfigurationCommand extends Command
             $provider->validateConfiguration();
 
             $this->laravel->make(AttemptLimiter::class);
+            // Builds the environment resolver too: product prefix, token version and environment.
+            $this->laravel->make(TokenCodec::class);
 
             // Expiry, grace and lease comparisons assume UTC timestamps (RFC 3339 on the wire).
             if (config('app.timezone') !== 'UTC') {

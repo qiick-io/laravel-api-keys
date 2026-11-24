@@ -20,6 +20,7 @@ use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
 use Qiick\ApiKeys\Contracts\RandomSource;
+use Qiick\ApiKeys\FailedAttemptLimiter;
 use Qiick\ApiKeys\LegacyCutoff;
 use Qiick\ApiKeys\LegacyTokenMatcher;
 use Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification;
@@ -77,6 +78,15 @@ final class ApiKeysServiceProvider extends ServiceProvider
         $this->app->singletonIf(
             AttemptLimiter::class,
             fn (Application $app): AttemptLimiter => new CacheAttemptLimiter($app->make(CacheRepository::class)),
+        );
+
+        // The brake products pass to ApiKeyAuthenticator, sized by api-keys.failed_attempts_per_minute.
+        $this->app->singletonIf(
+            FailedAttemptLimiter::class,
+            fn (Application $app): FailedAttemptLimiter => new FailedAttemptLimiter(
+                $app->make(AttemptLimiter::class),
+                $this->wholeNumberSetting('api-keys.failed_attempts_per_minute', 0),
+            ),
         );
 
         $this->app->singleton(EnvironmentResolver::class, function (Application $app): EnvironmentResolver {

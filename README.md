@@ -254,17 +254,21 @@ Extract the bearer first (`BearerTokenExtractor`: no trim; case-insensitive
 
 ### Wiring the failed-attempt brake (recipe default ON)
 
-```php
-$failedAttempts = new FailedAttemptLimiter(
-    limiter: app(AttemptLimiter::class), // CacheAttemptLimiter by default
-    maxPerMinute: 20,         // ≤0 disables; leave ON unless you have a reason
-);
+The package binds `FailedAttemptLimiter` on the bound `AttemptLimiter`, sized by
+`api-keys.failed_attempts_per_minute` (`API_KEYS_FAILED_ATTEMPTS_PER_MINUTE`,
+default 20; `0` disables). Pass it to the authenticator; bind your own (for
+example with the IPv6 /48 tier) to replace it:
 
+```php
 $auth = new ApiKeyAuthenticator(
     // ...
-    failedAttemptLimiter: $failedAttempts,
+    failedAttemptLimiter: app(FailedAttemptLimiter::class),
 );
 ```
+
+`php artisan api-keys:check` also builds the token codec, so an empty
+`product_prefix`, a `token_version` other than 1 or 2, or an `environment` other
+than `live`/`test` fails the deploy check.
 
 Pass `KeyContext::ip` from `ClientIp::from($request)` only after `TrustProxies` is correct.
 Clients behind CGNAT / shared office egress share one IPv4 bucket — tune `maxPerMinute`

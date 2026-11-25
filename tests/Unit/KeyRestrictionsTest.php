@@ -15,15 +15,24 @@ mutates(RequestRestrictions::class);
 mutates(ResourceRestrictions::class);
 mutates(ResourceRestriction::class);
 
-it('treats null and empty JSON as unrestricted', function (): void {
+it('treats only null as unrestricted', function (): void {
     expect(KeyRestrictions::parse(null)->isDenied)->toBeFalse()
         ->and(KeyRestrictions::parse(null)->request->isUnrestricted())->toBeTrue()
         ->and(KeyRestrictions::parse(null)->resources->isEmpty())->toBeTrue()
-        ->and(KeyRestrictions::parse('')->isDenied)->toBeFalse()
-        ->and(KeyRestrictions::parse([])->isDenied)->toBeFalse()
         ->and(KeyRestrictions::unrestricted()->isDenied)->toBeFalse()
         ->and(KeyRestrictions::denied()->isDenied)->toBeTrue();
 });
+
+it('denies a document without version 1, empty ones included', function (mixed $raw): void {
+    expect(KeyRestrictions::parse($raw)->isDenied)->toBeTrue();
+})->with([
+    'empty array' => [[]],
+    'empty string' => [''],
+    'empty JSON object' => ['{}'],
+    'empty JSON list' => ['[]'],
+    'request without v' => ['{"request":{}}'],
+    'request without v, as array' => [['request' => []]],
+]);
 
 it('parses a valid version-1 document from array and JSON string', function (): void {
     $document = [

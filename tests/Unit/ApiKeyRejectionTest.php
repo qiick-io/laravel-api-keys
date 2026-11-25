@@ -167,3 +167,14 @@ it('translates messages via the translator hook but never the error code', funct
         ApiKeyRejection::setTranslator(null);
     }
 });
+
+it('refuses a scope that could break out of the WWW-Authenticate header', function (string $scope): void {
+    expect(fn () => ApiKeyRejection::insufficientScope($scope))
+        ->toThrow(InvalidArgumentException::class, 'The required scope must be a scope atom such as items:read.');
+})->with([
+    'quote' => ['items:read", error="invalid_token'],
+    'CRLF' => ["items:read\r\nSet-Cookie: session=x"],
+    'backslash' => ['items:read\\'],
+    'empty' => [''],
+    'not a scope atom' => ['Items:Read'],
+]);

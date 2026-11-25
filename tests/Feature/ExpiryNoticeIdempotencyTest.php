@@ -193,8 +193,8 @@ it('B1: concurrent claimExpiryNotice allows only one winner within the lease', f
 
     [$repository, $notifiable] = bindExpiryNoticeCommand($record, $now);
 
-    expect($repository->claimExpiryNotice($record, $now, 900))->toBeTrue()
-        ->and($repository->claimExpiryNotice($record, $now, 900))->toBeFalse()
+    expect($repository->claimExpiryNotice($record, $now, 900, 'token-a'))->toBeTrue()
+        ->and($repository->claimExpiryNotice($record, $now, 900, 'token-b'))->toBeFalse()
         ->and($repository->findByPublicId($record->publicId())?->expiryNoticeClaimedAt())->not->toBeNull()
         ->and($repository->findByPublicId($record->publicId())?->expiryNotifiedAt())->toBeNull();
 
@@ -221,7 +221,7 @@ it('B1: crash after claim is reclaimable once the lease expires', function (): v
     config(['api-keys.expiry.claim_lease_seconds' => 60]);
 
     // Worker A claims, then dies before send (no release, no mark).
-    expect($repository->claimExpiryNotice($record, $claimAt, 60))->toBeTrue()
+    expect($repository->claimExpiryNotice($record, $claimAt, 60, 'token-a'))->toBeTrue()
         ->and($repository->findByPublicId($record->publicId())?->expiryNoticeClaimedAt())->not->toBeNull()
         ->and($repository->findByPublicId($record->publicId())?->expiryNotifiedAt())->toBeNull();
 
@@ -261,8 +261,87 @@ it('N1: Fake claim CAS rejects a stale observed version', function (): void {
     $repository = new FakeApiKeyRepository([$record], $now);
     $staleVersion = $repository->casVersionFor($record->publicId());
 
-    expect($repository->claimExpiryNotice($record, $now, 900))->toBeTrue()
+    expect($repository->claimExpiryNotice($record, $now, 900, 'token-a'))->toBeTrue()
         ->and($repository->casVersionFor($record->publicId()))->toBe($staleVersion + 1)
-        ->and($repository->claimExpiryNoticeWithObservedVersion($record, $now, 900, $staleVersion))
+        ->and($repository->claimExpiryNoticeWithObservedVersion($record, $now, 900, $staleVersion, 'token-b'))
         ->toBeFalse();
+});
+
+function expiringRecord(string $suffix): InMemoryApiKeyRecord
+{
+    return (new InMemoryApiKeyRecord(
+        publicId: '018f0000-0000-7000-8000-0000000001'.$suffix,
+        keyPrefix: 'tst_test_expiry'.$suffix,
+        keyHash: 'hash',
+        scopes: ['items:read'],
+    ))->withExpiresAt(new DateTimeImmutable('2026-01-15T00:00:00+00:00'));
+}
+
+it('lets only the claim\'s own token mark or release it, so a run whose lease expired cannot touch the next run\'s claim', function (): void {
+    $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
+    $record = expiringRecord('a1');
+    $repository = new FakeApiKeyRepository([$record], $now);
+
+    expect($repository->claimExpiryNotice($record, $now, 60, 'token-a'))->toBeTrue();
+
+    $afterLease = $now->modify('+61 seconds');
+
+    expect($repository->claimExpiryNotice($record, $afterLease, 60, 'token-b'))->toBeTrue()
+        ->and($repository->markExpiryNotified($record, $afterLease, 'token-a'))->toBeFalse();
+
+    $repository->releaseExpiryNotice($record, 'token-a');
+
+    expect($repository->findByPublicId($record->publicId())?->expiryNoticeClaimedAt())->toEqual($afterLease)
+        ->and($repository->findByPublicId($record->publicId())?->expiryNotifiedAt())->toBeNull()
+        ->and($repository->markExpiryNotified($record, $afterLease, 'token-b'))->toBeTrue()
+        ->and($repository->findByPublicId($record->publicId())?->expiryNotifiedAt())->toEqual($afterLease)
+        ->and($repository->expiryNotifications)->toHaveCount(1);
+});
+
+it('releases a claim only with its own token', function (): void {
+    $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
+    $record = expiringRecord('a2');
+    $repository = new FakeApiKeyRepository([$record], $now);
+
+    $repository->claimExpiryNotice($record, $now, 900, 'token-a');
+    $repository->releaseExpiryNotice($record, 'token-b');
+
+    expect($repository->claimExpiryNotice($record, $now, 900, 'token-c'))->toBeFalse();
+
+    $repository->releaseExpiryNotice($record, 'token-a');
+
+    expect($repository->findByPublicId($record->publicId())?->expiryNoticeClaimedAt())->toBeNull()
+        ->and($repository->claimExpiryNotice($record, $now, 900, 'token-c'))->toBeTrue();
+});
+
+it('binds the claim and the mark to the expiry that was selected', function (): void {
+    $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
+    $selected = expiringRecord('a3');
+    $rotated = $selected->withExpiresAt(new DateTimeImmutable('2026-04-15T00:00:00+00:00'));
+    $repository = new FakeApiKeyRepository([$selected], $now);
+
+    expect($repository->claimExpiryNotice($selected, $now, 900, 'token-a'))->toBeTrue();
+
+    // The key is rotated to a new expiry while the notice for the old one is in flight.
+    $repository->setRecords([$rotated->withExpiryNoticeClaimedAt($now)]);
+
+    expect($repository->markExpiryNotified($selected, $now, 'token-a'))->toBeFalse()
+        ->and($repository->findByPublicId($selected->publicId())?->expiryNotifiedAt())->toBeNull()
+        ->and($repository->expiryNotifications)->toBe([]);
+
+    // A claim for the old expiry, from a stale select, loses too.
+    $fresh = new FakeApiKeyRepository([$rotated], $now);
+
+    expect($fresh->claimExpiryNotice($selected, $now, 900, 'token-b'))->toBeFalse();
+});
+
+it('claims with a token from the RandomSource', function (): void {
+    Notification::fake();
+    $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
+    [$repository] = bindExpiryNoticeCommand(expiringRecord('a4'), $now);
+    app()->instance(Qiick\ApiKeys\Contracts\RandomSource::class, new Qiick\ApiKeys\Testing\FixedRandomSource('claim-token-seed-0123456789abcdef'));
+
+    $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
+
+    expect($repository->claimTokensUsed)->toBe([bin2hex(substr('claim-token-seed-0123456789abcdef', 0, 16))]);
 });

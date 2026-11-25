@@ -23,6 +23,8 @@ use Qiick\ApiKeys\Tests\Support\FailingForKeyExpiryNotification;
 use Qiick\ApiKeys\Tests\Support\FailingForKeyLegacyWarningNotification;
 use Qiick\ApiKeys\Tests\Support\RecordingRecipientResolver;
 use Qiick\ApiKeys\Tests\Support\ScriptedApiKeyRepository;
+use Qiick\ApiKeys\Testing\FixedRandomSource;
+use Qiick\ApiKeys\Contracts\RandomSource;
 
 mutates(NotifyExpiringApiKeysCommand::class);
 
@@ -313,4 +315,47 @@ it('runs on a config published before the nested expiry and legacy keys existed'
     $this->artisan(NotifyExpiringApiKeysCommand::class)
         ->expectsOutputToContain('Expiry notices sent: 1')
         ->assertSuccessful();
+});
+
+it('claims every notice with its own fresh token and marks or releases with that same token', function (): void {
+    Notification::fake();
+    $notifiable = commandNotifiable(1);
+    $records = [commandRecord('c1'), commandRecord('f0'), commandRecord('c2')];
+    $repository = new ScriptedApiKeyRepository($records);
+    bindCommand($repository, new RecordingRecipientResolver([
+        $records[0]->publicId() => [$notifiable],
+        $records[1]->publicId() => [$notifiable],
+        $records[2]->publicId() => [$notifiable],
+    ]));
+    // The f0 key's delivery fails, so its claim is released.
+    config(['api-keys.expiry.notification' => FailingForKeyExpiryNotification::class]);
+    app()->instance(RandomSource::class, new FixedRandomSource('0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'));
+
+    $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
+
+    $tokens = [bin2hex('0123456789abcdef'), bin2hex('ghijklmnopqrstuv'), bin2hex('wxyzABCDEFGHIJKL')];
+
+    expect($repository->claimTokenCalls)->toBe([
+        'claim:'.$records[0]->publicId().':'.$tokens[0],
+        'mark:'.$records[0]->publicId().':'.$tokens[0],
+        'claim:'.$records[1]->publicId().':'.$tokens[1],
+        'release:'.$records[1]->publicId().':'.$tokens[1],
+        'claim:'.$records[2]->publicId().':'.$tokens[2],
+        'mark:'.$records[2]->publicId().':'.$tokens[2],
+    ]);
+});
+
+it('warns when a sent notice could not be marked because its claim was taken or its expiry changed', function (): void {
+    Notification::fake();
+    Event::fake([ApiKeyExpiryNoticeSent::class]);
+    $record = commandRecord('c3');
+    $repository = new ScriptedApiKeyRepository([$record], lostMarkPublicIds: [$record->publicId()]);
+    bindCommand($repository, new RecordingRecipientResolver([$record->publicId() => [commandNotifiable(1)]]));
+
+    $this->artisan(NotifyExpiringApiKeysCommand::class)
+        ->expectsOutputToContain('Expiry notice for '.$record->publicId().' was sent, but its claim was taken by another run or the key\'s expiry changed: not marked as notified.')
+        ->expectsOutputToContain('Expiry notices sent: 1')
+        ->assertSuccessful();
+
+    Event::assertDispatched(ApiKeyExpiryNoticeSent::class);
 });

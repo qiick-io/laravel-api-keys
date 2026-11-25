@@ -20,6 +20,7 @@ use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
 use Qiick\ApiKeys\Contracts\RandomSource;
+use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
 use Qiick\ApiKeys\FailedAttemptLimiter;
 use Qiick\ApiKeys\LegacyCutoff;
 use Qiick\ApiKeys\LegacyTokenMatcher;
@@ -189,6 +190,20 @@ final class ApiKeysServiceProvider extends ServiceProvider
         $this->assertWholeNumberAtLeast('api-keys.failed_attempts_per_minute', 'API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 0);
         $this->assertWholeNumberAtLeast('api-keys.expiry.claim_lease_seconds', 'API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 1);
         $this->assertWholeNumberAtLeast('api-keys.legacy.warn_days_before', 'API_KEYS_LEGACY_WARN_DAYS_BEFORE', 0);
+        // Validates the URL and hands it to the refusals in one step.
+        ApiKeyRejection::setResourceMetadataUrl($this->resourceMetadataUrl());
+    }
+
+    /**
+     * @throws \InvalidArgumentException when api-keys.resource_metadata_url is set but not a string
+     */
+    private function resourceMetadataUrl(): ?string
+    {
+        $url = $this->config($this->app)->get('api-keys.resource_metadata_url');
+
+        return $url === null || is_string($url)
+            ? $url
+            : throw new \InvalidArgumentException('The resource metadata URL must be an absolute https URL.');
     }
 
     /**

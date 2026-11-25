@@ -15,6 +15,16 @@ were added; see UPGRADING.md.
 
 ### Added
 
+- Scope challenge (RFC 6750 §3.1, MCP authorization): the 403 for a key with no
+  usable scopes now names the required scope, in `WWW-Authenticate` and in the
+  JSON `scope`, like `insufficient_scope` already did.
+  `api-keys.resource_metadata_url` (`API_KEYS_RESOURCE_METADATA_URL`, absolute
+  https) adds `resource_metadata="<url>"` (RFC 9728) to the `invalid_token` and
+  `insufficient_scope` challenges (#65, found while adopting the package in
+  excubia).
+
+### Added
+
 - `503 service_unavailable` (`ApiKeyRejection::serviceUnavailable()`,
   `KeyRejectionCode::ServiceUnavailable`) when the attempt store is down: the
   request still fails closed, but with a typed, retryable refusal instead of a

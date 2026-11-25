@@ -58,6 +58,14 @@ return [
     'failed_attempts_per_minute' => env('API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 20),
 
     /*
+     * RFC 9728 protected-resource metadata URL (absolute https). When set, the
+     * 401 invalid_token and 403 insufficient_scope challenges carry
+     * resource_metadata="<url>", as the MCP authorization spec asks. Null
+     * leaves it out.
+     */
+    'resource_metadata_url' => env('API_KEYS_RESOURCE_METADATA_URL'),
+
+    /*
      * Optional organisation max lifetime in days, enforced on rotation by the
      * default ConfigLifetimePolicy (a product binding of LifetimePolicy
      * replaces it). Unset disables it; any other value must be a whole number

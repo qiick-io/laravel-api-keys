@@ -20,7 +20,33 @@ were added; see UPGRADING.md.
   request still fails closed, but with a typed, retryable refusal instead of a
   500. The cause goes to the exception reporter.
 
+## [0.3.0-beta.1] - 2026-11-25
+
+First beta after the red-team and standards reviews: atomic limits, a frozen
+public API, the full mutation gate and the 1.0 checklist decisions. **0.x may
+still break;** read UPGRADING.md before adopting.
+
 Public Suffix List: first snapshot (2026-11-24).
+
+### Upgrade notes
+
+- The default cache store must be Redis or Memcached (array in tests), or bind
+  your own `AttemptLimiter`; add `php artisan api-keys:check` to the deploy
+  pipeline, which fails on an unsupported store, an unusable codec setting or
+  a non-UTC `app.timezone`.
+- Replace any `AttemptLimiter` adapter over Laravel's `RateLimiter` and any
+  custom `LegacyFormatWarningGate` with the new contracts (UPGRADING.md lists
+  every signature).
+- `API_KEYS_FAILED_ATTEMPTS_PER_MINUTE`, `API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS`,
+  `API_KEYS_LEGACY_WARN_DAYS_BEFORE` and `API_KEYS_MAX_LIFETIME_DAYS` must be
+  digits only, or boot fails. `max_lifetime_days` is now enforced on rotation;
+  call `LifetimeAssertion::assertAllows()` before inserting a new key.
+- Stored `restrictions` with origin wildcards over a public suffix (`*.com`,
+  `*.co.uk`, `*.github.io`) or other now-invalid patterns parse as denied:
+  narrow them before upgrading.
+- Pass `app(FailedAttemptLimiter::class)` to the authenticator so
+  `failed_attempts_per_minute` takes effect.
+- No database migration: the package ships none.
 
 ### Fixed
 
@@ -233,6 +259,7 @@ First pre-release. The API may still change before 1.0.0; see UPGRADING.md.
   (PHP 8.3/8.4/8.5 × Laravel 12/13 × lowest/stable) with `composer validate
   --strict`, `composer audit`, and SHA-pinned Actions.
 
-[Unreleased]: https://github.com/qiick-io/laravel-api-keys/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.1...HEAD
+[0.3.0-beta.1]: https://github.com/qiick-io/laravel-api-keys/compare/v0.2.0...v0.3.0-beta.1
 [0.2.0]: https://github.com/qiick-io/laravel-api-keys/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/qiick-io/laravel-api-keys/releases/tag/v0.1.0

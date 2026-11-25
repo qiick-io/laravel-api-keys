@@ -24,19 +24,18 @@ Part of the qiick fleet. Binding design:
 
 ## Status
 
-Pre-release `0.2.0`. Public APIs may change in any 0.x release; see
-[UPGRADING.md](./UPGRADING.md). Pin an exact version. Packagist publish only
-after Luca’s go.
+Beta `0.3.0-beta.1`. Public APIs may change in any 0.x release; see
+[UPGRADING.md](./UPGRADING.md). Pin an exact version.
 
 ## Requirements
 
 - PHP `^8.3`
 - Illuminate console / contracts / http / notifications / support `^12.0 \|\| ^13.0` (never `laravel/framework`)
 
-## Install (when published)
+## Install
 
 ```bash
-composer require qiick/laravel-api-keys
+composer require qiick/laravel-api-keys:0.3.0-beta.1
 php artisan vendor:publish --tag=api-keys-config
 ```
 

@@ -134,6 +134,7 @@ documents each one.
 - `usage_bypass_throttle_on_ip_change`
 - `default_rate_limit_per_minute`
 - `failed_attempts_per_minute`
+- `cache_store`
 - `max_lifetime_days`
 - `expiry.notice_days`
 - `expiry.claim_lease_seconds`
@@ -145,10 +146,12 @@ documents each one.
 - `legacy.warning_notification`
 
 The package also reads `app.timezone` (`api-keys:check` requires UTC) and the
-default cache store (`cache.default`) for the bound `AttemptLimiter`.
+default cache store (`cache.default`) when `cache_store` is null, for the bound
+`AttemptLimiter` (Laravel's `RateLimiter`, see `docs/security.md`).
 
 ## Environment variables
 
+- `API_KEYS_CACHE_STORE`
 - `API_KEYS_DEFAULT_RATE_LIMIT_PER_MINUTE`
 - `API_KEYS_ENVIRONMENT`
 - `API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS`

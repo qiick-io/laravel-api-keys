@@ -6,8 +6,8 @@
 # Excluded by docs/decisions/2026-11-24-one-point-zero-checklist.md: interfaces
 # (no executable code), enums without methods, and the Testing namespace.
 #
-# MUTATE_SHARD=i/n runs the i-th of n slices (CI shards). CacheAttemptLimiter needs
-# live Redis and Memcached: it runs only when API_KEYS_LIMITER_STORE=both (its own
+# MUTATE_SHARD=i/n runs the i-th of n slices (CI shards). CacheAttemptLimiter's store
+# tests need live Redis and Memcached: it runs only when API_KEYS_LIMITER_STORE=both (its own
 # CI job) and is skipped everywhere else. MUTATE_ONLY=<FQCN> runs a single class.
 set -euo pipefail
 

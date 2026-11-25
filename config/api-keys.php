@@ -58,6 +58,15 @@ return [
     'failed_attempts_per_minute' => env('API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 20),
 
     /*
+     * Cache store for the per-key limits and the failed-attempt brake, counted
+     * with Laravel's RateLimiter. Null uses the default store. For production
+     * pick a store that increments atomically: redis, memcached, dynamodb, or
+     * database on MySQL/PostgreSQL. The file store is not atomic across
+     * workers and api-keys:check warns about it.
+     */
+    'cache_store' => env('API_KEYS_CACHE_STORE'),
+
+    /*
      * Optional organisation max lifetime in days, enforced on rotation by the
      * default ConfigLifetimePolicy (a product binding of LifetimePolicy
      * replaces it). Unset disables it; any other value must be a whole number

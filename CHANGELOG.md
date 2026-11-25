@@ -70,6 +70,8 @@ Public Suffix List: first snapshot (2026-11-24).
 
 ### Added
 
+- `docs/dependencies.md` records runtime Composer constraints, usage, maintainers,
+  licenses, risks, and exit plans.
 - `LifetimeAssertion::assertAllows()`: the lifetime policy check products call
   before inserting a new key (issuance is product-owned); rotation uses it too.
 - `api-keys:check` also fails when `app.timezone` is not UTC.

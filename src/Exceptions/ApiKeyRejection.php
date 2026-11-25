@@ -91,9 +91,7 @@ final class ApiKeyRejection extends HttpException
      */
     public static function insufficientScope(string $scope): self
     {
-        if (Scope::tryFromString($scope) === null) {
-            throw new \InvalidArgumentException('The required scope must be a scope atom such as items:read.');
-        }
+        self::assertScopeAtom($scope);
 
         return new self(
             403,
@@ -111,9 +109,15 @@ final class ApiKeyRejection extends HttpException
     /**
      * The key holds no usable scope. When the request required one, it is named
      * like in {@see insufficientScope()}, so the client knows what to ask for.
+     *
+     * @throws \InvalidArgumentException when `$requiredScope` is not a scope atom
      */
     public static function noUsableScopes(?string $requiredScope = null): self
     {
+        if ($requiredScope !== null) {
+            self::assertScopeAtom($requiredScope);
+        }
+
         return new self(
             403,
             self::translate('api_keys.no_usable_scopes', 'The API key holds no scopes.'),
@@ -229,9 +233,22 @@ final class ApiKeyRejection extends HttpException
     }
 
     /**
+     * A scope goes into the `WWW-Authenticate` header verbatim, so only a scope atom
+     * ({@see Scope::PATTERN}) may: a quote or CRLF would inject into the header.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function assertScopeAtom(string $scope): void
+    {
+        if (Scope::tryFromString($scope) === null) {
+            throw new \InvalidArgumentException('The required scope must be a scope atom such as items:read.');
+        }
+    }
+
+    /**
      * RFC 6750 §3 challenge: `Bearer error="…"[, scope="…"][, resource_metadata="…"]`.
-     * Scopes are validated scope strings and the URL is checked on the way in,
-     * so neither can break out of its quotes.
+     * Scopes are checked by assertScopeAtom() and the URL on the way in, so
+     * neither can break out of its quotes.
      */
     private static function challenge(string $error, ?string $scope = null): string
     {

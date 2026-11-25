@@ -62,8 +62,8 @@ were added; see UPGRADING.md.
   a product's `array` cast turned them into null (#61, found while adopting
   the package in signaculum). `ApiKeyRecord::raw*()` now return the columns as
   stored; see UPGRADING.md.
-- `ApiKeyRejection::insufficientScope()` refuses a scope that is not a scope
-  atom with `InvalidArgumentException`: it goes into `WWW-Authenticate`
+- `ApiKeyRejection::insufficientScope()` and `noUsableScopes()` refuse a scope
+  that is not a scope atom with `InvalidArgumentException`: it goes into `WWW-Authenticate`
   verbatim, so a product passing quotes or CRLF could inject into the header.
 
 ### Upgrade notes

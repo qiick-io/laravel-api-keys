@@ -302,10 +302,11 @@ jobs:
             exit 1
           fi
 
-  # Prefer SHA pin when the reusable workflow is addressable; app-ui publishes
-  # drift-check under tags, so @v0.11.0 matches qiick-standards.json "ref".
+  # Pinned by commit like every action (1.0 checklist item 7); keep it on the
+  # tag qiick-standards.json "ref" names.
   standards:
-    uses: qiick-io/app-ui/.github/workflows/drift-check.yml@v0.11.0
+    # qiick-io/app-ui v0.11.0
+    uses: qiick-io/app-ui/.github/workflows/drift-check.yml@cbb1843eb1f50ef5a38e7e7bdf9b8dbec7b48bed
     with:
       standards: true
       registry: false

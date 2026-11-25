@@ -13,6 +13,15 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Security
+
+- The expiry-notice claim is bound to a random claim token
+  (`expiry_notice_claim_token`) and to the selected `expires_at`. A run whose
+  lease expired can no longer mark or release the next run's claim, and a
+  rotation between claim and mark is not stamped as notified.
+  `api-keys:notify-expiring` warns when a sent notice could not be marked.
+  **Contract break** in `ApiKeyRepository`; see UPGRADING.md (#78).
+
 ## [0.3.0-beta.2] - 2026-11-25
 
 Second beta: Redis is no longer required, and the fixes found while adopting

@@ -16,6 +16,22 @@ authenticating after you upgrade, with no migration. Each CHANGELOG entry says
 whether the list changed; before upgrading, search stored `restrictions` for
 wildcards over the suffixes it names.
 
+## From 0.3.0-beta.2 to 0.3.0-beta.3
+
+- **Contract break, `ApiKeyRepository`:** the expiry-notice claim is bound to
+  a token and to the selected expiry.
+  - Add `expiry_notice_claim_token` (string(64), nullable) to `api_keys`.
+    Pre-1.0 products put it in their `create_api_keys` migration.
+  - `claimExpiryNotice($record, $now, $leaseSeconds, string $claimToken): bool`
+    also sets the token, and wins only while `expires_at` equals
+    `$record->expiresAt()`.
+  - `markExpiryNotified($record, $notifiedAt, string $claimToken): bool` and
+    `releaseExpiryNotice($record, string $claimToken): void` apply only while
+    the row holds that token and `expires_at`. Both clear the token, and the
+    mark returns false when the claim was lost.
+  - `ExpiryNoticeClaimSql` has the statements and their new bindings. Bind
+    `expires_at` exactly as you read it, so the equality holds on your engine.
+
 ## From 0.3.0-beta.1 to 0.3.0-beta.2
 
 - Redis or Memcached is no longer required. Attempts are counted with

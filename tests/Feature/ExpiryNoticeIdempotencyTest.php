@@ -10,12 +10,14 @@ use Qiick\ApiKeys\Contracts\ApiKeyRepository;
 use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\ExpiryRecipientResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
+use Qiick\ApiKeys\Contracts\RandomSource;
 use Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSent;
 use Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification;
 use Qiick\ApiKeys\Testing\FakeApiKeyRepository;
 use Qiick\ApiKeys\Testing\FakeExpiryRecipientResolver;
 use Qiick\ApiKeys\Testing\FakeLegacyFormatWarningGate;
 use Qiick\ApiKeys\Testing\FixedClock;
+use Qiick\ApiKeys\Testing\FixedRandomSource;
 use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\Tests\Support\ThrowingExpiryNotification;
 
@@ -339,7 +341,7 @@ it('claims with a token from the RandomSource', function (): void {
     Notification::fake();
     $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
     [$repository] = bindExpiryNoticeCommand(expiringRecord('a4'), $now);
-    app()->instance(Qiick\ApiKeys\Contracts\RandomSource::class, new Qiick\ApiKeys\Testing\FixedRandomSource('claim-token-seed-0123456789abcdef'));
+    app()->instance(RandomSource::class, new FixedRandomSource('claim-token-seed-0123456789abcdef'));
 
     $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
 

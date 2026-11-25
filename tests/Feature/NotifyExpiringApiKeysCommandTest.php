@@ -10,6 +10,7 @@ use Qiick\ApiKeys\Contracts\ApiKeyRepository;
 use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\ExpiryRecipientResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
+use Qiick\ApiKeys\Contracts\RandomSource;
 use Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSent;
 use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSent;
 use Qiick\ApiKeys\ExpiryRecipient;
@@ -18,13 +19,12 @@ use Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification;
 use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
 use Qiick\ApiKeys\Testing\FakeLegacyFormatWarningGate;
 use Qiick\ApiKeys\Testing\FixedClock;
+use Qiick\ApiKeys\Testing\FixedRandomSource;
 use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\Tests\Support\FailingForKeyExpiryNotification;
 use Qiick\ApiKeys\Tests\Support\FailingForKeyLegacyWarningNotification;
 use Qiick\ApiKeys\Tests\Support\RecordingRecipientResolver;
 use Qiick\ApiKeys\Tests\Support\ScriptedApiKeyRepository;
-use Qiick\ApiKeys\Testing\FixedRandomSource;
-use Qiick\ApiKeys\Contracts\RandomSource;
 
 mutates(NotifyExpiringApiKeysCommand::class);
 

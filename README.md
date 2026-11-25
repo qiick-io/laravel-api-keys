@@ -122,8 +122,12 @@ $this->app->singleton(AttemptLimiter::class, fn () => new CacheAttemptLimiter(Ca
 ## Expiry notices (claim lease)
 
 `api-keys:notify-expiring` takes a CAS lease on `expiry_notice_claimed_at`
-before sending, then stamps `expiry_notified_at` only after a successful send
-(see `ExpiryNoticeClaimSql`). The lease cutoff is computed from the worker's
+before sending, with a fresh random `expiry_notice_claim_token`, for the
+`expires_at` it selected. It stamps `expiry_notified_at` only after a
+successful send, and only while the row still holds that token and expiry (see
+`ExpiryNoticeClaimSql`). A run whose lease expired therefore cannot mark or
+release the next run's claim, and a key rotated in between is not stamped as
+notified for its new expiry. The lease cutoff is computed from the worker's
 `Clock` (`$now`), not the database server clock.
 
 Two operational risks (accepted as documented nits after #18):

@@ -7,6 +7,7 @@ namespace Qiick\ApiKeys\Testing;
 use Qiick\ApiKeys\Contracts\ApiKeyRecord;
 use Qiick\ApiKeys\Contracts\ApiKeyRepository;
 use Qiick\ApiKeys\CredentialKind;
+use Qiick\ApiKeys\ExpiryNoticeClaimSql;
 
 /**
  * @api In-memory repository for authenticator tests.
@@ -36,6 +37,21 @@ final class FakeApiKeyRepository implements ApiKeyRepository
      * @var array<string, int>
      */
     private array $casVersions = [];
+
+    /**
+     * The token of the live expiry-notice claim per public id
+     * (`expiry_notice_claim_token`).
+     *
+     * @var array<string, string>
+     */
+    private array $claimTokens = [];
+
+    /**
+     * Every token passed to a claim, in call order.
+     *
+     * @var list<string>
+     */
+    public array $claimTokensUsed = [];
 
     private ?\DateTimeImmutable $now;
 
@@ -134,21 +150,17 @@ final class FakeApiKeyRepository implements ApiKeyRepository
         return $matches;
     }
 
-    public function markExpiryNotified(ApiKeyRecord $record, \DateTimeImmutable $notifiedAt): void
+    public function markExpiryNotified(ApiKeyRecord $record, \DateTimeImmutable $notifiedAt, string $claimToken): bool
     {
         $publicId = $record->publicId();
-        $observedVersion = $this->casVersions[$publicId] ?? 0;
         $current = $this->findByPublicId($publicId) ?? $record;
 
-        if ($current->expiryNotifiedAt() !== null) {
-            return;
+        if (! $this->holdsClaim($current, $record, $claimToken)) {
+            return false;
         }
 
-        if (($this->casVersions[$publicId] ?? 0) !== $observedVersion) {
-            return;
-        }
-
-        $this->casVersions[$publicId] = $observedVersion + 1;
+        $this->casVersions[$publicId] = ($this->casVersions[$publicId] ?? 0) + 1;
+        unset($this->claimTokens[$publicId]);
         $this->expiryNotifications[] = [
             'record' => $current,
             'notifiedAt' => $notifiedAt,
@@ -160,41 +172,23 @@ final class FakeApiKeyRepository implements ApiKeyRepository
                 ->withExpiryNoticeClaimedAt(null);
             $this->replaceRecord($publicId, $updated);
         }
+
+        return true;
     }
 
     public function claimExpiryNotice(
         ApiKeyRecord $record,
         \DateTimeImmutable $now,
         int $leaseSeconds,
+        string $claimToken,
     ): bool {
-        $publicId = $record->publicId();
-        $observedVersion = $this->casVersions[$publicId] ?? 0;
-        $current = $this->findByPublicId($publicId) ?? $record;
-
-        if ($current->expiryNotifiedAt() !== null) {
-            return false;
-        }
-
-        $claimedAt = $current->expiryNoticeClaimedAt();
-        if ($claimedAt !== null) {
-            $leaseCutoff = $now->modify('-'.$leaseSeconds.' seconds');
-
-            if ($claimedAt >= $leaseCutoff) {
-                return false;
-            }
-        }
-
-        if (($this->casVersions[$publicId] ?? 0) !== $observedVersion) {
-            return false;
-        }
-
-        $this->casVersions[$publicId] = $observedVersion + 1;
-
-        if ($current instanceof InMemoryApiKeyRecord) {
-            $this->replaceRecord($publicId, $current->withExpiryNoticeClaimedAt($now));
-        }
-
-        return true;
+        return $this->claimExpiryNoticeWithObservedVersion(
+            $record,
+            $now,
+            $leaseSeconds,
+            $this->casVersions[$record->publicId()] ?? 0,
+            $claimToken,
+        );
     }
 
     /**
@@ -213,21 +207,19 @@ final class FakeApiKeyRepository implements ApiKeyRepository
         \DateTimeImmutable $now,
         int $leaseSeconds,
         int $observedVersion,
+        string $claimToken,
     ): bool {
         $publicId = $record->publicId();
         $current = $this->findByPublicId($publicId) ?? $record;
+        $this->claimTokensUsed[] = $claimToken;
 
-        if ($current->expiryNotifiedAt() !== null) {
+        if ($current->expiryNotifiedAt() !== null || ! $this->isSameExpiry($current, $record)) {
             return false;
         }
 
         $claimedAt = $current->expiryNoticeClaimedAt();
-        if ($claimedAt !== null) {
-            $leaseCutoff = $now->modify('-'.$leaseSeconds.' seconds');
-
-            if ($claimedAt >= $leaseCutoff) {
-                return false;
-            }
+        if ($claimedAt !== null && $claimedAt >= $now->modify('-'.$leaseSeconds.' seconds')) {
+            return false;
         }
 
         if (($this->casVersions[$publicId] ?? 0) !== $observedVersion) {
@@ -235,6 +227,7 @@ final class FakeApiKeyRepository implements ApiKeyRepository
         }
 
         $this->casVersions[$publicId] = $observedVersion + 1;
+        $this->claimTokens[$publicId] = $claimToken;
 
         if ($current instanceof InMemoryApiKeyRecord) {
             $this->replaceRecord($publicId, $current->withExpiryNoticeClaimedAt($now));
@@ -243,25 +236,37 @@ final class FakeApiKeyRepository implements ApiKeyRepository
         return true;
     }
 
-    public function releaseExpiryNotice(ApiKeyRecord $record): void
+    public function releaseExpiryNotice(ApiKeyRecord $record, string $claimToken): void
     {
         $publicId = $record->publicId();
-        $observedVersion = $this->casVersions[$publicId] ?? 0;
         $current = $this->findByPublicId($publicId) ?? $record;
 
-        if ($current->expiryNotifiedAt() !== null) {
+        if (! $this->holdsClaim($current, $record, $claimToken)) {
             return;
         }
 
-        if (($this->casVersions[$publicId] ?? 0) !== $observedVersion) {
-            return;
-        }
-
-        $this->casVersions[$publicId] = $observedVersion + 1;
+        $this->casVersions[$publicId] = ($this->casVersions[$publicId] ?? 0) + 1;
+        unset($this->claimTokens[$publicId]);
 
         if ($current instanceof InMemoryApiKeyRecord) {
             $this->replaceRecord($publicId, $current->withExpiryNoticeClaimedAt(null));
         }
+    }
+
+    /**
+     * Like {@see ExpiryNoticeClaimSql::markNotified()} and `release()`: the row is
+     * unsent, still holds this claim's token, and still has the selected expiry.
+     */
+    private function holdsClaim(ApiKeyRecord $current, ApiKeyRecord $selected, string $claimToken): bool
+    {
+        return $current->expiryNotifiedAt() === null
+            && ($this->claimTokens[$current->publicId()] ?? null) === $claimToken
+            && $this->isSameExpiry($current, $selected);
+    }
+
+    private function isSameExpiry(ApiKeyRecord $current, ApiKeyRecord $selected): bool
+    {
+        return $current->expiresAt()?->format('U.u') === $selected->expiresAt()?->format('U.u');
     }
 
     public function findActiveLegacy(): iterable

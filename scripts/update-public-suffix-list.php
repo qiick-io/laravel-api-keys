@@ -12,8 +12,14 @@ declare(strict_types=1);
  * IDN rules are converted to their ASCII (punycode) form, which is how origins
  * arrive; this needs ext-intl when the script runs, not at runtime. Run
  * `vendor/bin/pint resources` afterwards to keep the file in the house style.
+ *
+ * Fails (exit 1) and leaves the current snapshot untouched on a list that is not
+ * valid UTF-8 or holds too few rules: a broken download must never empty the
+ * list origin wildcards are checked against. A second argument writes elsewhere
+ * (tests).
  */
 $source = $argv[1] ?? 'https://publicsuffix.org/list/public_suffix_list.dat';
+$target = $argv[2] ?? __DIR__.'/../resources/public_suffix_list.php';
 $list = file_get_contents($source);
 
 if ($list === false || ! str_contains($list, '===BEGIN PRIVATE DOMAINS===')) {
@@ -26,10 +32,17 @@ if (! function_exists('idn_to_ascii')) {
     exit(1);
 }
 
+// The u flag matters: byte-wise, \R also breaks on 0x85, a byte inside many CJK characters.
+$lines = preg_split('/\R/u', $list);
+
+if ($lines === false) {
+    fwrite(STDERR, "The Public Suffix List from {$source} is not valid UTF-8\n");
+    exit(1);
+}
+
 $rules = [];
 
-// The u flag matters: byte-wise, \R also breaks on 0x85, a byte inside many CJK characters.
-foreach (preg_split('/\R/u', $list) ?: [] as $line) {
+foreach ($lines as $line) {
     // A rule is the first whitespace-delimited token; comments start with `//`.
     $rule = strtok(trim($line), " \t");
 
@@ -41,6 +54,12 @@ foreach (preg_split('/\R/u', $list) ?: [] as $line) {
     $domain = substr($rule, strlen($prefix));
     $ascii = idn_to_ascii($domain, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46);
     $rules[$prefix.strtolower($ascii === false ? $domain : $ascii)] = true;
+}
+
+// shortcut: a fixed floor, far below the ~10,000 real rules; raise it if the list ever shrinks legitimately.
+if (count($rules) < 1000) {
+    fwrite(STDERR, count($rules)." rules read from {$source}: refusing to replace the snapshot with a truncated list\n");
+    exit(1);
 }
 
 ksort($rules);
@@ -59,9 +78,9 @@ declare(strict_types=1);
 
 PHP;
 
-file_put_contents(
-    __DIR__.'/../resources/public_suffix_list.php',
-    $header.'// Fetched: '.gmdate('Y-m-d')."\n\nreturn ".var_export($rules, true).";\n",
-);
+// Write beside the target, then rename: a reader never sees a half-written file.
+$temporary = $target.'.tmp';
+file_put_contents($temporary, $header.'// Fetched: '.gmdate('Y-m-d')."\n\nreturn ".var_export($rules, true).";\n");
+rename($temporary, $target);
 
 echo count($rules)." rules written.\n";

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Qiick\ApiKeys\Laravel;
 
 use Illuminate\Cache\CacheManager;
-use Illuminate\Cache\RateLimiter;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Foundation\Application;
@@ -79,7 +78,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
         // Laravel's RateLimiter on api-keys.cache_store (null: the default store); a product binding wins.
         $this->app->singletonIf(
             AttemptLimiter::class,
-            fn (Application $app): AttemptLimiter => new CacheAttemptLimiter(new RateLimiter($this->attemptCacheStore())),
+            fn (Application $app): AttemptLimiter => new CacheAttemptLimiter($this->attemptCacheStore()),
         );
 
         // The brake products pass to ApiKeyAuthenticator, sized by api-keys.failed_attempts_per_minute.

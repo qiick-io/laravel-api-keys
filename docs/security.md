@@ -35,9 +35,11 @@ holds. The cross-process tests in
   unreachable Memcached or the null store, where Laravel casts `false` to 0.
   `CacheAttemptLimiter::hit()` throws and the authenticator answers
   `503 service_unavailable` instead of admitting the request.
-- `CacheAttemptLimiter::decrement()` only takes back a live counter above zero.
-  Laravel's `decrement()` is an `increment()` by -1 and would otherwise create a
-  counter at -1 with a 60-second window, cutting a day or month bucket short.
+- `CacheAttemptLimiter::decrement()` only takes back a live counter above zero,
+  through the cache repository's `decrement()`. `RateLimiter::decrement()` is an
+  `increment()` by -1: Memcached refuses a negative offset (the refund would be
+  lost), and on an expired counter it would create one at -1 with a 60-second
+  window, cutting a day or month bucket short.
 - Any exception from the store (Redis down, database locked) becomes a
   `503 service_unavailable`, reported to the exception handler. The limits are
   never skipped.

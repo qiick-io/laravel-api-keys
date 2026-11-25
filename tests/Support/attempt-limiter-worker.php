@@ -20,7 +20,6 @@ declare(strict_types=1);
 use Illuminate\Cache\DatabaseStore;
 use Illuminate\Cache\MemcachedConnector;
 use Illuminate\Cache\MemcachedStore;
-use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\RedisStore;
 use Illuminate\Cache\Repository;
 use Illuminate\Container\Container;
@@ -59,7 +58,7 @@ $store = $database !== null ? new DatabaseStore($database, 'cache', 'api-keys-li
     default => throw new InvalidArgumentException('Unknown store '.$storeName),
 };
 
-$limiter = new CacheAttemptLimiter(new RateLimiter(new Repository($store)));
+$limiter = new CacheAttemptLimiter(new Repository($store));
 
 /**
  * The connection the CI databases smoke job starts for `$engine`. SQLite is a

@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Illuminate\Cache\RateLimiter;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
@@ -39,7 +38,7 @@ function limiterCacheStore(string $store): Repository
 
 function cacheLimiter(string $store): CacheAttemptLimiter
 {
-    return new CacheAttemptLimiter(new RateLimiter(limiterCacheStore($store)));
+    return new CacheAttemptLimiter(limiterCacheStore($store));
 }
 
 dataset('in-process stores', ['array', 'file', 'database']);
@@ -135,7 +134,7 @@ it('accepts a one-second window', function (): void {
 
 it('fails closed when the store does not count the attempt', function (): void {
     config(['cache.stores.none' => ['driver' => 'null']]);
-    $limiter = new CacheAttemptLimiter(new RateLimiter(Cache::store('none')));
+    $limiter = new CacheAttemptLimiter(Cache::store('none'));
 
     expect(fn () => $limiter->hit('bucket'))
         ->toThrow(RuntimeException::class, 'The cache store did not count the attempt.');

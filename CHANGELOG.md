@@ -20,8 +20,6 @@ were added; see UPGRADING.md.
   required. The package's Lua and Memcached code is gone. Laravel's
   window-start race is accepted: a burst can admit a few more attempts than
   the limit, at most once per window (docs/security.md).
-- `CacheAttemptLimiter::__construct()` takes an `Illuminate\Cache\RateLimiter`
-  instead of a cache repository.
 - `api-keys:check` prints the active limiter, fails on the null cache store and
   warns on the file store and on the array store outside tests. It no longer
   fails on the database or file store.
@@ -30,16 +28,16 @@ were added; see UPGRADING.md.
 
 - A store that does not count an attempt (an unreachable Memcached, the null
   store) answers `503 service_unavailable` instead of admitting the request.
-- A refund that arrives after its window expired no longer creates a negative
-  counter that cuts a day or month bucket to 60 seconds.
+- Refunds go through the cache's own `decrement()`, and only for a live
+  counter above zero. `RateLimiter::decrement()` is refused by Memcached, and
+  on an expired counter it would create one at -1 that cuts a day or month
+  bucket to 60 seconds.
 
 ### Upgrade notes
 
 - Apps on Redis or Memcached change nothing. Other stores now work instead of
   failing at the first authentication; see UPGRADING.md for the file and
   SQLite caveats.
-- Code that builds `new CacheAttemptLimiter($cache)` by hand now passes
-  `new RateLimiter($cache)`.
 
 ## [0.3.0-beta.1] - 2026-11-25
 

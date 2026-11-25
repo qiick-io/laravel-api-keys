@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Illuminate\Cache\MemcachedConnector;
 use Illuminate\Cache\MemcachedStore;
-use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\RedisStore;
 use Illuminate\Cache\Repository;
 use Illuminate\Container\Container;
@@ -66,7 +65,7 @@ beforeEach(function (): void {
 });
 
 it('counts hits and reports the remaining attempts and the time left in the window', function (?string $storeName): void {
-    $limiter = new CacheAttemptLimiter(new RateLimiter(realLimiterStore((string) $storeName)));
+    $limiter = new CacheAttemptLimiter(realLimiterStore((string) $storeName));
 
     expect($limiter->hit('bucket', 60))->toBe(1)
         ->and($limiter->hit('bucket', 60))->toBe(2)
@@ -75,7 +74,7 @@ it('counts hits and reports the remaining attempts and the time left in the wind
 })->with('limiter stores');
 
 it('never decrements below zero, and ignores a counter that does not exist', function (?string $storeName): void {
-    $limiter = new CacheAttemptLimiter(new RateLimiter(realLimiterStore((string) $storeName)));
+    $limiter = new CacheAttemptLimiter(realLimiterStore((string) $storeName));
 
     $limiter->decrement('bucket');
     expect($limiter->remaining('bucket', 5))->toBe(5);
@@ -94,7 +93,7 @@ it('never decrements below zero, and ignores a counter that does not exist', fun
 })->with('limiter stores');
 
 it('lets a window expire and starts a fresh one', function (?string $storeName): void {
-    $limiter = new CacheAttemptLimiter(new RateLimiter(realLimiterStore((string) $storeName)));
+    $limiter = new CacheAttemptLimiter(realLimiterStore((string) $storeName));
 
     $limiter->hit('bucket', 1);
     usleep(2_100_000);
@@ -106,7 +105,7 @@ it('lets a window expire and starts a fresh one', function (?string $storeName):
 })->with('limiter stores');
 
 it('keeps counting a window longer than 30 days', function (?string $storeName): void {
-    $limiter = new CacheAttemptLimiter(new RateLimiter(realLimiterStore((string) $storeName)));
+    $limiter = new CacheAttemptLimiter(realLimiterStore((string) $storeName));
 
     expect($limiter->hit('bucket', 2_678_400))->toBe(1)
         ->and($limiter->hit('bucket', 2_678_400))->toBe(2)
@@ -114,14 +113,14 @@ it('keeps counting a window longer than 30 days', function (?string $storeName):
 })->with('limiter stores');
 
 it('refuses a window shorter than one second instead of opening the limit', function (?string $storeName): void {
-    $limiter = new CacheAttemptLimiter(new RateLimiter(realLimiterStore((string) $storeName)));
+    $limiter = new CacheAttemptLimiter(realLimiterStore((string) $storeName));
 
     expect(fn () => $limiter->hit('bucket', 0))->toThrow(InvalidArgumentException::class)
         ->and(fn () => $limiter->hit('bucket', -5))->toThrow(InvalidArgumentException::class);
 })->with('limiter stores');
 
 it('opens a 60-second window by default, reports nothing for an unknown bucket and never a negative remainder', function (?string $storeName): void {
-    $limiter = new CacheAttemptLimiter(new RateLimiter(realLimiterStore((string) $storeName)));
+    $limiter = new CacheAttemptLimiter(realLimiterStore((string) $storeName));
 
     expect($limiter->availableIn('bucket'))->toBe(0)
         ->and($limiter->hit('bucket'))->toBe(1)
@@ -132,7 +131,7 @@ it('opens a 60-second window by default, reports nothing for an unknown bucket a
 })->with('limiter stores');
 
 it('keeps counting a window one second past 30 days', function (?string $storeName): void {
-    $limiter = new CacheAttemptLimiter(new RateLimiter(realLimiterStore((string) $storeName)));
+    $limiter = new CacheAttemptLimiter(realLimiterStore((string) $storeName));
 
     expect($limiter->hit('bucket', 2_592_001))->toBe(1)
         ->and($limiter->hit('bucket', 2_592_001))->toBe(2);
@@ -149,7 +148,7 @@ it('fails loudly when memcached cannot be reached', function (): void {
     ));
 
     try {
-        (new CacheAttemptLimiter(new RateLimiter($unreachable)))->hit('bucket');
+        (new CacheAttemptLimiter($unreachable))->hit('bucket');
         $this->fail('expected the unreachable server to be reported');
     } catch (RuntimeException $exception) {
         // Laravel's RateLimiter reads Memcached's `false` as 0: the limiter must not admit that.

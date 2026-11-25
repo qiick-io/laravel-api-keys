@@ -115,7 +115,7 @@ never skipped.
 To count on another store or connection than `api-keys.cache_store`, bind your own:
 
 ```php
-$this->app->singleton(AttemptLimiter::class, fn () => new CacheAttemptLimiter(new RateLimiter(Cache::store('redis'))));
+$this->app->singleton(AttemptLimiter::class, fn () => new CacheAttemptLimiter(Cache::store('redis')));
 ```
 
 ## Expiry notices (claim lease)

@@ -29,8 +29,6 @@ wildcards over the suffixes it names.
 - **Null store:** `api-keys:check` fails, because it keeps no counters.
 - For production, use Redis, Memcached, DynamoDB, or the database store on
   MySQL or PostgreSQL.
-- `new CacheAttemptLimiter($cache)` becomes
-  `new CacheAttemptLimiter(new RateLimiter($cache))`.
 - The limits may admit a few attempts over the limit at the start of a window
   (Laravel's `put()` reset, at most once per window). Earlier releases admitted
   exactly the limit on Redis and Memcached.

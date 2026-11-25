@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Qiick\ApiKeys;
 
 use Illuminate\Cache\RateLimiter;
+use Illuminate\Contracts\Cache\Repository;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
 
 /**
@@ -28,9 +29,13 @@ use Qiick\ApiKeys\Contracts\AttemptLimiter;
  */
 final class CacheAttemptLimiter implements AttemptLimiter
 {
+    private RateLimiter $rateLimiter;
+
     public function __construct(
-        private RateLimiter $rateLimiter,
-    ) {}
+        private Repository $cache,
+    ) {
+        $this->rateLimiter = new RateLimiter($cache);
+    }
 
     /**
      * @throws \InvalidArgumentException when the window is shorter than one second:
@@ -51,14 +56,16 @@ final class CacheAttemptLimiter implements AttemptLimiter
     }
 
     /**
-     * Only a live counter above zero is taken back. Laravel's `decrement()` is an
-     * `increment()` by -1, so on an expired counter it would create one at -1
-     * with a fresh 60-second window, cutting a day or month bucket short.
+     * Only a live counter above zero is taken back, through the cache's own
+     * `decrement()`. `RateLimiter::decrement()` is an `increment()` by -1, which
+     * Memcached refuses (a negative offset) and which, on an expired counter,
+     * would create one at -1 with a fresh 60-second window, cutting a day or
+     * month bucket short.
      */
     public function decrement(string $key): void
     {
         if ($this->rateLimiter->attempts($key) > 0) {
-            $this->rateLimiter->decrement($key);
+            $this->cache->decrement($this->rateLimiter->cleanRateLimiterKey($key));
         }
     }
 

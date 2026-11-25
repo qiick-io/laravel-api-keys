@@ -32,6 +32,13 @@ wildcards over the suffixes it names.
 - The limits may admit a few attempts over the limit at the start of a window
   (Laravel's `put()` reset, at most once per window). Earlier releases admitted
   exactly the limit on Redis and Memcached.
+- `ApiKeyRecord::rawScopes()`, `rawIpAllowlist()` and `rawRestrictions()` must
+  return the columns as stored, for example
+  `return $this->getRawOriginal('ip_allowlist');`, not through the `array`
+  cast. The cast turns JSON that does not decode into null, which reads as "no
+  restriction". The authenticator now decodes the string, and a corrupted value
+  denies the key and is reported. Decoded arrays are still accepted, so nothing
+  breaks if you have not switched yet, but the fail-open case stays until you do.
 
 ## From 0.2.0 to 0.3.0-beta.1
 

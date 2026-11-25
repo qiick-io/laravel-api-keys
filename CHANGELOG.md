@@ -41,6 +41,14 @@ were added; see UPGRADING.md.
   put back to 0, instead of staying at -1 with no expiry and failing every
   later attempt on that bucket.
 
+### Security
+
+- Stored `scopes`, `ip_allowlist` and `restrictions` that are not valid JSON
+  deny the key and are reported, instead of reading as "no restriction" when
+  a product's `array` cast turned them into null (#61, found while adopting
+  the package in signaculum). `ApiKeyRecord::raw*()` now return the columns as
+  stored; see UPGRADING.md.
+
 ### Upgrade notes
 
 - Apps on Redis or Memcached change nothing. Other stores now work instead of

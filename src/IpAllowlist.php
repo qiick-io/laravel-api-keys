@@ -31,10 +31,13 @@ final class IpAllowlist
             return false;
         }
 
+        $entries = [];
         foreach ($allowlist as $entry) {
-            if (! is_string($entry) || str_contains($entry, '%')) {
+            $expanded = $this->expandedEntry($entry);
+            if ($expanded === null) {
                 return false;
             }
+            $entries[] = $expanded;
         }
 
         // An unknown client cannot be inside a non-empty allowlist.
@@ -47,16 +50,30 @@ final class IpAllowlist
             return false;
         }
 
-        $entries = [];
-        foreach ($allowlist as $entry) {
-            $expanded = $this->expandMappedEntry($entry);
-            if ($expanded === null) {
-                return false;
-            }
-            $entries[] = $expanded;
+        return IpUtils::checkIp($client, $entries);
+    }
+
+    /**
+     * Whether one allowlist entry is valid, by the same rules {@see allows()}
+     * applies: an IPv4 or IPv6 address or CIDR, no zone id, a prefix in range
+     * for the family, and IPv4-mapped CIDR only from /96. Forms validate input
+     * with it instead of probing allows().
+     */
+    public function isValidEntry(mixed $entry): bool
+    {
+        return $this->expandedEntry($entry) !== null;
+    }
+
+    /**
+     * The entry in the form IpUtils matches, or null when it is not valid.
+     */
+    private function expandedEntry(mixed $entry): ?string
+    {
+        if (! is_string($entry) || str_contains($entry, '%')) {
+            return null;
         }
 
-        return IpUtils::checkIp($client, $entries);
+        return $this->expandMappedEntry($entry);
     }
 
     /**

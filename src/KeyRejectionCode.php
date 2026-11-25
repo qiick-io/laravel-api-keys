@@ -14,4 +14,5 @@ enum KeyRejectionCode: string
     case IpNotAllowed = 'ip_not_allowed';
     case RequestNotAllowed = 'request_not_allowed';
     case RateLimitExceeded = 'rate_limit_exceeded';
+    case ServiceUnavailable = 'service_unavailable';
 }

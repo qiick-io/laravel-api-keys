@@ -13,6 +13,13 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Added
+
+- `503 service_unavailable` (`ApiKeyRejection::serviceUnavailable()`,
+  `KeyRejectionCode::ServiceUnavailable`) when the attempt store is down: the
+  request still fails closed, but with a typed, retryable refusal instead of a
+  500. The cause goes to the exception reporter.
+
 Public Suffix List: first snapshot (2026-11-24).
 
 ### Fixed

@@ -27,6 +27,41 @@ were added; see UPGRADING.md.
   request still fails closed, but with a typed, retryable refusal instead of a
   500. The cause goes to the exception reporter.
 
+### Changed
+
+- The attempt limiter counts with Laravel's own `RateLimiter` on any cache
+  store (`api-keys.cache_store`, default store when null): Redis is no longer
+  required. The package's Lua and Memcached code is gone. Laravel's
+  window-start race is accepted: a burst can admit a few more attempts than
+  the limit, at most once per window (docs/security.md).
+- `api-keys:check` prints the active limiter, fails on the null cache store and
+  warns on the file store and on the array store outside tests. It no longer
+  fails on the database or file store.
+
+### Fixed
+
+- A store that does not count an attempt (an unreachable Memcached, the null
+  store) answers `503 service_unavailable` instead of admitting the request.
+- Refunds go through the cache's own `decrement()`, and only for a live
+  counter above zero: Memcached refuses `RateLimiter::decrement()` (a negative
+  increment). A counter that expires between that check and the decrement is
+  put back to 0, instead of staying at -1 with no expiry and failing every
+  later attempt on that bucket.
+
+### Security
+
+- Stored `scopes`, `ip_allowlist` and `restrictions` that are not valid JSON
+  deny the key and are reported, instead of reading as "no restriction" when
+  a product's `array` cast turned them into null (#61, found while adopting
+  the package in signaculum). `ApiKeyRecord::raw*()` now return the columns as
+  stored; see UPGRADING.md.
+
+### Upgrade notes
+
+- Apps on Redis or Memcached change nothing. Other stores now work instead of
+  failing at the first authentication; see UPGRADING.md for the file and
+  SQLite caveats.
+
 ## [0.3.0-beta.1] - 2026-11-25
 
 First beta after the red-team and standards reviews: atomic limits, a frozen

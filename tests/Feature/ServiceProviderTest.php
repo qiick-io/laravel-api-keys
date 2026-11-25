@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Qiick\ApiKeys\CacheAttemptLimiter;
 use Qiick\ApiKeys\ConfigLifetimePolicy;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\EnvironmentResolver;
@@ -10,6 +12,7 @@ use Qiick\ApiKeys\Contracts\LifetimePolicy;
 use Qiick\ApiKeys\FailedAttemptLimiter;
 use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\RotationService;
+use Qiick\ApiKeys\Testing\FakeAttemptLimiter;
 use Qiick\ApiKeys\Testing\FixedClock;
 use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\Tests\Support\RegexLegacyTokenMatcher;
@@ -27,6 +30,7 @@ it('merges the package defaults into the api-keys config', function (): void {
         'usage_bypass_throttle_on_ip_change' => true,
         'default_rate_limit_per_minute' => 60,
         'failed_attempts_per_minute' => 20,
+        'cache_store' => null,
         'legacy_matchers' => [],
     ]);
 
@@ -290,21 +294,87 @@ function useDefaultCacheStore(string $store): void
     app()->forgetInstance(AttemptLimiter::class);
 }
 
-it('boots on an unsupported cache store, so artisan and package discovery keep working', function (): void {
-    useDefaultCacheStore('database');
+it('counts attempts with Laravel\'s RateLimiter on the default cache store, or on api-keys.cache_store', function (): void {
+    useDefaultCacheStore('array');
+    $limiter = app(AttemptLimiter::class);
+    $limiter->hit('bucket');
 
-    app()->getProvider(ApiKeysServiceProvider::class)->boot();
+    expect($limiter)->toBeInstanceOf(CacheAttemptLimiter::class)
+        ->and(Cache::store('array')->get('bucket'))->toBe(1);
 
-    expect(fn () => app(AttemptLimiter::class))
-        ->toThrow(InvalidArgumentException::class, 'cannot increment atomically');
+    config(['api-keys.cache_store' => 'file', 'cache.stores.file.path' => sys_get_temp_dir().'/api-keys-cache-store-test']);
+    app()->forgetInstance(AttemptLimiter::class);
+    Cache::store('file')->flush();
+    app(AttemptLimiter::class)->hit('bucket');
+    app(AttemptLimiter::class)->hit('bucket');
+
+    expect(Cache::store('file')->get('bucket'))->toBe(2)
+        ->and(Cache::store('array')->get('bucket'))->toBe(1);
 });
 
-it('reports an unsupported cache store from api-keys:check, for deploy pipelines', function (): void {
+it('fails at boot on an api-keys.cache_store that is not a store name', function (mixed $value): void {
+    config(['api-keys.cache_store' => $value]);
+
+    expect(fn () => app()->getProvider(ApiKeysServiceProvider::class)->boot())
+        ->toThrow(InvalidArgumentException::class, 'api-keys.cache_store must be a cache store name, or null for the default store.');
+
+    useDefaultCacheStore('array');
+
+    expect(fn () => app(AttemptLimiter::class))
+        ->toThrow(InvalidArgumentException::class, 'api-keys.cache_store must be a cache store name, or null for the default store.');
+})->with(['', 0, false]);
+
+it('fails api-keys:check on the null cache store, which would switch the limits off', function (): void {
+    config(['cache.stores.none' => ['driver' => 'null'], 'api-keys.cache_store' => 'none']);
+    app()->forgetInstance(AttemptLimiter::class);
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain('The null cache store keeps no attempt counters')
+        ->assertFailed();
+});
+
+it('warns from api-keys:check on the file cache store, which is not atomic across workers', function (): void {
+    config(['cache.stores.file.path' => sys_get_temp_dir().'/api-keys-cache-store-test']);
+    useDefaultCacheStore('file');
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain('The file cache store does not increment atomically')
+        ->expectsOutputToContain('Attempt limiter: Laravel RateLimiter on the file cache store.')
+        ->expectsOutputToContain('API keys configuration is ready')
+        ->assertSuccessful();
+});
+
+it('warns from api-keys:check on the array cache store outside tests only', function (): void {
+    useDefaultCacheStore('array');
+
+    $this->artisan('api-keys:check')
+        ->doesntExpectOutputToContain('array cache store keeps')
+        ->expectsOutputToContain('Attempt limiter: Laravel RateLimiter on the array cache store.')
+        ->assertSuccessful();
+
+    app()->detectEnvironment(fn (): string => 'production');
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain('The array cache store keeps attempt counters per process')
+        ->assertSuccessful();
+});
+
+it('raises no store warning on an atomic store', function (): void {
     useDefaultCacheStore('database');
 
     $this->artisan('api-keys:check')
-        ->expectsOutputToContain('cannot increment atomically')
-        ->assertFailed();
+        ->doesntExpectOutputToContain('does not increment atomically')
+        ->doesntExpectOutputToContain('keeps attempt counters per process')
+        ->expectsOutputToContain('Attempt limiter: Laravel RateLimiter on the database cache store.')
+        ->assertSuccessful();
+});
+
+it('names an attempt limiter the application bound in api-keys:check', function (): void {
+    app()->instance(AttemptLimiter::class, new FakeAttemptLimiter);
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain('Attempt limiter: '.FakeAttemptLimiter::class.' (bound by the application).')
+        ->assertSuccessful();
 });
 
 it('passes api-keys:check when the limiter and the settings are usable', function (): void {

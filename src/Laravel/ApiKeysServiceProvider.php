@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Qiick\ApiKeys\Laravel;
 
+use Illuminate\Cache\CacheManager;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Foundation\Application;
@@ -74,10 +75,10 @@ final class ApiKeysServiceProvider extends ServiceProvider
         $this->app->singleton(RandomSource::class, RandomBytesSource::class);
         $this->app->singleton(LegacyFormatWarningGate::class, CacheLegacyFormatWarningGate::class);
 
-        // The default cache store must be redis or memcached (array in tests); a product binding wins.
+        // Laravel's RateLimiter on api-keys.cache_store (null: the default store); a product binding wins.
         $this->app->singletonIf(
             AttemptLimiter::class,
-            fn (Application $app): AttemptLimiter => new CacheAttemptLimiter($app->make(CacheRepository::class)),
+            fn (Application $app): AttemptLimiter => new CacheAttemptLimiter($this->attemptCacheStore()),
         );
 
         // The brake products pass to ApiKeyAuthenticator, sized by api-keys.failed_attempts_per_minute.
@@ -175,10 +176,10 @@ final class ApiKeysServiceProvider extends ServiceProvider
     /**
      * Fails fast on settings that would otherwise be read wrong at runtime.
      * Runs at boot and from `api-keys:check`. The cache store behind the
-     * attempt limiter is deliberately not checked here: an unsupported store
-     * must not break every artisan command (package:discover, migrations,
-     * product tests); it fails when the limiter is first resolved, and
-     * `api-keys:check` reports it for deploy pipelines.
+     * attempt limiter is deliberately not resolved here: a store that cannot
+     * connect must not break every artisan command (package:discover,
+     * migrations, product tests); `api-keys:check` resolves it and judges it
+     * for deploy pipelines.
      *
      * @throws \InvalidArgumentException|\RuntimeException
      */
@@ -189,6 +190,32 @@ final class ApiKeysServiceProvider extends ServiceProvider
         $this->assertWholeNumberAtLeast('api-keys.failed_attempts_per_minute', 'API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 0);
         $this->assertWholeNumberAtLeast('api-keys.expiry.claim_lease_seconds', 'API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 1);
         $this->assertWholeNumberAtLeast('api-keys.legacy.warn_days_before', 'API_KEYS_LEGACY_WARN_DAYS_BEFORE', 0);
+        $this->attemptCacheStoreName();
+    }
+
+    /**
+     * The cache store the attempt limiter counts on.
+     *
+     * @throws \InvalidArgumentException when api-keys.cache_store is set but not a store name
+     */
+    private function attemptCacheStore(): CacheRepository
+    {
+        /** @var CacheManager $cache */
+        $cache = $this->app->make('cache');
+
+        return $cache->store($this->attemptCacheStoreName());
+    }
+
+    /**
+     * @throws \InvalidArgumentException when api-keys.cache_store is set but not a store name
+     */
+    private function attemptCacheStoreName(): ?string
+    {
+        $store = $this->config($this->app)->get('api-keys.cache_store');
+
+        return $store === null || (is_string($store) && $store !== '')
+            ? $store
+            : throw new \InvalidArgumentException('api-keys.cache_store must be a cache store name, or null for the default store.');
     }
 
     /**

@@ -1544,3 +1544,73 @@ it('answers a typed 503 when the attempt store is down, and reports the cause', 
             ->and($reported)->toBe(['attempt store down']);
     }
 })->with(['failed-attempt brake', 'per-key limits']);
+
+/**
+ * Laravel's `array` cast reads JSON that does not decode as null, and a null
+ * allowlist or null restrictions mean "no restriction". Products therefore pass
+ * the columns as stored and the authenticator decodes them, failing closed.
+ *
+ * @return array{0: string, 1: list<string>}
+ */
+function authenticateWithStoredColumn(string $column, mixed $stored, string $ip = '203.0.113.10'): array
+{
+    $reported = [];
+    $seed = authenticator();
+    $record = new InMemoryApiKeyRecord(
+        id: '42',
+        keyPrefix: $seed['prefix'],
+        keyHash: $seed['hash'],
+        scopes: $column === 'scopes' ? $stored : '["items:read"]',
+        ipAllowlist: $column === 'ip_allowlist' ? $stored : null,
+        restrictions: $column === 'restrictions' ? $stored : null,
+    );
+    $fixture = authenticator([
+        'record' => $record,
+        'defaultRate' => 0,
+        'exceptionReporter' => function (Throwable $exception) use (&$reported): void {
+            $reported[] = $exception::class.': '.$exception->getMessage();
+        },
+    ]);
+
+    try {
+        $fixture['auth']->authenticate($fixture['token'], keyContext($ip));
+
+        return ['authenticated', $reported];
+    } catch (ApiKeyRejection $rejection) {
+        return [$rejection->errorCode(), $reported];
+    }
+}
+
+it('denies and reports a stored JSON column that does not decode', function (string $column, string $errorCode): void {
+    [$outcome, $reported] = authenticateWithStoredColumn($column, '{"broken');
+
+    expect($outcome)->toBe($errorCode)
+        ->and($reported)->toBe([
+            "UnexpectedValueException: The stored {$column} of API key 00000000-0000-7000-8000-000000000001 is not valid JSON: the key is denied.",
+        ]);
+})->with([
+    'ip allowlist' => ['ip_allowlist', 'ip_not_allowed'],
+    'restrictions' => ['restrictions', 'request_not_allowed'],
+    'scopes' => ['scopes', 'insufficient_scope'],
+]);
+
+it('treats an empty stored string as JSON that does not decode', function (string $column): void {
+    [$outcome, $reported] = authenticateWithStoredColumn($column, '');
+
+    expect($outcome)->not->toBe('authenticated')
+        ->and($reported)->toHaveCount(1);
+})->with(['ip_allowlist', 'restrictions', 'scopes']);
+
+it('decodes stored JSON columns and applies them', function (): void {
+    expect(authenticateWithStoredColumn('ip_allowlist', '["203.0.113.10"]'))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('ip_allowlist', '["203.0.113.10"]', '198.51.100.1'))->toBe(['ip_not_allowed', []])
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"request":{"methods":["POST"]}}'))->toBe(['request_not_allowed', []])
+        ->and(authenticateWithStoredColumn('scopes', '["items:read"]'))->toBe(['authenticated', []]);
+});
+
+it('reads a SQL NULL or a JSON null as no restriction, and decoded arrays as before', function (): void {
+    expect(authenticateWithStoredColumn('ip_allowlist', null))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('ip_allowlist', 'null'))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('restrictions', 'null'))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('ip_allowlist', ['198.51.100.1']))->toBe(['ip_not_allowed', []]);
+});

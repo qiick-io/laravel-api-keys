@@ -16,6 +16,30 @@ authenticating after you upgrade, with no migration. Each CHANGELOG entry says
 whether the list changed; before upgrading, search stored `restrictions` for
 wildcards over the suffixes it names.
 
+## From 0.3.0-beta.1 to 0.3.0-beta.2
+
+- Redis or Memcached is no longer required. Attempts are counted with
+  Laravel's `RateLimiter` on `API_KEYS_CACHE_STORE`, or on the default cache
+  store when that is unset. Any store works, but only some are atomic across
+  workers; docs/security.md has the table.
+- **File store:** `api-keys:check` warns. Parallel workers can exceed the
+  limits, even on one server.
+- **SQLite database store:** set `'transaction_mode' => 'IMMEDIATE'` (PHP 8.4+)
+  and a `busy_timeout` on the connection. Otherwise parallel requests answer 503.
+- **Null store:** `api-keys:check` fails, because it keeps no counters.
+- For production, use Redis, Memcached, DynamoDB, or the database store on
+  MySQL or PostgreSQL.
+- The limits may admit a few attempts over the limit at the start of a window
+  (Laravel's `put()` reset, at most once per window). Earlier releases admitted
+  exactly the limit on Redis and Memcached.
+- `ApiKeyRecord::rawScopes()`, `rawIpAllowlist()` and `rawRestrictions()` must
+  return the columns as stored, for example
+  `return $this->getRawOriginal('ip_allowlist');`, not through the `array`
+  cast. The cast turns JSON that does not decode into null, which reads as "no
+  restriction". The authenticator now decodes the string, and a corrupted value
+  denies the key and is reported. Decoded arrays are still accepted, so nothing
+  breaks if you have not switched yet, but the fail-open case stays until you do.
+
 ## From 0.2.0 to 0.3.0-beta.1
 
 ### Contract breaks

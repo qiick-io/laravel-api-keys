@@ -24,7 +24,7 @@ Part of the qiick fleet. Binding design:
 
 ## Status
 
-Beta `0.3.0-beta.1`. Public APIs may change in any 0.x release; see
+Beta `0.3.0-beta.2`. Public APIs may change in any 0.x release; see
 [UPGRADING.md](./UPGRADING.md). Pin an exact version.
 
 ## Requirements
@@ -35,7 +35,7 @@ Beta `0.3.0-beta.1`. Public APIs may change in any 0.x release; see
 ## Install
 
 ```bash
-composer require qiick/laravel-api-keys:0.3.0-beta.1
+composer require qiick/laravel-api-keys:0.3.0-beta.2
 php artisan vendor:publish --tag=api-keys-config
 ```
 
@@ -86,26 +86,34 @@ refuses it when that count is over the limit. A refused request hands back the
 hits it took on every window, so it counts against none of them. It never
 checks and then counts in two steps.
 
-The package binds `CacheAttemptLimiter` on your default cache store. An unsupported store (Laravel's default is `database`) throws when the limiter is first resolved; boot does not check it, so artisan keeps working. Run `php artisan api-keys:check` in the deploy pipeline: it exits 1 on an unsupported store or invalid settings. It
-accepts only stores that can count atomically across workers and throws
-otherwise:
+The package binds `CacheAttemptLimiter`, which counts with Laravel's own
+`RateLimiter` on the cache store in `api-keys.cache_store`
+(`API_KEYS_CACHE_STORE`; null means the default store). Redis is not
+required: any Laravel cache store works, and the choice is yours. For
+production, use a store that increments atomically across workers: Redis,
+Memcached, DynamoDB, or the database store on MySQL or PostgreSQL.
 
-| Store | How it stays atomic |
-| --- | --- |
-| Redis | One Lua script per call: `INCR` plus `EXPIRE` on the first hit; `DECR` only on an existing counter above zero. |
-| Memcached | Atomic `add` (with the window as TTL) then `increment`; `decrement` is a no-op on a missing key and floors at zero. |
-| Array | Single process only: tests and local development. |
-| Database, file, others | Refused: their `add` / `increment` are not atomic. |
+- **File store:** not atomic. Parallel workers can let more attempts through
+  than the limits, even on one server.
+- **SQLite database store:** needs `transaction_mode => 'IMMEDIATE'` (PHP 8.4+)
+  and a `busy_timeout`. Without them, parallel requests answer 503.
+- **Window-start race:** Laravel resets a counter with `put()` when a window
+  opens. Under load that reset can erase most of the window's count, so a
+  window can admit up to just under twice its limit. It happens at most once
+  per window and is accepted by design.
 
-A decrement that arrives after its window expired finds no counter and does
-nothing, so counts never go negative; if another request already opened the
-next window, the late decrement lands there (at most the refunds in flight
-across the boundary). Windows must last at least one second:
-`RateLimitDecision` and `hit()` refuse shorter ones, which would open the limit
-on Redis. Do **not** adapt Laravel's
-`RateLimiter` instead: its `increment()` recreates counters with a non-atomic
-`put()` and its decrement can leave negative counters, so parallel requests
-overshoot the limit. To use a store other than the default, bind your own:
+[docs/security.md](./docs/security.md) has the decision, the measurements and
+the table of stores.
+
+Boot does not resolve the store, so artisan keeps working. Run
+`php artisan api-keys:check` in the deploy pipeline. It prints the active
+limiter and exits 1 on invalid settings or on the null store, which keeps no
+counters. It warns, without failing, on the file store, and on the array store
+outside tests. If the store fails or does not count an attempt at request
+time, the authenticator answers `503 service_unavailable`: the limits are
+never skipped.
+
+To count on another store or connection than `api-keys.cache_store`, bind your own:
 
 ```php
 $this->app->singleton(AttemptLimiter::class, fn () => new CacheAttemptLimiter(Cache::store('redis')));
@@ -278,7 +286,13 @@ up only if false lockouts outweigh credential-stuffing risk.
 
 Refusals are `ApiKeyRejection`: `401 invalid_token` and `403 insufficient_scope`
 carry RFC 6750 `WWW-Authenticate`; `403 ip_not_allowed`, `403 request_not_allowed`,
-and rate-limit responses do not. Format-miss and hash-miss share the same
+and rate-limit responses do not. Every `insufficient_scope` names the scope the
+request required (`scope="items:write"`, and `scope` in the JSON) when there is
+one. With `api-keys.resource_metadata_url` set to your RFC 9728
+protected-resource metadata (absolute https), both challenges also carry
+`resource_metadata="<url>"`, as the MCP authorization spec asks. When the attempt store (Redis, Memcached) is
+down, the request fails closed as `503 service_unavailable` (the cause goes to
+the exception reporter), never a bare 500. Format-miss and hash-miss share the same
 body/headers. Presented tokens are `#[SensitiveParameter]` and never appear in
 messages, `render()`, `__debugInfo`, JSON, or serialize output.
 

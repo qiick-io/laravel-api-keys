@@ -2,11 +2,16 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
+use Illuminate\Support\Facades\Schema;
 use Qiick\ApiKeys\ApiKeyAuthenticator;
 use Qiick\ApiKeys\AuthorizationDecision;
 use Qiick\ApiKeys\Contracts\ApiKeyRecord;
 use Qiick\ApiKeys\Contracts\ApiKeyRepository;
+use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\UsageSideEffect;
 use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
 use Qiick\ApiKeys\FailedAttemptLimiter;
@@ -24,6 +29,7 @@ use Qiick\ApiKeys\Testing\FixedEnvironment;
 use Qiick\ApiKeys\Testing\FixedRandomSource;
 use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\Tests\Support\RegexLegacyTokenMatcher;
+use Qiick\ApiKeys\Tests\Support\UnavailableAttemptLimiter;
 use Qiick\ApiKeys\TokenCodec;
 use Qiick\ApiKeys\TokenEnvironment;
 use Qiick\ApiKeys\UsageRecorder;
@@ -45,7 +51,7 @@ function makeCodec(?DummyMatchProbe $probe = null): TokenCodec
  * @param  array{
  *     repository?: FakeApiKeyRepository,
  *     authorizer?: FakeKeyAuthorizer,
- *     limiter?: FakeAttemptLimiter,
+ *     limiter?: AttemptLimiter,
  *     failedLimiter?: FailedAttemptLimiter|null,
  *     clock?: FixedClock,
  *     throttle?: int,
@@ -1517,3 +1523,148 @@ it('refuses a rate-limit window shorter than one second', function (int $decaySe
     expect(fn () => new RateLimitDecision('bucket', 10, $decaySeconds))
         ->toThrow(InvalidArgumentException::class, 'decaySeconds');
 })->with([0, -5]);
+
+it('answers a typed 503 when the attempt store is down, and reports the cause', function (string $whichLimiter): void {
+    $reported = [];
+    $down = new UnavailableAttemptLimiter;
+    $fixture = authenticator([
+        'limiter' => $whichLimiter === 'per-key limits' ? $down : new FakeAttemptLimiter,
+        'failedLimiter' => $whichLimiter === 'failed-attempt brake' ? new FailedAttemptLimiter($down) : null,
+        'exceptionReporter' => function (Throwable $exception) use (&$reported): void {
+            $reported[] = $exception->getMessage();
+        },
+    ]);
+
+    try {
+        $fixture['auth']->authenticate($fixture['token'], keyContext());
+        $this->fail('expected service_unavailable');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->getStatusCode())->toBe(503)
+            ->and($rejection->errorCode())->toBe('service_unavailable')
+            ->and($rejection->render()->getData(true))->toBe([
+                'message' => 'API key verification is temporarily unavailable.',
+                'error' => 'service_unavailable',
+            ])
+            ->and($reported)->toBe(['attempt store down']);
+    }
+})->with(['failed-attempt brake', 'per-key limits']);
+
+it('names the required scope when the key holds no usable scopes', function (): void {
+    $seed = authenticator();
+    $fixture = authenticator([
+        'defaultRate' => 0,
+        'record' => new InMemoryApiKeyRecord(id: '42', keyPrefix: $seed['prefix'], keyHash: $seed['hash'], scopes: ['unknown:scope']),
+    ]);
+
+    try {
+        $fixture['auth']->authenticate($fixture['token'], keyContext(), Scope::tryFromString('items:read'));
+        $this->fail('expected insufficient_scope');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->render()->headers->get('WWW-Authenticate'))->toBe('Bearer error="insufficient_scope", scope="items:read"')
+            ->and($rejection->render()->getData(true)['scope'])->toBe('items:read');
+    }
+});
+
+/**
+ * Laravel's `array` cast reads JSON that does not decode as null, and a null
+ * allowlist or null restrictions mean "no restriction". Products therefore pass
+ * the columns as stored and the authenticator decodes them, failing closed.
+ *
+ * @return array{0: string, 1: list<string>}
+ */
+function authenticateWithStoredColumn(string $column, mixed $stored, string $ip = '203.0.113.10'): array
+{
+    $reported = [];
+    $seed = authenticator();
+    $record = new InMemoryApiKeyRecord(
+        id: '42',
+        keyPrefix: $seed['prefix'],
+        keyHash: $seed['hash'],
+        scopes: $column === 'scopes' ? $stored : '["items:read"]',
+        ipAllowlist: $column === 'ip_allowlist' ? $stored : null,
+        restrictions: $column === 'restrictions' ? $stored : null,
+    );
+    $fixture = authenticator([
+        'record' => $record,
+        'defaultRate' => 0,
+        'exceptionReporter' => function (Throwable $exception) use (&$reported): void {
+            $reported[] = $exception::class.': '.$exception->getMessage();
+        },
+    ]);
+
+    try {
+        $fixture['auth']->authenticate($fixture['token'], keyContext($ip));
+
+        return ['authenticated', $reported];
+    } catch (ApiKeyRejection $rejection) {
+        return [$rejection->errorCode(), $reported];
+    }
+}
+
+it('denies and reports a stored JSON column that does not decode', function (string $column, string $errorCode): void {
+    [$outcome, $reported] = authenticateWithStoredColumn($column, '{"broken');
+
+    expect($outcome)->toBe($errorCode)
+        ->and($reported)->toBe([
+            "UnexpectedValueException: The stored {$column} of API key 00000000-0000-7000-8000-000000000001 is not valid JSON: the key is denied.",
+        ]);
+})->with([
+    'ip allowlist' => ['ip_allowlist', 'ip_not_allowed'],
+    'restrictions' => ['restrictions', 'request_not_allowed'],
+    'scopes' => ['scopes', 'insufficient_scope'],
+]);
+
+it('treats an empty stored string as JSON that does not decode', function (string $column): void {
+    [$outcome, $reported] = authenticateWithStoredColumn($column, '');
+
+    expect($outcome)->not->toBe('authenticated')
+        ->and($reported)->toHaveCount(1);
+})->with(['ip_allowlist', 'restrictions', 'scopes']);
+
+it('decodes stored JSON columns and applies them', function (): void {
+    expect(authenticateWithStoredColumn('ip_allowlist', '["203.0.113.10"]'))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('ip_allowlist', '["203.0.113.10"]', '198.51.100.1'))->toBe(['ip_not_allowed', []])
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"request":{"methods":["POST"]}}'))->toBe(['request_not_allowed', []])
+        ->and(authenticateWithStoredColumn('scopes', '["items:read"]'))->toBe(['authenticated', []]);
+});
+
+it('reads a SQL NULL or a JSON null as no restriction, and decoded arrays as before', function (): void {
+    expect(authenticateWithStoredColumn('ip_allowlist', null))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('ip_allowlist', 'null'))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('restrictions', 'null'))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('ip_allowlist', ['198.51.100.1']))->toBe(['ip_not_allowed', []]);
+});
+
+it('denies a corrupted JSON column read from an Eloquent model as the contract asks, which its array cast would hide', function (): void {
+    Schema::create('api_keys', function (Blueprint $table): void {
+        $table->id();
+        $table->json('scopes');
+        $table->json('ip_allowlist')->nullable();
+        $table->json('restrictions')->nullable();
+    });
+    // SQLite stores the text as is; MySQL and PostgreSQL reject it, but a corrupted row can come from elsewhere.
+    DB::table('api_keys')->insert([
+        'scopes' => '["items:read"]',
+        'ip_allowlist' => '["203.0.113.10"',
+        'restrictions' => null,
+    ]);
+    $model = new class extends Model
+    {
+        protected $table = 'api_keys';
+
+        protected function casts(): array
+        {
+            return ['scopes' => 'array', 'ip_allowlist' => 'array', 'restrictions' => 'array'];
+        }
+    };
+    $stored = $model->newQuery()->firstOrFail();
+
+    // The cast the product keeps for its own code reads the corrupted allowlist as "allow every IP".
+    expect($stored->ip_allowlist)->toBeNull();
+
+    // ApiKeyRecord::rawIpAllowlist() as documented: the column as stored.
+    [$outcome, $reported] = authenticateWithStoredColumn('ip_allowlist', $stored->getRawOriginal('ip_allowlist'));
+
+    expect($outcome)->toBe('ip_not_allowed')
+        ->and($reported)->toHaveCount(1);
+});

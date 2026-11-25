@@ -167,3 +167,63 @@ it('translates messages via the translator hook but never the error code', funct
         ApiKeyRejection::setTranslator(null);
     }
 });
+
+afterEach(function (): void {
+    ApiKeyRejection::setResourceMetadataUrl(null);
+});
+
+it('names the required scope when the key holds no usable scopes', function (): void {
+    $response = ApiKeyRejection::noUsableScopes('items:read')->render();
+
+    expect($response->getStatusCode())->toBe(403)
+        ->and($response->headers->get('WWW-Authenticate'))->toBe('Bearer error="insufficient_scope", scope="items:read"')
+        ->and($response->getData(true))->toBe([
+            'message' => 'The API key holds no scopes.',
+            'error' => 'insufficient_scope',
+            'scope' => 'items:read',
+        ]);
+});
+
+it('adds resource_metadata to the invalid_token and insufficient_scope challenges once configured', function (): void {
+    $url = 'https://api.example.com/.well-known/oauth-protected-resource';
+    ApiKeyRejection::setResourceMetadataUrl($url);
+
+    expect(ApiKeyRejection::invalidToken()->render()->headers->get('WWW-Authenticate'))
+        ->toBe('Bearer error="invalid_token", resource_metadata="'.$url.'"')
+        ->and(ApiKeyRejection::insufficientScope('items:write')->render()->headers->get('WWW-Authenticate'))
+        ->toBe('Bearer error="insufficient_scope", scope="items:write", resource_metadata="'.$url.'"')
+        ->and(ApiKeyRejection::noUsableScopes('items:read')->render()->headers->get('WWW-Authenticate'))
+        ->toBe('Bearer error="insufficient_scope", scope="items:read", resource_metadata="'.$url.'"')
+        ->and(ApiKeyRejection::noUsableScopes()->render()->headers->get('WWW-Authenticate'))
+        ->toBe('Bearer error="insufficient_scope", resource_metadata="'.$url.'"')
+        ->and(ApiKeyRejection::ipNotAllowed()->render()->headers->get('WWW-Authenticate'))->toBeNull();
+
+    ApiKeyRejection::setResourceMetadataUrl(null);
+
+    expect(ApiKeyRejection::invalidToken()->render()->headers->get('WWW-Authenticate'))->toBe('Bearer error="invalid_token"');
+});
+
+it('refuses a resource metadata URL that is not an absolute https URL safe in a header', function (string $url): void {
+    expect(fn () => ApiKeyRejection::setResourceMetadataUrl($url))
+        ->toThrow(InvalidArgumentException::class, 'The resource metadata URL must be an absolute https URL.');
+})->with([
+    'http' => ['http://api.example.com/.well-known/oauth-protected-resource'],
+    'relative' => ['/.well-known/oauth-protected-resource'],
+    'quote' => ['https://api.example.com/"x'],
+    'backslash' => ['https://api.example.com/\\x'],
+    'new line' => ["https://api.example.com/\nx"],
+    'empty' => [''],
+]);
+
+it('refuses a scope that could break out of the WWW-Authenticate header', function (string $scope): void {
+    expect(fn () => ApiKeyRejection::insufficientScope($scope))
+        ->toThrow(InvalidArgumentException::class, 'The required scope must be a scope atom such as items:read.')
+        ->and(fn () => ApiKeyRejection::noUsableScopes($scope))
+        ->toThrow(InvalidArgumentException::class, 'The required scope must be a scope atom such as items:read.');
+})->with([
+    'quote' => ['items:read", error="invalid_token'],
+    'CRLF' => ["items:read\r\nSet-Cookie: session=x"],
+    'backslash' => ['items:read\\'],
+    'empty' => [''],
+    'not a scope atom' => ['Items:Read'],
+]);

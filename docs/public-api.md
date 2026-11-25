@@ -134,6 +134,8 @@ documents each one.
 - `usage_bypass_throttle_on_ip_change`
 - `default_rate_limit_per_minute`
 - `failed_attempts_per_minute`
+- `resource_metadata_url`
+- `cache_store`
 - `max_lifetime_days`
 - `expiry.notice_days`
 - `expiry.claim_lease_seconds`
@@ -145,10 +147,12 @@ documents each one.
 - `legacy.warning_notification`
 
 The package also reads `app.timezone` (`api-keys:check` requires UTC) and the
-default cache store (`cache.default`) for the bound `AttemptLimiter`.
+default cache store (`cache.default`) when `cache_store` is null, for the bound
+`AttemptLimiter` (Laravel's `RateLimiter`, see `docs/security.md`).
 
 ## Environment variables
 
+- `API_KEYS_CACHE_STORE`
 - `API_KEYS_DEFAULT_RATE_LIMIT_PER_MINUTE`
 - `API_KEYS_ENVIRONMENT`
 - `API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS`
@@ -158,6 +162,7 @@ default cache store (`cache.default`) for the bound `AttemptLimiter`.
 - `API_KEYS_LEGACY_WARN_DAYS_BEFORE`
 - `API_KEYS_MAX_LIFETIME_DAYS`
 - `API_KEYS_PRODUCT_PREFIX`
+- `API_KEYS_RESOURCE_METADATA_URL`
 - `API_KEYS_ROTATION_GRACE_HOURS`
 - `API_KEYS_ROTATION_MAX_GRACE_HOURS`
 - `API_KEYS_TOKEN_VERSION`
@@ -184,7 +189,7 @@ claim statements for each engine.
 
 Products may define these keys; each refusal falls back to an English message:
 `api_keys.invalid_token`, `api_keys.insufficient_scope`, `api_keys.ip_not_allowed`,
-`api_keys.no_usable_scopes`, `api_keys.rate_limit_exceeded`,
+`api_keys.no_usable_scopes`, `api_keys.rate_limit_exceeded`, `api_keys.service_unavailable`,
 `api_keys.request_not_allowed`.
 
 ## Wire and storage formats
@@ -194,7 +199,8 @@ Products may define these keys; each refusal falls back to an English message:
 - Refusal `error` codes: `KeyRejectionCode` backing values; RFC 6750
   `WWW-Authenticate` on `invalid_token` and `insufficient_scope`; `Retry-After`
   and `X-RateLimit-*` on `rate_limit_exceeded` (`X-RateLimit-Reset` in seconds
-  until the reset, not an epoch timestamp).
+  until the reset, not an epoch timestamp); `503 service_unavailable` when the
+  attempt store is down.
 - Stored values: `CredentialKind`, `RevocationReason`, `TokenEnvironment` and
   `ExpiryRecipient` backing values; the `restrictions` JSON shape version 1
   (`KeyRestrictions::VERSION`).

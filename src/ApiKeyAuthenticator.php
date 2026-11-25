@@ -64,8 +64,10 @@ final class ApiKeyAuthenticator
     ): AuthenticationResult {
         $clientIp = $context->ip;
 
-        if ($this->failedAttemptLimiter?->isBlocked($clientIp) === true) {
-            throw $this->failedAttemptsExceeded($this->failedAttemptLimiter, $clientIp);
+        $brake = $this->failedAttemptLimiter;
+
+        if ($brake !== null && $this->onAttemptStore(fn (): bool => $brake->isBlocked($clientIp))) {
+            throw $this->failedAttemptsExceeded($brake, $clientIp);
         }
 
         try {
@@ -73,8 +75,8 @@ final class ApiKeyAuthenticator
         } catch (ApiKeyRejection $rejection) {
             $isFailedGuess = $rejection->errorCode() === KeyRejectionCode::InvalidToken->value;
 
-            if ($isFailedGuess && $this->failedAttemptLimiter?->countFailure($clientIp) === false) {
-                throw $this->failedAttemptsExceeded($this->failedAttemptLimiter, $clientIp);
+            if ($isFailedGuess && $brake !== null && ! $this->onAttemptStore(fn (): bool => $brake->countFailure($clientIp))) {
+                throw $this->failedAttemptsExceeded($brake, $clientIp);
             }
 
             throw $rejection;
@@ -164,15 +166,21 @@ final class ApiKeyAuthenticator
         }
 
         // The credential is valid. If racing guesses filled the bucket meanwhile, do not reveal it.
-        if ($this->failedAttemptLimiter?->isBlocked($clientIp) === true) {
-            throw $this->failedAttemptsExceeded($this->failedAttemptLimiter, $clientIp);
+        $brake = $this->failedAttemptLimiter;
+
+        if ($brake !== null && $this->onAttemptStore(fn (): bool => $brake->isBlocked($clientIp))) {
+            throw $this->failedAttemptsExceeded($brake, $clientIp);
         }
 
-        if (! $this->ipAllowlist->allows($clientIp, $matched->rawIpAllowlist())) {
+        $ipAllowlist = $this->decodedStoredJson($matched, 'ip_allowlist', $matched->rawIpAllowlist(), ApiKeyRejection::ipNotAllowed(...));
+
+        if (! $this->ipAllowlist->allows($clientIp, $ipAllowlist)) {
             throw ApiKeyRejection::ipNotAllowed();
         }
 
-        $restrictions = KeyRestrictions::parse($matched->rawRestrictions());
+        $restrictions = KeyRestrictions::parse(
+            $this->decodedStoredJson($matched, 'restrictions', $matched->rawRestrictions(), ApiKeyRejection::requestNotAllowed(...)),
+        );
         if ($restrictions->isDenied) {
             throw ApiKeyRejection::requestNotAllowed();
         }
@@ -181,14 +189,17 @@ final class ApiKeyAuthenticator
             throw ApiKeyRejection::requestNotAllowed();
         }
 
-        $expanded = ScopeSet::parseStoredExpanded($matched->rawScopes(), $this->vocabulary);
+        $expanded = ScopeSet::parseStoredExpanded(
+            $this->decodedStoredJson($matched, 'scopes', $matched->rawScopes(), ApiKeyRejection::noUsableScopes(...)),
+            $this->vocabulary,
+        );
         if ($expanded->isEmpty()) {
-            throw ApiKeyRejection::noUsableScopes();
+            throw ApiKeyRejection::noUsableScopes($requiredScope?->value());
         }
 
         $granted = $this->narrowToOwnerCeiling($matched, $expanded, $context);
         if ($granted->isEmpty()) {
-            throw ApiKeyRejection::noUsableScopes();
+            throw ApiKeyRejection::noUsableScopes($requiredScope?->value());
         }
 
         if ($requiredScope !== null && ! $granted->allows($requiredScope)) {
@@ -244,10 +255,33 @@ final class ApiKeyAuthenticator
         );
     }
 
+    /**
+     * Runs a call on the attempt store (Redis, Memcached). A store that is down
+     * fails closed as a typed 503, never a bare 500: the cause is reported, the
+     * client gets a stable `service_unavailable` it can retry.
+     *
+     * @template TResult
+     *
+     * @param  callable(): TResult  $call
+     * @return TResult
+     *
+     * @throws ApiKeyRejection
+     */
+    private function onAttemptStore(callable $call): mixed
+    {
+        try {
+            return $call();
+        } catch (\Throwable $exception) {
+            $this->reportException($exception);
+
+            throw ApiKeyRejection::serviceUnavailable();
+        }
+    }
+
     private function failedAttemptsExceeded(FailedAttemptLimiter $failedAttemptLimiter, ?string $clientIp): ApiKeyRejection
     {
         return ApiKeyRejection::rateLimited(
-            $failedAttemptLimiter->availableIn($clientIp),
+            $this->onAttemptStore(fn (): int => $failedAttemptLimiter->availableIn($clientIp)),
             $failedAttemptLimiter->maxPerMinute(),
             remaining: 0,
         );
@@ -286,6 +320,36 @@ final class ApiKeyAuthenticator
         }
     }
 
+    /**
+     * Products pass the JSON columns as stored ({@see ApiKeyRecord::rawIpAllowlist()}
+     * and its siblings). Laravel's `array` cast would read JSON that does not
+     * decode as null, which means "no restriction" for the allowlist and the
+     * restrictions. A string is decoded here instead; one that does not decode
+     * (an empty string included) denies the key and is reported, so a corrupted
+     * row never authenticates without its limits.
+     *
+     * @param  callable(): ApiKeyRejection  $denial
+     *
+     * @throws ApiKeyRejection when the stored string is not valid JSON
+     */
+    private function decodedStoredJson(ApiKeyRecord $record, string $column, mixed $stored, callable $denial): mixed
+    {
+        if (! is_string($stored)) {
+            return $stored;
+        }
+
+        try {
+            return json_decode($stored, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            $this->reportException(new \UnexpectedValueException(
+                "The stored {$column} of API key {$record->publicId()} is not valid JSON: the key is denied.",
+                previous: $exception,
+            ));
+
+            throw $denial();
+        }
+    }
+
     private function reportException(\Throwable $exception): void
     {
         if (is_callable($this->exceptionReporter)) {
@@ -319,16 +383,16 @@ final class ApiKeyAuthenticator
             }
 
             // Count first, then compare: one atomic step, so concurrent requests cannot all see room.
-            $hits = $this->attemptLimiter->hit($decision->bucketKey, $decision->decaySeconds);
+            $hits = $this->onAttemptStore(fn (): int => $this->attemptLimiter->hit($decision->bucketKey, $decision->decaySeconds));
             $countedBucketKeys[] = $decision->bucketKey;
 
             if ($hits > $decision->maxAttempts) {
                 // A refused request counts against no window, the earlier ones included.
                 foreach ($countedBucketKeys as $countedBucketKey) {
-                    $this->attemptLimiter->decrement($countedBucketKey);
+                    $this->onAttemptStore(fn () => $this->attemptLimiter->decrement($countedBucketKey));
                 }
 
-                $retryAfter = $this->attemptLimiter->availableIn($decision->bucketKey);
+                $retryAfter = $this->onAttemptStore(fn (): int => $this->attemptLimiter->availableIn($decision->bucketKey));
 
                 throw ApiKeyRejection::rateLimited(
                     $retryAfter,

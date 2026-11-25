@@ -134,7 +134,8 @@ jobs:
           - mysql
           - mariadb
           - pgsql
-          # CacheAttemptLimiter races on the stores it supports.
+          # CacheAttemptLimiter races on Redis and Memcached; the four engines
+          # above race it on Laravel's database cache store too.
           - redis
           - memcached
     steps:
@@ -178,7 +179,7 @@ jobs:
             -e MARIADB_ROOT_PASSWORD=password \
             -e MARIADB_DATABASE=api_keys_claim \
             -p 3307:3306 \
-            mariadb:11
+            mariadb:11.4
           for attempt in $(seq 1 30); do
             if docker exec claim-mariadb mariadb-admin ping -h 127.0.0.1 -uroot -ppassword --silent; then
               exit 0
@@ -195,7 +196,7 @@ jobs:
             -e POSTGRES_PASSWORD=password \
             -e POSTGRES_DB=api_keys_claim \
             -p 5432:5432 \
-            postgres:16
+            postgres:17
           for attempt in $(seq 1 30); do
             if docker exec claim-pgsql pg_isready -U postgres; then
               exit 0
@@ -236,6 +237,13 @@ jobs:
         env:
           API_KEYS_LIMITER_STORE: ${{ matrix.engine }}
         run: vendor/bin/pest --filter='CacheAttemptLimiter(Concurrency|Store)'
+
+      - name: Attempt limiter races on the database cache store (${{ matrix.engine }})
+        if: matrix.engine != 'redis' && matrix.engine != 'memcached'
+        env:
+          API_KEYS_LIMITER_STORE: ${{ matrix.engine }}
+          API_KEYS_CLAIM_PASSWORD: password
+        run: vendor/bin/pest --filter=CacheAttemptLimiterConcurrency
 
       - name: Expiry notice claim CAS (${{ matrix.engine }})
         if: matrix.engine != 'redis' && matrix.engine != 'memcached'
@@ -302,10 +310,11 @@ jobs:
             exit 1
           fi
 
-  # Prefer SHA pin when the reusable workflow is addressable; app-ui publishes
-  # drift-check under tags, so @v0.11.0 matches qiick-standards.json "ref".
+  # Pinned by commit like every action (1.0 checklist item 7); keep it on the
+  # tag qiick-standards.json "ref" names.
   standards:
-    uses: qiick-io/app-ui/.github/workflows/drift-check.yml@v0.11.0
+    # qiick-io/app-ui v0.11.0
+    uses: qiick-io/app-ui/.github/workflows/drift-check.yml@cbb1843eb1f50ef5a38e7e7bdf9b8dbec7b48bed
     with:
       standards: true
       registry: false

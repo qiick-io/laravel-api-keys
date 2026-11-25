@@ -6,6 +6,7 @@ namespace Qiick\ApiKeys\Exceptions;
 
 use Illuminate\Http\JsonResponse;
 use Qiick\ApiKeys\KeyRejectionCode;
+use Qiick\ApiKeys\Scope;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /**
@@ -24,6 +25,13 @@ final class ApiKeyRejection extends HttpException
      * @var (callable(string, array<string, string>): string)|null
      */
     private static $translator = null;
+
+    /**
+     * RFC 9728 protected-resource metadata URL, added to the `invalid_token` and
+     * `insufficient_scope` challenges so OAuth / MCP clients can discover how to
+     * get a token with the right scopes. Null leaves it out.
+     */
+    private static ?string $resourceMetadataUrl = null;
 
     /**
      * @param  (callable(string, array<string, string>): string)|null  $translator
@@ -46,6 +54,25 @@ final class ApiKeyRejection extends HttpException
         parent::__construct($statusCode, $message, null, $headers);
     }
 
+    /**
+     * @throws \InvalidArgumentException when the URL is not an absolute https URL that
+     *                                   is safe inside a quoted header parameter
+     */
+    public static function setResourceMetadataUrl(?string $url): void
+    {
+        $isSafe = $url === null || (
+            str_starts_with($url, 'https://')
+            && filter_var($url, FILTER_VALIDATE_URL) !== false
+            && strpbrk($url, "\"\\\r\n") === false
+        );
+
+        if (! $isSafe) {
+            throw new \InvalidArgumentException('The resource metadata URL must be an absolute https URL.');
+        }
+
+        self::$resourceMetadataUrl = $url;
+    }
+
     public static function invalidToken(?string $message = null): self
     {
         return new self(
@@ -53,12 +80,19 @@ final class ApiKeyRejection extends HttpException
             $message ?? self::translate('api_keys.invalid_token', 'The API key is not valid.'),
             KeyRejectionCode::InvalidToken,
             null,
-            ['WWW-Authenticate' => 'Bearer error="invalid_token"'],
+            ['WWW-Authenticate' => self::challenge('invalid_token')],
         );
     }
 
+    /**
+     * @throws \InvalidArgumentException when `$scope` is not a scope atom: it goes
+     *                                   into the `WWW-Authenticate` header verbatim,
+     *                                   so a quote or CRLF would inject into it
+     */
     public static function insufficientScope(string $scope): self
     {
+        self::assertScopeAtom($scope);
+
         return new self(
             403,
             self::translate(
@@ -68,18 +102,28 @@ final class ApiKeyRejection extends HttpException
             ),
             KeyRejectionCode::InsufficientScope,
             $scope,
-            ['WWW-Authenticate' => 'Bearer error="insufficient_scope", scope="'.$scope.'"'],
+            ['WWW-Authenticate' => self::challenge('insufficient_scope', $scope)],
         );
     }
 
-    public static function noUsableScopes(): self
+    /**
+     * The key holds no usable scope. When the request required one, it is named
+     * like in {@see insufficientScope()}, so the client knows what to ask for.
+     *
+     * @throws \InvalidArgumentException when `$requiredScope` is not a scope atom
+     */
+    public static function noUsableScopes(?string $requiredScope = null): self
     {
+        if ($requiredScope !== null) {
+            self::assertScopeAtom($requiredScope);
+        }
+
         return new self(
             403,
             self::translate('api_keys.no_usable_scopes', 'The API key holds no scopes.'),
             KeyRejectionCode::InsufficientScope,
-            null,
-            ['WWW-Authenticate' => 'Bearer error="insufficient_scope"'],
+            $requiredScope,
+            ['WWW-Authenticate' => self::challenge('insufficient_scope', $requiredScope)],
         );
     }
 
@@ -106,6 +150,19 @@ final class ApiKeyRejection extends HttpException
                 'API key is not allowed for this request.',
             ),
             KeyRejectionCode::RequestNotAllowed,
+        );
+    }
+
+    /**
+     * 503 when the attempt store behind the rate limits is down: the request
+     * fails closed, and the client may retry.
+     */
+    public static function serviceUnavailable(): self
+    {
+        return new self(
+            503,
+            self::translate('api_keys.service_unavailable', 'API key verification is temporarily unavailable.'),
+            KeyRejectionCode::ServiceUnavailable,
         );
     }
 
@@ -173,6 +230,39 @@ final class ApiKeyRejection extends HttpException
             'message' => $this->getMessage(),
             'scope' => $this->requiredScope,
         ];
+    }
+
+    /**
+     * A scope goes into the `WWW-Authenticate` header verbatim, so only a scope atom
+     * ({@see Scope::PATTERN}) may: a quote or CRLF would inject into the header.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function assertScopeAtom(string $scope): void
+    {
+        if (Scope::tryFromString($scope) === null) {
+            throw new \InvalidArgumentException('The required scope must be a scope atom such as items:read.');
+        }
+    }
+
+    /**
+     * RFC 6750 §3 challenge: `Bearer error="…"[, scope="…"][, resource_metadata="…"]`.
+     * Scopes are checked by assertScopeAtom() and the URL on the way in, so
+     * neither can break out of its quotes.
+     */
+    private static function challenge(string $error, ?string $scope = null): string
+    {
+        $challenge = 'Bearer error="'.$error.'"';
+
+        if ($scope !== null) {
+            $challenge .= ', scope="'.$scope.'"';
+        }
+
+        if (self::$resourceMetadataUrl !== null) {
+            $challenge .= ', resource_metadata="'.self::$resourceMetadataUrl.'"';
+        }
+
+        return $challenge;
     }
 
     /**

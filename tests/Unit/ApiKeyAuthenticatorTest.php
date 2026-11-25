@@ -1668,3 +1668,20 @@ it('denies a corrupted JSON column read from an Eloquent model as the contract a
     expect($outcome)->toBe('ip_not_allowed')
         ->and($reported)->toHaveCount(1);
 });
+
+it('names the required scope when the stored scopes do not decode', function (): void {
+    $seed = authenticator();
+    $fixture = authenticator([
+        'defaultRate' => 0,
+        'record' => new InMemoryApiKeyRecord(id: '42', keyPrefix: $seed['prefix'], keyHash: $seed['hash'], scopes: '{"broken'),
+        'exceptionReporter' => function (Throwable $exception): void {},
+    ]);
+
+    try {
+        $fixture['auth']->authenticate($fixture['token'], keyContext(), Scope::tryFromString('items:read'));
+        $this->fail('expected insufficient_scope');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->render()->headers->get('WWW-Authenticate'))->toBe('Bearer error="insufficient_scope", scope="items:read"')
+            ->and($rejection->render()->getData(true)['scope'])->toBe('items:read');
+    }
+});

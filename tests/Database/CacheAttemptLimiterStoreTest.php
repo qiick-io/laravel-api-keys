@@ -9,6 +9,7 @@ use Illuminate\Cache\Repository;
 use Illuminate\Container\Container;
 use Illuminate\Redis\RedisManager;
 use Qiick\ApiKeys\CacheAttemptLimiter;
+use Qiick\ApiKeys\Tests\Support\RacedRefundCacheRepository;
 
 mutates(CacheAttemptLimiter::class);
 
@@ -137,6 +138,18 @@ it('keeps counting a window one second past 30 days', function (?string $storeNa
         ->and($limiter->hit('bucket', 2_592_001))->toBe(2);
 })->with('limiter stores');
 
+it('keeps counting after a refund races another worker below zero', function (?string $storeName, string $race): void {
+    $limiter = new CacheAttemptLimiter(new RacedRefundCacheRepository(realLimiterStore((string) $storeName), $race));
+
+    $limiter->hit('bucket', 60);
+    $limiter->decrement('bucket');
+
+    // Redis would keep -1 with no expiry, and every later hit would count 0 and fail closed.
+    expect($limiter->hit('bucket', 60))->toBe(1)
+        ->and($limiter->hit('bucket', 60))->toBe(2)
+        ->and($limiter->availableIn('bucket'))->toBeGreaterThan(55)->toBeLessThanOrEqual(60);
+})->with('limiter stores')->with(['expired', 'concurrent']);
+
 it('fails loudly when memcached cannot be reached', function (): void {
     if (! in_array('memcached', limiterStoresUnderTest(), true)) {
         $this->markTestSkipped('Runs with the memcached store.');
@@ -151,8 +164,7 @@ it('fails loudly when memcached cannot be reached', function (): void {
         (new CacheAttemptLimiter($unreachable))->hit('bucket');
         $this->fail('expected the unreachable server to be reported');
     } catch (RuntimeException $exception) {
-        // The prefix, then memcached's own reason.
-        expect($exception->getMessage())->toStartWith('Memcached could not count an attempt: ')
-            ->and(strlen($exception->getMessage()))->toBeGreaterThan(strlen('Memcached could not count an attempt: '));
+        // Laravel's RateLimiter reads Memcached's `false` as 0: the limiter must not admit that.
+        expect($exception->getMessage())->toBe('The cache store did not count the attempt.');
     }
 });

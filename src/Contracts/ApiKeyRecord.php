@@ -54,12 +54,26 @@ interface ApiKeyRecord
      */
     public function metadata(): array;
 
+    /**
+     * The `scopes` column as stored: the JSON string (or null), for example
+     * `$this->getRawOriginal('scopes')`. Never read it through Laravel's `array`
+     * or `json` cast: those turn JSON that does not decode into null. The
+     * authenticator decodes it and denies the key, with a report, when it does not
+     * decode. A decoded array is still accepted.
+     */
     public function rawScopes(): mixed;
 
+    /**
+     * The `ip_allowlist` column as stored (see {@see rawScopes()}). Null means
+     * "allow every IP", so a cast that turns a corrupted value into null would
+     * fail open.
+     */
     public function rawIpAllowlist(): mixed;
 
     /**
-     * Raw `restrictions` JSON / array (parsed by {@see KeyRestrictions}).
+     * The `restrictions` column as stored (see {@see rawScopes()}), parsed by
+     * {@see KeyRestrictions}. Null means "unrestricted", so a cast that turns a
+     * corrupted value into null would fail open.
      */
     public function rawRestrictions(): mixed;
 

@@ -39,6 +39,16 @@ wildcards over the suffixes it names.
   restriction". The authenticator now decodes the string, and a corrupted value
   denies the key and is reported. Decoded arrays are still accepted, so nothing
   breaks if you have not switched yet, but the fail-open case stays until you do.
+- `ApiKeyRejection::insufficientScope()` and `noUsableScopes()` throw
+  `InvalidArgumentException` for a scope that is not a scope atom
+  (`Scope::PATTERN`, such as `items:read`). Pass `Scope::value()`, never raw
+  user input.
+- `SystemClock` now follows Laravel's clock (`Date::now()`). Tests that freeze or
+  travel time move the package's expiry, grace and lease checks too. A
+  product `Clock` binding still wins.
+- Optional: set `API_KEYS_RESOURCE_METADATA_URL` to your RFC 9728
+  protected-resource metadata (absolute https) so the `invalid_token` and
+  `insufficient_scope` challenges point MCP / OAuth clients to it.
 
 ## From 0.2.0 to 0.3.0-beta.1
 

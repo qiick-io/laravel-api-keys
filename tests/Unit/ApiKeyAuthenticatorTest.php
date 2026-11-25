@@ -1688,6 +1688,7 @@ it('denies stored restrictions without version 1', function (string $stored): vo
     expect(authenticateWithStoredColumn('restrictions', $stored)[0])->toBe('request_not_allowed');
 })->with(['{}', '[]', '{"request":{}}']);
 
-it('still reads an empty JSON list as an open allowlist', function (): void {
-    expect(authenticateWithStoredColumn('ip_allowlist', '[]'))->toBe(['authenticated', []]);
+it('still reads an empty JSON list as an open allowlist, and a version-1 object as restrictions', function (): void {
+    expect(authenticateWithStoredColumn('ip_allowlist', '[]'))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1}'))->toBe(['authenticated', []]);
 });

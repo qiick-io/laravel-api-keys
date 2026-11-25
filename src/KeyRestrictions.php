@@ -49,10 +49,6 @@ final readonly class KeyRestrictions
         }
 
         if (is_string($raw)) {
-            if ($raw === '') {
-                return self::unrestricted();
-            }
-
             try {
                 // Equivalent mutant: a document deeper than the schema is denied by the shape checks
                 // anyway; the depth only caps decoder work on stored data.
@@ -68,10 +64,7 @@ final readonly class KeyRestrictions
             return self::denied();
         }
 
-        if ($raw === []) {
-            return self::unrestricted();
-        }
-
+        // An empty document (`{}`, `[]`, `''`) has no `v`: only null means unrestricted.
         if (! array_key_exists('v', $raw)) {
             return self::denied();
         }

@@ -13,6 +13,13 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Security
+
+- A stored `scopes` or `ip_allowlist` that is a JSON object instead of a list
+  (`{}` included) denies the key and is reported: decoded to an array, `{}`
+  read as an open allowlist. `restrictions` without `v` = 1 (`{}`, `[]`, `''`)
+  denies instead of reading as unrestricted; only null is unrestricted (#72).
+
 ## [0.3.0-beta.2] - 2026-11-25
 
 Second beta: Redis is no longer required, and the fixes found while adopting

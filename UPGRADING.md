@@ -16,6 +16,14 @@ authenticating after you upgrade, with no migration. Each CHANGELOG entry says
 whether the list changed; before upgrading, search stored `restrictions` for
 wildcards over the suffixes it names.
 
+## From 0.3.0-beta.2 to 0.3.0-beta.3
+
+- `KeyRestrictions::parse()` denies `[]`, `''` and any document without
+  `v` = 1; only null is unrestricted. Store null, not `{}` or `[]`, for a key
+  without restrictions, or those keys stop authenticating (fail closed).
+- A stored `scopes` or `ip_allowlist` that is a JSON object instead of a list
+  denies the key and is reported.
+
 ## From 0.3.0-beta.1 to 0.3.0-beta.2
 
 - Redis or Memcached is no longer required. Attempts are counted with

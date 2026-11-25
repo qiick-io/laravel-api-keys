@@ -1591,7 +1591,7 @@ it('denies and reports a stored JSON column that does not decode', function (str
 })->with([
     'ip allowlist' => ['ip_allowlist', 'ip_not_allowed'],
     'restrictions' => ['restrictions', 'request_not_allowed'],
-    'scopes' => ['scopes', 'no_usable_scopes'],
+    'scopes' => ['scopes', 'insufficient_scope'],
 ]);
 
 it('treats an empty stored string as JSON that does not decode', function (string $column): void {

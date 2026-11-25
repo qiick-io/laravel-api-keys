@@ -172,11 +172,15 @@ final class ApiKeyAuthenticator
             throw $this->failedAttemptsExceeded($brake, $clientIp);
         }
 
-        if (! $this->ipAllowlist->allows($clientIp, $matched->rawIpAllowlist())) {
+        $ipAllowlist = $this->decodedStoredJson($matched, 'ip_allowlist', $matched->rawIpAllowlist(), ApiKeyRejection::ipNotAllowed(...));
+
+        if (! $this->ipAllowlist->allows($clientIp, $ipAllowlist)) {
             throw ApiKeyRejection::ipNotAllowed();
         }
 
-        $restrictions = KeyRestrictions::parse($matched->rawRestrictions());
+        $restrictions = KeyRestrictions::parse(
+            $this->decodedStoredJson($matched, 'restrictions', $matched->rawRestrictions(), ApiKeyRejection::requestNotAllowed(...)),
+        );
         if ($restrictions->isDenied) {
             throw ApiKeyRejection::requestNotAllowed();
         }
@@ -185,7 +189,10 @@ final class ApiKeyAuthenticator
             throw ApiKeyRejection::requestNotAllowed();
         }
 
-        $expanded = ScopeSet::parseStoredExpanded($matched->rawScopes(), $this->vocabulary);
+        $expanded = ScopeSet::parseStoredExpanded(
+            $this->decodedStoredJson($matched, 'scopes', $matched->rawScopes(), ApiKeyRejection::noUsableScopes(...)),
+            $this->vocabulary,
+        );
         if ($expanded->isEmpty()) {
             throw ApiKeyRejection::noUsableScopes();
         }
@@ -310,6 +317,36 @@ final class ApiKeyAuthenticator
             $this->usageSideEffect?->afterRecorded($record, $ip, $userAgent, $wasFirstUse);
         } catch (\Throwable $exception) {
             $this->reportException($exception);
+        }
+    }
+
+    /**
+     * Products pass the JSON columns as stored ({@see ApiKeyRecord::rawIpAllowlist()}
+     * and its siblings). Laravel's `array` cast would read JSON that does not
+     * decode as null, which means "no restriction" for the allowlist and the
+     * restrictions. A string is decoded here instead; one that does not decode
+     * (an empty string included) denies the key and is reported, so a corrupted
+     * row never authenticates without its limits.
+     *
+     * @param  callable(): ApiKeyRejection  $denial
+     *
+     * @throws ApiKeyRejection when the stored string is not valid JSON
+     */
+    private function decodedStoredJson(ApiKeyRecord $record, string $column, mixed $stored, callable $denial): mixed
+    {
+        if (! is_string($stored)) {
+            return $stored;
+        }
+
+        try {
+            return json_decode($stored, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            $this->reportException(new \UnexpectedValueException(
+                "The stored {$column} of API key {$record->publicId()} is not valid JSON: the key is denied.",
+                previous: $exception,
+            ));
+
+            throw $denial();
         }
     }
 

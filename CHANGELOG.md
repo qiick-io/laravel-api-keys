@@ -13,6 +13,14 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Security
+
+- Stored `scopes`, `ip_allowlist` and `restrictions` that are not valid JSON
+  deny the key and are reported, instead of reading as "no restriction" when
+  a product's `array` cast turned them into null (#61, found while adopting
+  the package in signaculum). `ApiKeyRecord::raw*()` now return the columns as
+  stored; see UPGRADING.md.
+
 ### Added
 
 - `503 service_unavailable` (`ApiKeyRejection::serviceUnavailable()`,

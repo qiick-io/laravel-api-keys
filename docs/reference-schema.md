@@ -65,6 +65,19 @@ keep the owner column nullable until the principals programme lands.
 - **`revoked_reason`:** `user`, `admin`, `owner`, `exposure`, `policy`, `reuse`,
   `reconsent`, `system` (superset of mcp-oauth `RevocationReason`).
 
+### Reading the JSON columns
+
+Hand `scopes`, `ip_allowlist` and `restrictions` to the package as stored:
+`ApiKeyRecord::rawScopes()` and its siblings return
+`$this->getRawOriginal('<column>')`. Do not read them through Laravel's
+`array` or `json` cast for the package: those casts turn JSON that does not
+decode into null, and a null allowlist or null restrictions mean "no
+restriction". The authenticator decodes the stored string itself. A value
+that does not decode (an empty string included) denies the key
+(`ip_not_allowed`, `request_not_allowed` or `insufficient_scope`) and is
+reported to the exception handler. SQL `NULL` and JSON `null` still mean no
+restriction. The model can keep the cast for its own UI code.
+
 ### Not in this schema
 
 `collection_slugs`, `role_id`, `read_only`, tenancy columns, `owner_kind`,

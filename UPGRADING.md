@@ -29,9 +29,9 @@ wildcards over the suffixes it names.
 - **Null store:** `api-keys:check` fails, because it keeps no counters.
 - For production, use Redis, Memcached, DynamoDB, or the database store on
   MySQL or PostgreSQL.
-- The limits may admit a few attempts over the limit at the start of a window
-  (Laravel's `put()` reset, at most once per window). Earlier releases admitted
-  exactly the limit on Redis and Memcached.
+- A window may admit up to just under twice its limit under load (Laravel's
+  `put()` reset at window start, at most once per window). Earlier releases
+  admitted exactly the limit on Redis and Memcached.
 - `ApiKeyRecord::rawScopes()`, `rawIpAllowlist()` and `rawRestrictions()` must
   return the columns as stored, for example
   `return $this->getRawOriginal('ip_allowlist');`, not through the `array`

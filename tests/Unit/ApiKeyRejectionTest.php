@@ -214,3 +214,16 @@ it('refuses a resource metadata URL that is not an absolute https URL safe in a 
     'new line' => ["https://api.example.com/\nx"],
     'empty' => [''],
 ]);
+
+it('refuses a scope that could break out of the WWW-Authenticate header', function (string $scope): void {
+    expect(fn () => ApiKeyRejection::insufficientScope($scope))
+        ->toThrow(InvalidArgumentException::class, 'The required scope must be a scope atom such as items:read.')
+        ->and(fn () => ApiKeyRejection::noUsableScopes($scope))
+        ->toThrow(InvalidArgumentException::class, 'The required scope must be a scope atom such as items:read.');
+})->with([
+    'quote' => ['items:read", error="invalid_token'],
+    'CRLF' => ["items:read\r\nSet-Cookie: session=x"],
+    'backslash' => ['items:read\\'],
+    'empty' => [''],
+    'not a scope atom' => ['Items:Read'],
+]);

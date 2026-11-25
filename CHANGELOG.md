@@ -39,8 +39,8 @@ were added; see UPGRADING.md.
 - The attempt limiter counts with Laravel's own `RateLimiter` on any cache
   store (`api-keys.cache_store`, default store when null): Redis is no longer
   required. The package's Lua and Memcached code is gone. Laravel's
-  window-start race is accepted: a burst can admit a few more attempts than
-  the limit, at most once per window (docs/security.md).
+  window-start race is accepted: one reset per window can let a window admit
+  up to just under twice its limit (docs/security.md).
 - `api-keys:check` prints the active limiter, fails on the null cache store and
   warns on the file store and on the array store outside tests. It no longer
   fails on the database or file store.
@@ -62,6 +62,9 @@ were added; see UPGRADING.md.
   a product's `array` cast turned them into null (#61, found while adopting
   the package in signaculum). `ApiKeyRecord::raw*()` now return the columns as
   stored; see UPGRADING.md.
+- `ApiKeyRejection::insufficientScope()` and `noUsableScopes()` refuse a scope
+  that is not a scope atom with `InvalidArgumentException`: it goes into `WWW-Authenticate`
+  verbatim, so a product passing quotes or CRLF could inject into the header.
 
 ### Upgrade notes
 

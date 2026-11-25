@@ -80,18 +80,21 @@ function admittedRacers(array $operations, int $maxAttempts): int
 }
 
 /*
- * Laravel's RateLimiter resets a counter with put() when a window opens, so the
- * increments that land in that instant can be lost and a burst can admit a few
- * more than the limit (accepted in docs/security.md). The bounds below hold
- * whatever the timing: at least the limit, less than twice the limit, at most one
- * such reset per window (a second burst admits nothing), and the next attempt
- * after the burst is refused.
+ * Laravel's RateLimiter resets a counter with put() when a window opens: the
+ * worker whose increment returned 1 without having created the key writes 1
+ * back. On a loaded machine that put() can land after the rest of the burst has
+ * counted, so the reset can erase most of the window's count, but it happens at
+ * most once per window (accepted in docs/security.md). Every worker of a burst
+ * has exited before the next burst starts, so after a second burst in the same
+ * window the reset is over. The bounds below hold whatever the timing: the two
+ * bursts together admit at least the limit and less than twice the limit, and
+ * the next attempt is refused.
  */
-it('admits the limit, give or take the accepted window-start race, when 50 guesses from one IP race', function (): void {
-    $admitted = admittedRacers(array_fill(0, 50, ['guess', '203.0.113.10']), 10);
+it('admits less than twice the limit per window when guesses from one IP race', function (): void {
+    $admitted = admittedRacers(array_fill(0, 50, ['guess', '203.0.113.10']), 10)
+        + admittedRacers(array_fill(0, 50, ['guess', '203.0.113.10']), 10);
 
     expect($admitted)->toBeGreaterThanOrEqual(10)->toBeLessThan(20)
-        ->and(admittedRacers(array_fill(0, 50, ['guess', '203.0.113.10']), 10))->toBe(0)
         ->and(raceLimiterWorkers([['guess', '203.0.113.10']], 10)[0])->toBe('0')
         ->and((int) limiterWorker('count', 'api-key-failures:v4:203.0.113.10'))->toBeGreaterThanOrEqual(10);
 });
@@ -113,7 +116,9 @@ it('caps visible guesses when valid requests from the same IP race them', functi
         }
     }
 
-    expect($admittedGuesses)->toBeGreaterThan(0)->toBeLessThan(20)
+    $admittedGuesses += admittedRacers(array_fill(0, 50, ['guess', '203.0.113.10']), 10);
+
+    expect($admittedGuesses)->toBeGreaterThanOrEqual(10)->toBeLessThan(20)
         ->and(raceLimiterWorkers([['guess', '203.0.113.10']], 10)[0])->toBe('0')
         ->and((int) limiterWorker('count', 'api-key-failures:v4:203.0.113.10'))->toBeGreaterThanOrEqual(10);
 });
@@ -124,11 +129,11 @@ it('admits every valid request from one IP however many are verified at once', f
     expect(array_sum(array_map(intval(...), $outcomes)))->toBe(30);
 });
 
-it('admits the limit, give or take the accepted window-start race, on a per-key bucket', function (): void {
-    $admitted = admittedRacers(array_fill(0, 50, ['hit', 'race:key']), 10);
+it('admits less than twice the limit per window on a per-key bucket', function (): void {
+    $admitted = admittedRacers(array_fill(0, 50, ['hit', 'race:key']), 10)
+        + admittedRacers(array_fill(0, 50, ['hit', 'race:key']), 10);
 
     expect($admitted)->toBeGreaterThanOrEqual(10)->toBeLessThan(20)
-        ->and(admittedRacers(array_fill(0, 50, ['hit', 'race:key']), 10))->toBe(0)
         ->and(raceLimiterWorkers([['hit', 'race:key']], 10)[0])->toBe('0')
         ->and((int) limiterWorker('count', 'race:key'))->toBeGreaterThanOrEqual(10);
 });

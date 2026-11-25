@@ -12,20 +12,22 @@ Memcached.
 
 `RateLimiter::increment()` creates a counter with `add()`, increments it, and
 when the increment returns 1 without having created the key, it resets the
-counter with `put()`. Increments by other workers in that instant are lost,
-so a burst at the start of a window can admit a few more attempts than the
-limit. It happens at most once per window, and the lost increments are only
-those in flight during that gap: with 50 parallel guesses against a limit of
-10, local runs admitted between 10 and 13.
+counter with `put()`. That `put()` runs after the increment, and on a loaded
+server it can land after the rest of the burst has counted, so the reset can
+erase most of the window's count: the next attempts are admitted again until
+the counter refills. It happens at most once per window, so a window admits
+fewer than twice its limit. With 50 parallel guesses against a limit of 10,
+local runs admitted between 10 and 13 per burst, and a slow CI runner admitted
+19 over two bursts.
 
 Each extra attempt is one more guess at a key with at least 128 bits of
 entropy, so the brake's purpose (slow down guessing, refuse floods) still
 holds. The cross-process tests in
 `tests/Database/CacheAttemptLimiterConcurrencyTest.php` hold every store to:
 
-- at least the limit and less than twice the limit admitted per burst;
-- at most one reset per window: a second burst in the same window admits nothing;
-- the next attempt after a burst is always refused.
+- two bursts in the same window admit, together, at least the limit and less
+  than twice the limit (at most one reset per window);
+- the next attempt after them is always refused.
 
 ## Where the package still fails closed
 

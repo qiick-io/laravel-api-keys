@@ -2,7 +2,11 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
+use Illuminate\Support\Facades\Schema;
 use Qiick\ApiKeys\ApiKeyAuthenticator;
 use Qiick\ApiKeys\AuthorizationDecision;
 use Qiick\ApiKeys\Contracts\ApiKeyRecord;
@@ -1629,4 +1633,38 @@ it('reads a SQL NULL or a JSON null as no restriction, and decoded arrays as bef
         ->and(authenticateWithStoredColumn('ip_allowlist', 'null'))->toBe(['authenticated', []])
         ->and(authenticateWithStoredColumn('restrictions', 'null'))->toBe(['authenticated', []])
         ->and(authenticateWithStoredColumn('ip_allowlist', ['198.51.100.1']))->toBe(['ip_not_allowed', []]);
+});
+
+it('denies a corrupted JSON column read from an Eloquent model as the contract asks, which its array cast would hide', function (): void {
+    Schema::create('api_keys', function (Blueprint $table): void {
+        $table->id();
+        $table->json('scopes');
+        $table->json('ip_allowlist')->nullable();
+        $table->json('restrictions')->nullable();
+    });
+    // SQLite stores the text as is; MySQL and PostgreSQL reject it, but a corrupted row can come from elsewhere.
+    DB::table('api_keys')->insert([
+        'scopes' => '["items:read"]',
+        'ip_allowlist' => '["203.0.113.10"',
+        'restrictions' => null,
+    ]);
+    $model = new class extends Model
+    {
+        protected $table = 'api_keys';
+
+        protected function casts(): array
+        {
+            return ['scopes' => 'array', 'ip_allowlist' => 'array', 'restrictions' => 'array'];
+        }
+    };
+    $stored = $model->newQuery()->firstOrFail();
+
+    // The cast the product keeps for its own code reads the corrupted allowlist as "allow every IP".
+    expect($stored->ip_allowlist)->toBeNull();
+
+    // ApiKeyRecord::rawIpAllowlist() as documented: the column as stored.
+    [$outcome, $reported] = authenticateWithStoredColumn('ip_allowlist', $stored->getRawOriginal('ip_allowlist'));
+
+    expect($outcome)->toBe('ip_not_allowed')
+        ->and($reported)->toHaveCount(1);
 });

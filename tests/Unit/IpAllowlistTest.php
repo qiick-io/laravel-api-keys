@@ -102,3 +102,26 @@ it('reads a zero-padded CIDR prefix as its number', function (): void {
         ->and($allowlist->allows('203.0.113.10', ['203.0.113.0/024']))->toBeTrue()
         ->and($allowlist->allows('203.0.114.10', ['203.0.113.0/024']))->toBeFalse();
 });
+
+it('validates a single entry with the rules allows() applies', function (mixed $entry, bool $isValid): void {
+    expect(allowlist()->isValidEntry($entry))->toBe($isValid)
+        // A list holding only that entry is usable exactly when the entry is valid.
+        ->and(allowlist()->allows('203.0.113.10', [$entry]) || allowlist()->allows('2001:db8::1', [$entry]) || ! $isValid)->toBeTrue();
+})->with([
+    'IPv4' => ['203.0.113.10', true],
+    'IPv4 CIDR' => ['203.0.113.0/24', true],
+    'IPv6' => ['2001:db8::1', true],
+    'IPv6 CIDR' => ['2001:db8::/32', true],
+    'IPv4-mapped CIDR' => ['::ffff:203.0.113.0/120', true],
+    'match-all IPv4' => ['0.0.0.0/0', true],
+    'hostname' => ['example.com', false],
+    'zone id' => ['fe80::1%eth0', false],
+    'IPv4 prefix too long' => ['203.0.113.0/33', false],
+    'IPv6 prefix too long' => ['2001:db8::/129', false],
+    'mapped prefix below 96' => ['::ffff:203.0.113.0/95', false],
+    'non-numeric prefix' => ['203.0.113.0/abc', false],
+    'two slashes' => ['203.0.113.0/24/8', false],
+    'empty string' => ['', false],
+    'not a string' => [3232235777, false],
+    'null' => [null, false],
+]);

@@ -217,6 +217,8 @@ it('refuses a resource metadata URL that is not an absolute https URL safe in a 
 
 it('refuses a scope that could break out of the WWW-Authenticate header', function (string $scope): void {
     expect(fn () => ApiKeyRejection::insufficientScope($scope))
+        ->toThrow(InvalidArgumentException::class, 'The required scope must be a scope atom such as items:read.')
+        ->and(fn () => ApiKeyRejection::noUsableScopes($scope))
         ->toThrow(InvalidArgumentException::class, 'The required scope must be a scope atom such as items:read.');
 })->with([
     'quote' => ['items:read", error="invalid_token'],

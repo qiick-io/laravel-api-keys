@@ -9,6 +9,7 @@ use Qiick\ApiKeys\ConfigLifetimePolicy;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
+use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
 use Qiick\ApiKeys\FailedAttemptLimiter;
 use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\RotationService;
@@ -30,6 +31,7 @@ it('merges the package defaults into the api-keys config', function (): void {
         'usage_bypass_throttle_on_ip_change' => true,
         'default_rate_limit_per_minute' => 60,
         'failed_attempts_per_minute' => 20,
+        'resource_metadata_url' => null,
         'cache_store' => null,
         'legacy_matchers' => [],
     ]);
@@ -438,3 +440,24 @@ it('builds the failed-attempt brake from api-keys.failed_attempts_per_minute', f
     'off' => ['0', 10],
     'five' => ['5', 5],
 ]);
+
+it('publishes api-keys.resource_metadata_url in the challenges at boot', function (): void {
+    $url = 'https://api.example.com/.well-known/oauth-protected-resource';
+    config(['api-keys.resource_metadata_url' => $url]);
+
+    try {
+        app()->getProvider(ApiKeysServiceProvider::class)->boot();
+
+        expect(ApiKeyRejection::invalidToken()->render()->headers->get('WWW-Authenticate'))
+            ->toBe('Bearer error="invalid_token", resource_metadata="'.$url.'"');
+    } finally {
+        ApiKeyRejection::setResourceMetadataUrl(null);
+    }
+});
+
+it('fails at boot on a resource metadata URL that is not absolute https', function (): void {
+    config(['api-keys.resource_metadata_url' => 'http://api.example.com/meta']);
+
+    expect(fn () => app()->getProvider(ApiKeysServiceProvider::class)->boot())
+        ->toThrow(InvalidArgumentException::class, 'The resource metadata URL must be an absolute https URL.');
+});

@@ -285,7 +285,11 @@ up only if false lockouts outweigh credential-stuffing risk.
 
 Refusals are `ApiKeyRejection`: `401 invalid_token` and `403 insufficient_scope`
 carry RFC 6750 `WWW-Authenticate`; `403 ip_not_allowed`, `403 request_not_allowed`,
-and rate-limit responses do not. When the attempt store (Redis, Memcached) is
+and rate-limit responses do not. Every `insufficient_scope` names the scope the
+request required (`scope="items:write"`, and `scope` in the JSON) when there is
+one. With `api-keys.resource_metadata_url` set to your RFC 9728
+protected-resource metadata (absolute https), both challenges also carry
+`resource_metadata="<url>"`, as the MCP authorization spec asks. When the attempt store (Redis, Memcached) is
 down, the request fails closed as `503 service_unavailable` (the cause goes to
 the exception reporter), never a bare 500. Format-miss and hash-miss share the same
 body/headers. Presented tokens are `#[SensitiveParameter]` and never appear in

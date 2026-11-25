@@ -194,12 +194,12 @@ final class ApiKeyAuthenticator
             $this->vocabulary,
         );
         if ($expanded->isEmpty()) {
-            throw ApiKeyRejection::noUsableScopes();
+            throw ApiKeyRejection::noUsableScopes($requiredScope?->value());
         }
 
         $granted = $this->narrowToOwnerCeiling($matched, $expanded, $context);
         if ($granted->isEmpty()) {
-            throw ApiKeyRejection::noUsableScopes();
+            throw ApiKeyRejection::noUsableScopes($requiredScope?->value());
         }
 
         if ($requiredScope !== null && ! $granted->allows($requiredScope)) {

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Qiick\ApiKeys\ConfigLifetimePolicy;
 use Qiick\ApiKeys\Rotation;
 use Qiick\ApiKeys\RotationService;
 use Qiick\ApiKeys\Testing\FixedClock;
@@ -38,7 +39,7 @@ function rotationRecord(TokenCodec $codec, ?DateTimeImmutable $now = null): InMe
     );
 }
 
-it('normalizes invalid, negative, and above-max grace hours to zero', function (): void {
+it('normalizes invalid, negative, and above-max grace hours to zero (A4)', function (): void {
     expect(RotationService::normalizeGraceHours(24))->toBe(24)
         ->and(RotationService::normalizeGraceHours(0))->toBe(0)
         ->and(RotationService::normalizeGraceHours(-1))->toBe(0)
@@ -55,7 +56,7 @@ it('normalizes invalid, negative, and above-max grace hours to zero', function (
         ->and(RotationService::normalizeGraceHours(48, maxGraceHours: 48))->toBe(48);
 });
 
-it('rotates with a grace window that preserves the previous hash', function (): void {
+it('rotates with a grace window that preserves the previous hash (A3)', function (): void {
     $codec = rotationCodec();
     $record = rotationRecord($codec);
     $now = new DateTimeImmutable('2026-01-15 12:00:00');
@@ -90,7 +91,7 @@ it('keeps a one-hour grace window (boundary of the zero check)', function (): vo
         ->and($rotation->previousKeyValidUntil?->format('Y-m-d H:i:s'))->toBe('2026-01-15 13:00:00');
 });
 
-it('drops the previous secret when grace hours are zero', function (): void {
+it('drops the previous secret when grace hours are zero (A3)', function (): void {
     $codec = rotationCodec();
     $record = rotationRecord($codec);
 
@@ -120,7 +121,7 @@ it('normalizes grace inside rotate so a negative or over-max config cannot exten
         ->and($capped->previousKeyValidUntil)->toBeNull();
 });
 
-it('replaces the previous grace secret on a second rotation', function (): void {
+it('replaces the previous grace secret on a second rotation (A3)', function (): void {
     $codec = rotationCodec();
     $first = rotationRecord($codec);
     $now = new DateTimeImmutable('2026-01-15 12:00:00');
@@ -269,7 +270,21 @@ it('redacts plaintext and hashes in Rotation debug, JSON, and serialize output',
     expect(json_encode($rotation))->not->toContain($rotation->newPlainText)
         ->and(json_encode($rotation))->toContain('[REDACTED]')
         ->and(serialize($rotation))->not->toContain($rotation->newPlainText)
+        ->and(serialize($rotation))->toContain('[REDACTED]')
+        ->and(serialize($rotation))->toContain($rotation->newKeyPrefix)
         ->and($rotation->__debugInfo()['newPlainText'])->toBe('[REDACTED]');
 
     expect(fn () => unserialize(serialize($rotation)))->toThrow(LogicException::class);
+});
+
+it('checks the lifetime policy against the new expiry when one is given, else the current one', function (): void {
+    $codec = rotationCodec();
+    $now = new DateTimeImmutable('2026-01-15T12:00:00Z');
+    $record = rotationRecord($codec)->withExpiresAt($now->modify('+365 days'));
+    $service = new RotationService(lifetimePolicy: new ConfigLifetimePolicy(30));
+    $clock = new FixedClock($now);
+
+    expect($service->rotate($record, $codec, $clock, 0, $now->modify('+10 days'))->lastRotatedAt)->toEqual($now)
+        ->and(fn () => $service->rotate($record, $codec, $clock, 0))
+        ->toThrow(InvalidArgumentException::class, 'lifetime policy');
 });

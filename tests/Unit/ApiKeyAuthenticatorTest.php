@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Exceptions;
 use Qiick\ApiKeys\ApiKeyAuthenticator;
 use Qiick\ApiKeys\AuthorizationDecision;
 use Qiick\ApiKeys\Contracts\ApiKeyRecord;
@@ -221,7 +222,7 @@ it('authenticates a real Externa ek_+9+31 legacy token', function (): void {
         ->toThrow(ApiKeyRejection::class);
 });
 
-it('accepts the previous secret inside the grace window', function (): void {
+it('accepts the previous secret inside the grace window (A3)', function (): void {
     $codec = makeCodec();
     $first = $codec->issue();
     $second = $codec->reissueForPrefix($first->keyPrefix);
@@ -268,7 +269,7 @@ it('returns identical invalid_token for format-miss and hash-miss (A2b)', functi
     }
 });
 
-it('rejects with invalid_token when the prefix has no candidates', function (): void {
+it('rejects with invalid_token and a dummy compare when the prefix has no candidates (A2)', function (): void {
     $fixture = authenticator([
         'repository' => new FakeApiKeyRepository([]),
         'defaultRate' => 0,
@@ -1258,6 +1259,7 @@ it('does not invoke the exception reporter when usageSideEffect is null', functi
 });
 
 it('reports usage failures via the Laravel report() helper when no reporter is wired', function (): void {
+    Exceptions::fake();
     $fixture = authenticator(['defaultRate' => 0]);
 
     $matching = authenticator([
@@ -1311,6 +1313,7 @@ it('reports usage failures via the Laravel report() helper when no reporter is w
     // No exceptionReporter — exercise the function_exists('report') fallback.
     $result = $matching['auth']->authenticate($fixture['token'], keyContext());
     expect($result->record->id())->toBe('42');
+    Exceptions::assertReported(fn (RuntimeException $exception): bool => $exception->getMessage() === 'usage write failed');
 });
 
 it('asserts remaining=0 on the pre-auth failed-attempt 429', function (): void {
@@ -1381,3 +1384,136 @@ it('does not count repository exceptions as failed attempts', function (): void 
         expect($limiter->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(0);
     }
 });
+
+it('hands the brake slot back when the key authenticates or is refused for a non-credential reason', function (): void {
+    $bucket = 'api-key-failures:v4:203.0.113.10';
+    $limiter = new FakeAttemptLimiter;
+    $fixture = authenticator([
+        'failedLimiter' => new FailedAttemptLimiter($limiter, maxPerMinute: 1),
+        'defaultRate' => 0,
+    ]);
+
+    $fixture['auth']->authenticate($fixture['token'], keyContext('203.0.113.10'));
+    $fixture['auth']->authenticate($fixture['token'], keyContext('203.0.113.10'));
+
+    expect($limiter->hitsFor($bucket))->toBe(0);
+
+    $allowlisted = authenticator([
+        'record' => $fixture['record']->withIpAllowlist(['198.51.100.0/24']),
+        'failedLimiter' => new FailedAttemptLimiter($limiter, maxPerMinute: 1),
+        'defaultRate' => 0,
+    ]);
+
+    try {
+        $allowlisted['auth']->authenticate($allowlisted['token'], keyContext('203.0.113.10'));
+        $this->fail('expected ip_not_allowed');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->errorCode())->toBe('ip_not_allowed')
+            ->and($limiter->hitsFor($bucket))->toBe(0);
+    }
+});
+
+it('does not count a request refused by the per-key limit against that limit', function (): void {
+    $limiter = new FakeAttemptLimiter;
+    $fixture = authenticator(['limiter' => $limiter, 'defaultRate' => 1]);
+
+    $fixture['auth']->authenticate($fixture['token'], keyContext());
+
+    foreach (range(1, 3) as $refusedAttempt) {
+        expect(fn () => $fixture['auth']->authenticate($fixture['token'], keyContext()))
+            ->toThrow(ApiKeyRejection::class);
+    }
+
+    expect($limiter->hitsFor('api-key:42'))->toBe(1);
+});
+
+it('accepts exactly the token versions it can verify', function (int $tokenVersion, bool $isAccepted): void {
+    $fixture = authenticator(['defaultRate' => 0]);
+    $versioned = authenticator([
+        'record' => $fixture['record']->withTokenVersion($tokenVersion),
+        'defaultRate' => 0,
+    ]);
+
+    $outcome = fn () => $versioned['auth']->authenticate($versioned['token'], keyContext());
+
+    if ($isAccepted) {
+        expect($outcome()->record->tokenVersion())->toBe($tokenVersion);
+
+        return;
+    }
+
+    expect($outcome)->toThrow(ApiKeyRejection::class, 'The API key is not valid.');
+})->with([
+    'legacy 0' => [0, true],
+    'canonical 1' => [1, true],
+    'checksummed 2' => [2, true],
+    'unknown 3' => [3, false],
+    'negative' => [-1, false],
+]);
+
+it('skips row windows that are unset or not positive', function (?int $perDay, ?int $perMonth): void {
+    $limiter = new FakeAttemptLimiter;
+    $fixture = authenticator(['limiter' => $limiter, 'defaultRate' => 0]);
+    $windowed = authenticator([
+        'limiter' => $limiter,
+        'defaultRate' => 0,
+        'record' => $fixture['record']->withRateLimitPerDay($perDay)->withRateLimitPerMonth($perMonth),
+    ]);
+
+    $windowed['auth']->authenticate($windowed['token'], keyContext());
+
+    expect($limiter->lastDecaySeconds)->toBe([]);
+})->with([
+    'unset' => [null, null],
+    'zero' => [0, 0],
+    'negative' => [-1, -1],
+]);
+
+it('gives back the hits it took on earlier windows when a later window refuses', function (): void {
+    $limiter = new FakeAttemptLimiter;
+    $fixture = authenticator([
+        'limiter' => $limiter,
+        'authorizer' => (new FakeKeyAuthorizer)->withRateLimits([
+            new RateLimitDecision('minute-bucket', 5, 60),
+            new RateLimitDecision('day-bucket', 1, 86_400),
+        ]),
+    ]);
+
+    $fixture['auth']->authenticate($fixture['token'], keyContext());
+
+    expect(fn () => $fixture['auth']->authenticate($fixture['token'], keyContext()))
+        ->toThrow(ApiKeyRejection::class);
+
+    expect($limiter->hitsFor('minute-bucket'))->toBe(1)
+        ->and($limiter->hitsFor('day-bucket'))->toBe(1);
+});
+
+it('answers rate_limited, never the real outcome, once the failed-attempt bucket is full', function (): void {
+    $failures = new FakeAttemptLimiter;
+    $fixture = authenticator([
+        'failedLimiter' => new FailedAttemptLimiter($failures, maxPerMinute: 2),
+        'defaultRate' => 0,
+    ]);
+    $outcome = function (string $token) use ($fixture): string {
+        try {
+            $fixture['auth']->authenticate($token, keyContext('203.0.113.10'));
+
+            return 'authenticated';
+        } catch (ApiKeyRejection $rejection) {
+            return $rejection->errorCode();
+        }
+    };
+
+    expect($outcome($fixture['token']))->toBe('authenticated')
+        ->and($outcome('bad-1'))->toBe('invalid_token')
+        ->and($outcome('bad-2'))->toBe('invalid_token')
+        ->and($outcome('bad-3'))->toBe('rate_limit_exceeded')
+        // A correct key is not revealed while the bucket is full.
+        ->and($outcome($fixture['token']))->toBe('rate_limit_exceeded')
+        ->and($failures->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(2);
+});
+
+it('refuses a rate-limit window shorter than one second', function (int $decaySeconds): void {
+    expect(fn () => new RateLimitDecision('bucket', 10, $decaySeconds))
+        ->toThrow(InvalidArgumentException::class, 'decaySeconds');
+})->with([0, -5]);

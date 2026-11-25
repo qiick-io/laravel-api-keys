@@ -17,51 +17,69 @@ use Qiick\ApiKeys\Contracts\AttemptLimiter;
  *
  * `maxPerMinute` ≤ 0 disables. Recipes should leave the default (20) on — see
  * README for NAT / shared-egress lockout risk.
+ *
+ * Optional second tier: `maxPerMinutePerIpv6Slash48` (null, the default, is
+ * off; otherwise at least 1) also caps failures across a whole IPv6 /48, the usual size of a single allocation. Without it, an
+ * attacker holding a /48 gets 65,536 separate /64 buckets.
  */
 final class FailedAttemptLimiter
 {
+    /**
+     * @throws \InvalidArgumentException when the /48 limit is below one (leave it null to turn the tier off)
+     */
     public function __construct(
         private AttemptLimiter $limiter,
         private int $maxPerMinute = 20,
         private IpAllowlist $ipAllowlist = new IpAllowlist,
-    ) {}
-
-    public function tooManyAttempts(?string $clientIp): bool
-    {
-        if ($this->maxPerMinute <= 0) {
-            return false;
+        private ?int $maxPerMinutePerIpv6Slash48 = null,
+    ) {
+        if ($maxPerMinutePerIpv6Slash48 !== null && $maxPerMinutePerIpv6Slash48 < 1) {
+            throw new \InvalidArgumentException('maxPerMinutePerIpv6Slash48 must be at least 1, or null to turn the /48 tier off.');
         }
-
-        $bucket = $this->bucketKey($clientIp);
-        if ($bucket === null) {
-            return false;
-        }
-
-        return $this->limiter->tooManyAttempts($bucket, $this->maxPerMinute);
     }
 
-    public function hit(?string $clientIp): void
+    /**
+     * True once any of the client's buckets holds its limit of failed guesses.
+     * Only reads the counters: a request still being verified takes no slot.
+     */
+    public function isBlocked(?string $clientIp): bool
     {
-        if ($this->maxPerMinute <= 0) {
-            return;
+        foreach ($this->limitsByBucketKey($clientIp) as $bucket => $maxAttempts) {
+            if ($this->limiter->remaining($bucket, $maxAttempts) === 0) {
+                return true;
+            }
         }
 
-        $bucket = $this->bucketKey($clientIp);
-        if ($bucket === null) {
-            return;
+        return false;
+    }
+
+    /**
+     * Counts a failed guess in every bucket of the client with one atomic
+     * increment each, and returns false when any went over its limit; the
+     * caller then answers `rate_limited` instead of `invalid_token`, so
+     * guesses past the limit teach an attacker nothing even when they race.
+     */
+    public function countFailure(?string $clientIp): bool
+    {
+        $isWithinLimits = true;
+
+        foreach ($this->limitsByBucketKey($clientIp) as $bucket => $maxAttempts) {
+            // Every tier counts, even once another tier is over.
+            $isWithinLimits = $this->limiter->hit($bucket, 60) <= $maxAttempts && $isWithinLimits;
         }
 
-        $this->limiter->hit($bucket, 60);
+        return $isWithinLimits;
     }
 
     public function availableIn(?string $clientIp): int
     {
-        $bucket = $this->bucketKey($clientIp);
-        if ($bucket === null) {
-            return 0;
+        $secondsLeft = 0;
+
+        foreach (array_keys($this->limitsByBucketKey($clientIp)) as $bucket) {
+            $secondsLeft = max($secondsLeft, $this->limiter->availableIn($bucket));
         }
 
-        return $this->limiter->availableIn($bucket);
+        return $secondsLeft;
     }
 
     public function maxPerMinute(): int
@@ -70,37 +88,55 @@ final class FailedAttemptLimiter
     }
 
     /**
+     * @return array<string, int> the limit of each bucket that applies to the client
+     */
+    private function limitsByBucketKey(?string $clientIp): array
+    {
+        $binary = $this->maxPerMinute > 0 ? $this->packedClientIp($clientIp) : null;
+
+        if ($binary === null) {
+            return [];
+        }
+
+        $limitsByBucketKey = [$this->bucketKeyFor($binary) => $this->maxPerMinute];
+
+        if ($this->maxPerMinutePerIpv6Slash48 !== null && strlen($binary) === 16) {
+            $limitsByBucketKey[$this->networkKey($binary, 6, 'v6-48')] = $this->maxPerMinutePerIpv6Slash48;
+        }
+
+        return $limitsByBucketKey;
+    }
+
+    /**
      * @internal Exposed for tests.
      */
     public function bucketKey(?string $clientIp): ?string
     {
-        if ($clientIp === null || $clientIp === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
-            return null;
-        }
+        $binary = $this->packedClientIp($clientIp);
 
-        $canonical = $this->ipAllowlist->expandMapped($clientIp);
-        if ($canonical === null) {
-            return null;
-        }
+        return $binary === null ? null : $this->bucketKeyFor($binary);
+    }
 
-        // expandMapped only returns addresses inet_pton already accepted.
-        $binary = @inet_pton($canonical);
-        if ($binary === false) { // @pest-mutate-ignore: FalseToTrue
-            return null; // @pest-mutate-ignore: RemoveEarlyReturn
-        }
+    private function packedClientIp(?string $clientIp): ?string
+    {
+        return $clientIp === null ? null : $this->ipAllowlist->packed($clientIp);
+    }
 
-        if (strlen($binary) === 4) {
-            return 'api-key-failures:v4:'.$canonical;
-        }
+    /**
+     * IPv4 by full address, IPv6 by /64.
+     */
+    private function bucketKeyFor(string $binary): string
+    {
+        return strlen($binary) === 4 ? $this->networkKey($binary, 4, 'v4') : $this->networkKey($binary, 8, 'v6');
+    }
 
-        // IPv6 /64: keep the first 64 bits, zero the rest.
-        $network = substr($binary, 0, 8).str_repeat("\0", 8);
-        $rendered = inet_ntop($network);
-        // inet_ntop only fails on corrupt binary; our 16-byte network is always valid.
-        if ($rendered === false) { // @pest-mutate-ignore: FalseToTrue
-            return null; // @pest-mutate-ignore: RemoveEarlyReturn
-        }
+    /**
+     * Keeps the first `$networkBytes` bytes of the address and zeroes the rest.
+     */
+    private function networkKey(string $binary, int $networkBytes, string $tier): string
+    {
+        $network = substr($binary, 0, $networkBytes).str_repeat("\0", strlen($binary) - $networkBytes);
 
-        return 'api-key-failures:v6:'.$rendered;
+        return 'api-key-failures:'.$tier.':'.inet_ntop($network);
     }
 }

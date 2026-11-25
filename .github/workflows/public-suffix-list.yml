@@ -1,0 +1,91 @@
+name: Public Suffix List refresh
+
+# Monthly: regenerate resources/public_suffix_list.php from publicsuffix.org and,
+# when the rules changed, open an issue listing the added and removed rules.
+# A maintainer then runs `php scripts/update-public-suffix-list.php` and opens
+# the pull request. A refresh can deny stored origin patterns that sit on a
+# newly listed suffix, so every refresh goes through review and is named in the
+# CHANGELOG. An issue needs only issues: write: no repository setting to change,
+# and the workflow never pushes.
+
+on:
+  schedule:
+    - cron: '0 6 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: public-suffix-list
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Check the Public Suffix List snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        # actions/checkout@v4.1.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: develop
+
+      - name: Setup PHP
+        # shivammathur/setup-php@2.40.0
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
+        with:
+          php-version: '8.4'
+          coverage: none
+          extensions: intl
+
+      - name: Regenerate the snapshot
+        run: |
+          git show HEAD:resources/public_suffix_list.php > "$RUNNER_TEMP/public_suffix_list.before.php"
+          php scripts/update-public-suffix-list.php
+
+      - name: List the changed rules
+        id: changes
+        run: |
+          php -r '
+            $before = array_keys(require $argv[1]);
+            $after = array_keys(require $argv[2]);
+            $added = array_values(array_diff($after, $before));
+            $removed = array_values(array_diff($before, $after));
+            $lines = array_merge(
+                array_map(fn ($rule) => "- added `$rule`", $added),
+                array_map(fn ($rule) => "- removed `$rule`", $removed),
+            );
+            file_put_contents($argv[3], implode("\n", $lines));
+            echo count($lines), " rule(s) changed\n";
+          ' "$RUNNER_TEMP/public_suffix_list.before.php" resources/public_suffix_list.php "$RUNNER_TEMP/changes.md"
+          if [ -s "$RUNNER_TEMP/changes.md" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open an issue when the rules changed
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="chore(deps): refresh the public suffix list snapshot ($(date -u +%Y-%m))"
+
+          # One open issue per month, even when the workflow is run again by hand.
+          if gh issue list --state open --search "\"$title\" in:title" --json number --jq 'length' | grep -qv '^0$'; then
+            echo "An issue for this month is already open."
+            exit 0
+          fi
+
+          {
+            echo "The Public Suffix List changed upstream. Rules that differ from \`resources/public_suffix_list.php\` on develop:"
+            echo
+            cat "$RUNNER_TEMP/changes.md"
+            echo
+            echo "To refresh: \`php scripts/update-public-suffix-list.php && vendor/bin/pint resources\`, then open a pull request and name the refresh in the CHANGELOG."
+            echo
+            echo "Before releasing: an added suffix makes stored origin wildcards over it parse as denied, so keys using them stop authenticating after the upgrade (see UPGRADING.md)."
+          } > "$RUNNER_TEMP/issue.md"
+
+          gh issue create --title "$title" --body-file "$RUNNER_TEMP/issue.md"

@@ -1,0 +1,19 @@
+name: pr title
+
+# PRs are squash-merged, so the title becomes the commit on develop: it must be
+# a Conventional Commit. `edited` reruns the check when the title changes.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    uses: qiick-io/app-ui/.github/workflows/pr-title.yml@v0.11.0

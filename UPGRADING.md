@@ -4,7 +4,52 @@ This package is **pre-release** (`0.x`). Breaking changes are allowed between
 minor versions while the major is `0`, and each break is recorded here before a
 tagged release.
 
-## From 0.1.0 toward 1.0.0
+## Every release: Public Suffix List refresh
+
+Origin wildcards are checked against a bundled snapshot of the Public Suffix
+List (`resources/public_suffix_list.php`); a monthly workflow opens an issue
+when the upstream list changed, and a maintainer refreshes it by pull request.
+Patterns are re-validated on every request, so a refresh that lists a new
+suffix makes stored origin wildcards over it (for example a new hosting
+platform's `https://*.platform.example`) parse as denied: those keys stop
+authenticating after you upgrade, with no migration. Each CHANGELOG entry says
+whether the list changed; before upgrading, search stored `restrictions` for
+wildcards over the suffixes it names.
+
+## From 0.2.0 to 0.3.0-beta.1
+
+### Contract breaks
+
+- `AttemptLimiter` (red-team fix, atomic limits): `hit()` must atomically
+  increment and return the new count; add `decrement(string $key)` (no-op on
+  a missing counter, never below zero); `tooManyAttempts()` is gone. Delete any
+  adapter over Laravel's `RateLimiter` (it is not atomic) and use the bound
+  `CacheAttemptLimiter`, which needs a Redis or Memcached default cache store.
+  `FailedAttemptLimiter` now exposes `isBlocked()` / `countFailure()` instead of `tooManyAttempts()` / `hit()`;
+  `RateLimitDecision` refuses `decaySeconds` below 1.
+- `LegacyFormatWarningGate`: `claim(string $key, int $leaseSeconds): ?string`
+  returns an owner token; `release(string $key, string $ownerToken)` and
+  `markSent(string $key, string $ownerToken)`. Only custom gates need
+  changes; the default cache gate is updated.
+- `new RequestRestrictions(...)` validates its lists and patterns and throws
+  `InvalidArgumentException`. Stored `restrictions` rows holding a pattern that
+  is now invalid (for example `https://*.com`, `https://*.github.io` or
+  `https://*.co.uk`) parse as denied, so those keys stop authenticating after
+  the upgrade (fail closed): narrow the pattern to your own domain first.
+  `ApiKeyAuthenticator` no longer takes a `requestRestrictionsEvaluator`
+  argument.
+- The bound attempt limiter needs Redis or Memcached (array in tests): on any
+  other default cache store, the first authentication throws. Set
+  `CACHE_STORE=redis` (or bind your own `AttemptLimiter`) and add
+  `php artisan api-keys:check` to the deploy pipeline, which fails on an
+  unsupported store. Boot itself fails when
+  `API_KEYS_FAILED_ATTEMPTS_PER_MINUTE`, `API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS`
+  or `API_KEYS_LEGACY_WARN_DAYS_BEFORE` is not digits only.
+- `api-keys.max_lifetime_days` is now enforced on rotation by default, and a
+  value that is not a whole number >= 1 fails at boot. Unset it to keep the
+  previous (unenforced) behaviour.
+
+## From 0.1.0 to 0.2.0
 
 ### Reference schema
 
@@ -50,9 +95,10 @@ pre-1.0 additions versus the 0.1.0 sketch:
 - New denial: `ApiKeyRejection::requestNotAllowed()` → `403 request_not_allowed`.
 - Runtime deps: `illuminate/console`, `illuminate/notifications`.
 - New Artisan command: `api-keys:notify-expiring` (bind `ExpiryRecipientResolver`).
-- Day/month quotas (`rate_limit_per_day` / `rate_limit_per_month`) are **rolling
-  windows** via Laravel's `RateLimiter` (decay seconds 86_400 / 2_592_000), not
-  calendar day/month buckets. Durable calendar quotas remain LATER.
+- Day/month quotas (`rate_limit_per_day` / `rate_limit_per_month`) are windows of
+  86_400 / 2_592_000 seconds, not calendar day/month buckets. Durable calendar
+  quotas remain LATER. (Since 0.3.0-beta.1 they are counted by
+  `CacheAttemptLimiter`, see above.)
 - Origin/referrer restriction patterns are structured: exact origin,
   `scheme://*.example.com[:port]` on the host-label boundary, and referrer path
   prefix only after an exact origin. Raw trailing `*` (e.g.

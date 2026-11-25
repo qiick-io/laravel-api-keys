@@ -7,7 +7,7 @@ namespace Qiick\ApiKeys;
 use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 
 /**
- * @api Maps the Laravel app environment to live/test.
+ * @internal Maps the Laravel app environment to live/test.
  *
  * `production` → live; everything else → test. An explicit `api-keys.environment`
  * config value overrides this when the service provider builds the codec.

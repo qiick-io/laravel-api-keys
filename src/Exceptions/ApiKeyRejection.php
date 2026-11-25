@@ -120,18 +120,18 @@ final class ApiKeyRejection extends HttpException
         ?int $remaining = null,
         ?int $resetAfterSeconds = null,
     ): self {
-        $headers = ['Retry-After' => (string) $retryAfterSeconds]; // @pest-mutate-ignore: RemoveStringCast
+        $headers = ['Retry-After' => (string) $retryAfterSeconds];
 
         if ($limit !== null) {
-            $headers['X-RateLimit-Limit'] = (string) $limit; // @pest-mutate-ignore: RemoveStringCast
+            $headers['X-RateLimit-Limit'] = (string) $limit;
         }
 
         if ($remaining !== null) {
-            $headers['X-RateLimit-Remaining'] = (string) $remaining; // @pest-mutate-ignore: RemoveStringCast
+            $headers['X-RateLimit-Remaining'] = (string) $remaining;
         }
 
         if ($resetAfterSeconds !== null) {
-            $headers['X-RateLimit-Reset'] = (string) $resetAfterSeconds; // @pest-mutate-ignore: RemoveStringCast
+            $headers['X-RateLimit-Reset'] = (string) $resetAfterSeconds;
         }
 
         return new self(

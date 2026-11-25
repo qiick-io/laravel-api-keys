@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Qiick\ApiKeys\Testing;
 
 /**
- * Fakes stay autoloadable (like Laravel's) but refuse construction outside tests.
+ * @internal Fakes stay autoloadable (like Laravel's) but refuse construction outside tests.
  *
  * Allowed when `app()->environment('testing')` or `QIICK_API_KEYS_ALLOW_FAKES=1`.
  */

@@ -15,7 +15,7 @@ function vocabulary(array $scopes = ['users:read', 'users:write', 'keys:read', '
     return new ArrayScopeVocabulary($scopes);
 }
 
-it('parses well-formed scope atoms and rejects whitespace, case and junk', function (): void {
+it('parses well-formed scope atoms and rejects whitespace, case and junk (A5b)', function (): void {
     expect(Scope::tryFromString('users:read'))->toEqual(new Scope('users', 'read'))
         ->and(Scope::tryFromString('users:write')?->value())->toBe('users:write')
         ->and(Scope::tryFromString(' users:read '))->toBeNull()
@@ -31,7 +31,7 @@ it('rejects crafted constructor atoms that would inject into WWW-Authenticate', 
         ->toThrow(InvalidArgumentException::class);
 });
 
-it('lets write satisfy read on the same resource only', function (): void {
+it('lets write satisfy read on the same resource only (A5)', function (): void {
     $read = Scope::tryFromString('users:read');
     $write = Scope::tryFromString('users:write');
     $keysRead = Scope::tryFromString('keys:read');
@@ -44,7 +44,7 @@ it('lets write satisfy read on the same resource only', function (): void {
         ->and($keysRead->satisfies($read))->toBeFalse();
 });
 
-it('fail-closes parseStored on empty, non-list, unknown, whitespace, case and duplicates', function (): void {
+it('fail-closes parseStored on empty, non-list, unknown, whitespace, case and duplicates (A5, A5b)', function (): void {
     $vocab = vocabulary();
 
     expect(ScopeSet::parseStored(null, $vocab)->isEmpty())->toBeTrue()
@@ -76,7 +76,7 @@ it('fail-closes when a malformed element is still claimed by the vocabulary', fu
         ->and(ScopeSet::parseStored(['Users:Read'], $acceptAll)->isEmpty())->toBeTrue();
 });
 
-it('keeps highest-per-resource after a successful parse', function (): void {
+it('keeps highest-per-resource after a successful parse (A5)', function (): void {
     $set = ScopeSet::parseStored(['users:read', 'users:write', 'keys:read'], vocabulary());
 
     expect($set->isEmpty())->toBeFalse()
@@ -126,4 +126,13 @@ it('dedupes granted scopes when write demotes onto an already-kept read', functi
 
     expect($narrowed->values())->toBe(['users:read'])
         ->and($narrowed->collapsed()->values())->toBe(['users:read']);
+});
+
+it('names the expected pattern when a scope atom is invalid', function (): void {
+    try {
+        new Scope('Items', 'read');
+        $this->fail('expected an invalid scope atom');
+    } catch (InvalidArgumentException $exception) {
+        expect($exception->getMessage())->toBe('Scope atom must match '.Scope::PATTERN);
+    }
 });

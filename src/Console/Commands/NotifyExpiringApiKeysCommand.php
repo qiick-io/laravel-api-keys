@@ -14,8 +14,8 @@ use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSent;
 use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSent;
 use Qiick\ApiKeys\ExpiryRecipient;
-use Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification;
-use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
+use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
+use Qiick\ApiKeys\LegacyCutoff;
 
 /**
  * @api Daily idempotent expiry notices and legacy-format T−90 warnings.
@@ -30,7 +30,8 @@ use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
  *
  * N2: when `now` is within `api-keys.legacy.warn_days_before` of
  * `accept_until`, warns owners of active `token_version` 0 rows once per
- * key/cut-off via {@see LegacyFormatWarningGate}.
+ * key/cut-off via {@see LegacyFormatWarningGate}, with the same protocol and
+ * the same lease: resolve recipients, claim, send, then mark sent or release.
  */
 final class NotifyExpiringApiKeysCommand extends Command
 {
@@ -45,7 +46,7 @@ final class NotifyExpiringApiKeysCommand extends Command
         Dispatcher $events,
         LegacyFormatWarningGate $legacyWarningGate,
     ): int {
-        $configuredNoticeDays = config('api-keys.expiry.notice_days', 7);
+        $configuredNoticeDays = config('api-keys.expiry.notice_days');
         $noticeDays = filter_var(
             $configuredNoticeDays,
             FILTER_VALIDATE_INT,
@@ -57,7 +58,7 @@ final class NotifyExpiringApiKeysCommand extends Command
             return self::FAILURE;
         }
 
-        $configuredLeaseSeconds = config('api-keys.expiry.claim_lease_seconds', 900);
+        $configuredLeaseSeconds = config('api-keys.expiry.claim_lease_seconds');
         $leaseSeconds = filter_var(
             $configuredLeaseSeconds,
             FILTER_VALIDATE_INT,
@@ -72,10 +73,7 @@ final class NotifyExpiringApiKeysCommand extends Command
         $now = $clock->now();
         $until = $now->add(new \DateInterval('P'.$noticeDays.'D'));
         $roles = $this->recipientRoles();
-        $notificationClass = config(
-            'api-keys.expiry.notification',
-            ApiKeyExpiringNotification::class,
-        );
+        $notificationClass = config('api-keys.expiry.notification');
 
         if (! is_string($notificationClass) || ! class_exists($notificationClass)) {
             $this->error('api-keys.expiry.notification must be a notification class.');
@@ -130,6 +128,7 @@ final class NotifyExpiringApiKeysCommand extends Command
             $events,
             $roles,
             $now,
+            $leaseSeconds,
         );
         $this->info("Legacy-format warnings sent: {$legacyWarned}");
 
@@ -146,30 +145,24 @@ final class NotifyExpiringApiKeysCommand extends Command
         Dispatcher $events,
         array $roles,
         \DateTimeImmutable $now,
+        int $leaseSeconds,
     ): int {
-        $acceptUntil = $this->legacyAcceptUntil();
+        // Boot already refused an invalid value, so parse() cannot throw here.
+        $acceptUntil = LegacyCutoff::parse(config('api-keys.legacy.accept_until'));
         if ($acceptUntil === null) {
             return 0;
         }
 
-        $warnDays = filter_var(
-            config('api-keys.legacy.warn_days_before', 90),
-            FILTER_VALIDATE_INT,
-            ['options' => ['min_range' => 0]],
-        );
-        if (! is_int($warnDays) || $warnDays === 0) {
-            return 0;
-        }
+        /** @var ApiKeysServiceProvider $provider registers this command, so it is loaded */
+        $provider = $this->laravel->getProvider(ApiKeysServiceProvider::class);
 
-        $windowStart = $acceptUntil->sub(new \DateInterval('P'.$warnDays.'D'));
+        // 0 (validated >= 0 at boot) leaves an empty window, which warns nobody.
+        $windowStart = $acceptUntil->modify('-'.$provider->wholeNumberSetting('api-keys.legacy.warn_days_before', 0).' days');
         if ($now < $windowStart || $now >= $acceptUntil) {
             return 0;
         }
 
-        $notificationClass = config(
-            'api-keys.legacy.warning_notification',
-            ApiKeyLegacyFormatWarningNotification::class,
-        );
+        $notificationClass = config('api-keys.legacy.warning_notification');
         if (! is_string($notificationClass) || ! class_exists($notificationClass)) {
             $this->error('api-keys.legacy.warning_notification must be a notification class.');
 
@@ -184,16 +177,27 @@ final class NotifyExpiringApiKeysCommand extends Command
                 .':'
                 .$acceptUntil->format(\DateTimeInterface::ATOM);
 
-            if (! $legacyWarningGate->claim($idempotencyKey)) {
-                continue;
-            }
-
+            // Resolve before claiming: a key with no recipient yet must stay claimable.
             $recipients = iterator_to_array($recipientResolver->recipientsFor($record, $roles), false);
             if ($recipients === []) {
                 continue;
             }
 
-            Notification::send($recipients, new $notificationClass($record, $acceptUntil));
+            $leaseOwner = $legacyWarningGate->claim($idempotencyKey, $leaseSeconds);
+            if ($leaseOwner === null) {
+                continue;
+            }
+
+            try {
+                Notification::send($recipients, new $notificationClass($record, $acceptUntil));
+            } catch (\Throwable $exception) {
+                $legacyWarningGate->release($idempotencyKey, $leaseOwner);
+                $this->error('Legacy-format warning failed for '.$record->publicId().': '.$exception->getMessage());
+
+                continue;
+            }
+
+            $legacyWarningGate->markSent($idempotencyKey, $leaseOwner);
             $events->dispatch(new ApiKeyLegacyFormatWarningSent(
                 apiKeyId: $record->publicId(),
                 acceptUntil: $acceptUntil,
@@ -205,35 +209,13 @@ final class NotifyExpiringApiKeysCommand extends Command
         return $warned;
     }
 
-    private function legacyAcceptUntil(): ?\DateTimeImmutable
-    {
-        $acceptUntil = config('api-keys.legacy.accept_until');
-        if (! is_string($acceptUntil) || $acceptUntil === '') {
-            return null;
-        }
-
-        $parsed = \DateTimeImmutable::createFromFormat(\DateTimeInterface::ATOM, $acceptUntil);
-        if ($parsed instanceof \DateTimeImmutable) {
-            return $parsed;
-        }
-
-        if (str_ends_with($acceptUntil, 'Z')) {
-            $normalized = substr($acceptUntil, 0, -1).'+00:00';
-            $parsedZulu = \DateTimeImmutable::createFromFormat(\DateTimeInterface::ATOM, $normalized);
-            if ($parsedZulu instanceof \DateTimeImmutable) {
-                return $parsedZulu;
-            }
-        }
-
-        return null;
-    }
-
     /**
      * @return list<ExpiryRecipient>
      */
     private function recipientRoles(): array
     {
-        $configured = config('api-keys.expiry.recipients', ['owner', 'issuer']);
+        // The merged package config always holds the key; a scalar falls back to the documented default.
+        $configured = config('api-keys.expiry.recipients');
         if (! is_array($configured)) {
             return [ExpiryRecipient::Owner, ExpiryRecipient::Issuer];
         }

@@ -22,12 +22,8 @@ use Qiick\ApiKeys\Contracts\RandomSource;
  */
 final class TokenCodec
 {
-    /**
-     * Public API mirrors of the operational lengths. Typed class-const declaration
-     * lines are not attributed coverage by Pest mutate, so Increment/Decrement on
-     * these lines is ignored; the covered {@see self::idLength()} /
-     * {@see self::secretLength()} methods are the values issue/parse actually use.
-     */
+    // Pest gives constant declarations no line coverage, so a mutant here is never run;
+    // TokenCodecTest pins every value and the token shapes built from them.
     public const int ID_LENGTH = 8; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
 
     public const int SECRET_LENGTH = 32; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
@@ -80,7 +76,7 @@ final class TokenCodec
     public function issue(?TokenEnvironment $override = null, ?int $tokenVersion = null): GeneratedToken
     {
         $environment = $override ?? $this->environment->environment();
-        $publicId = $this->randomAlphabet($this->idLength());
+        $publicId = $this->randomAlphabet(self::ID_LENGTH);
         $keyPrefix = $this->productPrefix.'_'.$environment->value.'_'.$publicId;
 
         return $this->reissueForPrefix($keyPrefix, $tokenVersion);
@@ -93,7 +89,7 @@ final class TokenCodec
             throw new \InvalidArgumentException('API key token version must be 1 or 2.');
         }
 
-        $body = $keyPrefix.$this->randomAlphabet($this->secretLength());
+        $body = $keyPrefix.$this->randomAlphabet(self::SECRET_LENGTH);
         $plainText = $version === 2 ? $body.$this->checksumFor($body) : $body;
 
         return new GeneratedToken(
@@ -110,7 +106,7 @@ final class TokenCodec
     public function isCanonicalKeyPrefix(string $keyPrefix): bool
     {
         $product = preg_quote($this->productPrefix, '/');
-        $idLength = $this->idLength();
+        $idLength = self::ID_LENGTH;
 
         return preg_match('/^'.$product.'_(?:live|test)_[A-Za-z0-9]{'.$idLength.'}$/D', $keyPrefix) === 1;
     }
@@ -212,7 +208,7 @@ final class TokenCodec
         }
 
         $matcherUntil = $matcher->acceptUntil();
-        // min(config, matcher): equality is equivalent either side; ignore ≤ vs <.
+        // Equivalent mutant: when both cut-offs are equal, min() picks the same instant either way.
         $until = $this->legacyAcceptUntil === null || $matcherUntil < $this->legacyAcceptUntil // @pest-mutate-ignore: SmallerToSmallerOrEqual
             ? $matcherUntil
             : $this->legacyAcceptUntil;
@@ -279,7 +275,8 @@ final class TokenCodec
         string $hashAlgorithm = self::KNOWN_HASH_ALGORITHM,
     ): TokenMatch {
         if ($hashAlgorithm !== self::KNOWN_HASH_ALGORITHM) {
-            $this->spendCompare($this->hash($presentedToken));
+            // Timing-only (equivalent mutant): the compare evens out response time, no result depends on it.
+            $this->spendCompare($this->hash($presentedToken)); // @pest-mutate-ignore: RemoveMethodCall
 
             return TokenMatch::None;
         }
@@ -299,8 +296,8 @@ final class TokenCodec
             return TokenMatch::Previous;
         }
 
-        // Timing-only compare when both current and previous hashes missed.
-        $this->spendCompare($presentedHash);
+        // Timing-only (equivalent mutant): evens out the miss path against a previous-hash hit.
+        $this->spendCompare($presentedHash); // @pest-mutate-ignore: RemoveMethodCall
 
         return TokenMatch::None;
     }
@@ -314,13 +311,14 @@ final class TokenCodec
             ($this->onDummyMatch)();
         }
 
-        $this->spendCompare($this->hash($presentedToken));
+        // Timing-only (equivalent mutant): the onDummyMatch probe above is what tests observe.
+        $this->spendCompare($this->hash($presentedToken)); // @pest-mutate-ignore: RemoveMethodCall
     }
 
     private function spendCompare(string $presentedHash): void
     {
-        // Equalises compare work on a miss; branch bodies are intentional no-ops.
-        if (hash_equals(self::DUMMY_DIGEST, $presentedHash)) {
+        // Equalises compare work on a miss; both branches are no-ops, so negating the condition is equivalent.
+        if (hash_equals(self::DUMMY_DIGEST, $presentedHash)) { // @pest-mutate-ignore: IfNegated
             return;
         }
     }
@@ -334,9 +332,9 @@ final class TokenCodec
         #[\SensitiveParameter] string $presentedToken,
     ): ?array {
         $product = preg_quote($this->productPrefix, '/');
-        $idLength = $this->idLength();
-        $secretLength = $this->secretLength();
-        $checksumLength = $this->checksumLength();
+        $idLength = self::ID_LENGTH;
+        $secretLength = self::SECRET_LENGTH;
+        $checksumLength = self::CHECKSUM_LENGTH;
 
         $version2 = '/^(?<prefix>'.$product.'_(?:live|test)_[A-Za-z0-9]{'.$idLength.'})(?<secret>[A-Za-z0-9]{'.$secretLength.'})(?<checksum>[A-Za-z0-9]{'.$checksumLength.'})$/D';
         if (preg_match($version2, $presentedToken, $version2Matches) === 1) {
@@ -372,36 +370,12 @@ final class TokenCodec
         $alphabetLength = strlen($alphabet);
         $output = '';
 
-        for ($index = 0; $index < $this->checksumLength(); $index++) {
+        for ($index = 0; $index < self::CHECKSUM_LENGTH; $index++) {
             $output = $alphabet[$crc % $alphabetLength].$output;
             $crc = intdiv($crc, $alphabetLength);
         }
 
         return $output;
-    }
-
-    /**
-     * Operational id length (≥ fleet public id). Mutate-covered; keep in sync with ID_LENGTH.
-     */
-    private function idLength(): int
-    {
-        return 8;
-    }
-
-    /**
-     * Operational secret length (≥160 bits of base62). Mutate-covered; keep in sync with SECRET_LENGTH.
-     */
-    private function secretLength(): int
-    {
-        return 32;
-    }
-
-    /**
-     * Operational checksum length. Mutate-covered; keep in sync with CHECKSUM_LENGTH.
-     */
-    private function checksumLength(): int
-    {
-        return 6;
     }
 
     /**

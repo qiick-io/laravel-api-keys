@@ -52,17 +52,19 @@ return [
 
     /*
      * Pre-auth per-IP brake for unknown/invalid tokens. 0 disables.
-     * Recipes should leave this on (20/min).
+     * Recipes should leave this on (20/min). Not cast: anything but digits
+     * fails at boot, so a typo cannot silently switch the brake off.
      */
-    'failed_attempts_per_minute' => (int) env('API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 20),
+    'failed_attempts_per_minute' => env('API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 20),
 
     /*
-     * Optional max lifetime in days for issue/rotate when a LifetimePolicy is bound.
-     * Null disables the package-side default policy.
+     * Optional organisation max lifetime in days, enforced on rotation by the
+     * default ConfigLifetimePolicy (a product binding of LifetimePolicy
+     * replaces it). Unset disables it; any other value must be a whole number
+     * >= 1, or the app fails at boot. Not cast here, so a typo cannot
+     * silently become another number.
      */
-    'max_lifetime_days' => env('API_KEYS_MAX_LIFETIME_DAYS') !== null
-        ? (int) env('API_KEYS_MAX_LIFETIME_DAYS')
-        : null,
+    'max_lifetime_days' => env('API_KEYS_MAX_LIFETIME_DAYS'),
 
     'expiry' => [
         /*
@@ -77,9 +79,10 @@ return [
          * (expiry_notice_claimed_at). Keep this above worst-case send latency:
          * an in-flight send longer than the lease can be reclaimed by another
          * worker and produce a second notice. Workers must share NTP-synced
-         * UTC; skew can reclaim a live claim early.
+         * UTC; skew can reclaim a live claim early. Digits only, >= 1, or the
+         * app fails at boot.
          */
-        'claim_lease_seconds' => (int) env('API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 900),
+        'claim_lease_seconds' => env('API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 900),
 
         /*
          * Roles resolved by ExpiryRecipientResolver: owner, issuer, organisation.
@@ -113,7 +116,7 @@ return [
         /*
          * Warn this many days before accept_until (legacy format EOL). 0 disables.
          */
-        'warn_days_before' => (int) env('API_KEYS_LEGACY_WARN_DAYS_BEFORE', 90),
+        'warn_days_before' => env('API_KEYS_LEGACY_WARN_DAYS_BEFORE', 90),
 
         /*
          * Notification class for the T−90 legacy-format warning (N2).

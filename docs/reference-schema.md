@@ -60,7 +60,7 @@ keep the owner column nullable until the principals programme lands.
   `{product}_{env}_{id}{secret}`. `2` appends a 6-character base62 CRC32
   checksum (GitHub construction) and is the default for new issuance; `1` stays
   accepted.
-- **`hash_algorithm`:** `sha256` (SHA-256 of the whole presented token).
+- **`hash_algorithm`:** `sha256` (SHA-256 of the whole presented token), the only algorithm in 1.x; changing it needs a major release (`docs/decisions/2026-11-24-sha-256-only.md`).
 - **`credential_kind`:** `api_key`, `oauth_grant`.
 - **`revoked_reason`:** `user`, `admin`, `owner`, `exposure`, `policy`, `reuse`,
   `reconsent`, `system` (superset of mcp-oauth `RevocationReason`).

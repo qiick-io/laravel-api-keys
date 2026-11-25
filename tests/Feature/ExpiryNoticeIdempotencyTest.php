@@ -19,6 +19,8 @@ use Qiick\ApiKeys\Testing\FixedClock;
 use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\Tests\Support\ThrowingExpiryNotification;
 
+mutates(NotifyExpiringApiKeysCommand::class);
+
 /**
  * B1: expiry notice claim lease + mark-after-send are load-bearing.
  */

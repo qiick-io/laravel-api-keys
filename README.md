@@ -24,19 +24,18 @@ Part of the qiick fleet. Binding design:
 
 ## Status
 
-Pre-release `0.2.0`. Public APIs may change in any 0.x release; see
-[UPGRADING.md](./UPGRADING.md). Pin an exact version. Packagist publish only
-after Luca’s go.
+Beta `0.3.0-beta.1`. Public APIs may change in any 0.x release; see
+[UPGRADING.md](./UPGRADING.md). Pin an exact version.
 
 ## Requirements
 
 - PHP `^8.3`
 - Illuminate console / contracts / http / notifications / support `^12.0 \|\| ^13.0` (never `laravel/framework`)
 
-## Install (when published)
+## Install
 
 ```bash
-composer require qiick/laravel-api-keys
+composer require qiick/laravel-api-keys:0.3.0-beta.1
 php artisan vendor:publish --tag=api-keys-config
 ```
 
@@ -48,7 +47,7 @@ Set `API_KEYS_PRODUCT_PREFIX` (three-letter product code) before issuing tokens.
 | --- | --- |
 | Proxies | `KeyContext::ip` / `ClientIp::from` MUST use `Request::ip()` only after `TrustProxies` is configured correctly. Never pass raw `X-Forwarded-For` / `X-Real-IP` from untrusted clients. |
 | Enumeration | Format-miss and hash-miss return the **same** `401 invalid_token` body/headers. A dummy `hash_equals` runs when no candidates match. Pre-auth `FailedAttemptLimiter` is default-on in recipes. The public `key_prefix` is non-secret by design. |
-| Failed-attempt brake | Buckets IPv4 by `/32` and IPv6 by `/64`. IPv4-mapped (`::ffff:a.b.c.d`) expands to dotted IPv4 before bucketing (same path as `IpAllowlist`). Null/empty/unparseable client IPs **skip** the brake (never share one bucket — that would lock out everyone behind a misconfigured proxy). Repository/infra exceptions are **not** counted. Shared egress / NAT: many clients behind one public IP share one bucket and can lock each other out; keep the recipe default **on** (20/min) and raise only with a clear threat model. Wire after `TrustProxies` so `KeyContext::ip` is the real client, not the LB. |
+| Failed-attempt brake | Buckets IPv4 by `/32` and IPv6 by `/64`. IPv4-mapped (`::ffff:a.b.c.d`) expands to dotted IPv4 before bucketing (same path as `IpAllowlist`). Null/empty/unparseable client IPs **skip** the brake (never share one bucket — that would lock out everyone behind a misconfigured proxy). Repository/infra exceptions are **not** counted. The brake counts only failed guesses (one atomic `AttemptLimiter::hit` each), so valid requests in flight never take a slot. Once the bucket is full, a guess over the limit **and** a correct key are both answered `429 rate_limit_exceeded`, so racing guesses reveal at most the limit's worth of outcomes per window. Shared egress / NAT: many clients behind one public IP share one bucket and can lock each other out; keep the recipe default **on** (20/min) and raise only with a clear threat model. Wire after `TrustProxies` so `KeyContext::ip` is the real client, not the LB. An IPv6 /64 per bucket leaves an attacker holding a /48 65,536 buckets: pass `maxPerMinutePerIpv6Slash48` (at least 1) for a second tier over the whole /48. |
 | Redaction | Presented tokens / Bearer values MUST NEVER appear in exception messages, JSON bodies, logs, telemetry, activity properties, or `__debugInfo`. |
 | Scopes | Fail-closed: whitespace, wrong case, duplicates, or non-vocabulary values → empty set → `403 insufficient_scope` (never 401). |
 | Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint; lowercase UUID; rejects non-UUID, nil UUID, and a conflicting existing `api_key_id`). |
@@ -74,9 +73,43 @@ See [docs/reference-schema.md](./docs/reference-schema.md) for the full column l
 ## Quotas (minute / day / month)
 
 `rate_limit_per_minute`, `rate_limit_per_day`, and `rate_limit_per_month` are
-enforced as **rolling windows** through Laravel's `RateLimiter` (decay 60 s /
+enforced as **fixed windows** opened by their first hit (decay 60 s /
 86_400 s / 2_592_000 s). They are not calendar day or calendar month buckets.
+A refusal carries `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`
+and `X-RateLimit-Reset`; `X-RateLimit-Reset` is the number of **seconds** until
+the window resets (like `Retry-After`), not an epoch timestamp.
 Durable calendar quotas are LATER (standards review L4).
+
+Limits hold under concurrency: the authenticator counts a request first with
+`AttemptLimiter::hit()`, one atomic increment that returns the new count, and
+refuses it when that count is over the limit. A refused request hands back the
+hits it took on every window, so it counts against none of them. It never
+checks and then counts in two steps.
+
+The package binds `CacheAttemptLimiter` on your default cache store. An unsupported store (Laravel's default is `database`) throws when the limiter is first resolved; boot does not check it, so artisan keeps working. Run `php artisan api-keys:check` in the deploy pipeline: it exits 1 on an unsupported store or invalid settings. It
+accepts only stores that can count atomically across workers and throws
+otherwise:
+
+| Store | How it stays atomic |
+| --- | --- |
+| Redis | One Lua script per call: `INCR` plus `EXPIRE` on the first hit; `DECR` only on an existing counter above zero. |
+| Memcached | Atomic `add` (with the window as TTL) then `increment`; `decrement` is a no-op on a missing key and floors at zero. |
+| Array | Single process only: tests and local development. |
+| Database, file, others | Refused: their `add` / `increment` are not atomic. |
+
+A decrement that arrives after its window expired finds no counter and does
+nothing, so counts never go negative; if another request already opened the
+next window, the late decrement lands there (at most the refunds in flight
+across the boundary). Windows must last at least one second:
+`RateLimitDecision` and `hit()` refuse shorter ones, which would open the limit
+on Redis. Do **not** adapt Laravel's
+`RateLimiter` instead: its `increment()` recreates counters with a non-atomic
+`put()` and its decrement can leave negative counters, so parallel requests
+overshoot the limit. To use a store other than the default, bind your own:
+
+```php
+$this->app->singleton(AttemptLimiter::class, fn () => new CacheAttemptLimiter(Cache::store('redis')));
+```
 
 ## Expiry notices (claim lease)
 
@@ -92,6 +125,59 @@ Two operational risks (accepted as documented nits after #18):
 2. **Send longer than the lease.** If delivery (mail, queue, webhook) exceeds
    `api-keys.expiry.claim_lease_seconds` (default **900**), another worker can
    win the CAS and send a second notice. Raise the lease, or keep sends short.
+
+The legacy-format T−90 warning follows the same protocol with the same lease,
+through `LegacyFormatWarningGate` (cache-backed by default): recipients are
+resolved first, so a key with no recipient yet stays claimable; a failed send
+releases the lease (only its owner can: the lease is a cache lock with an
+owner token) and the next run retries; a worker that dies mid-send
+leaves a lease that lapses after `claim_lease_seconds`; a sent warning is
+marked permanently and never repeats. The cache must be shared by all workers.
+
+## Max key lifetime
+
+`api-keys.max_lifetime_days` (`API_KEYS_MAX_LIFETIME_DAYS`) is enforced on
+rotation by the default `ConfigLifetimePolicy`: `RotationService` refuses an
+expiry later than now + that many days, or no expiry at all. Unset disables
+it. Any other value must be a whole number >= 1; anything else (`0`, `30abc`,
+`thirty`) fails at boot instead of being silently cast. Bind your own
+`Contracts\LifetimePolicy` to replace the default.
+
+Issuance is product-owned (`TokenCodec::issue()` persists nothing), so check the
+policy before inserting a new key; the same refusal is used on rotation:
+
+```php
+$expiresAt = $request->date('expires_at')?->toImmutable();
+
+LifetimeAssertion::assertAllows(app(LifetimePolicy::class), $expiresAt, $clock->now());
+
+$token = $codec->issue();
+ApiKey::create([/* ... */ 'expires_at' => $expiresAt, 'key_hash' => $token->keyHash]);
+```
+
+## Exposed keys
+
+`Contracts\CompromisedKeyRevoker` is the seam for automatic revocation when a
+key is reported exposed (a secret-scanning partner callback, a manual report).
+The package ships no scanner adapter (dated decision in `docs/decisions`): the
+product verifies the scanner's request, then revokes and announces it:
+
+```php
+final class RevokeExposedKey implements CompromisedKeyRevoker
+{
+    public function revokeExposed(ApiKeyRecord $record, string $exposureSource, DateTimeImmutable $exposedAt): void
+    {
+        ApiKey::query()->whereKey($record->id())->update([
+            'exposed_at' => $exposedAt,
+            'exposure_source' => $exposureSource,
+            'revoked_at' => $exposedAt,
+            'revoked_reason' => RevocationReason::Exposure->value,
+        ]);
+
+        event(new ApiKeyExposed($record->publicId(), $exposureSource, $exposedAt));
+    }
+}
+```
 
 ## Rotation (product persistence)
 
@@ -139,17 +225,25 @@ Extract the bearer first (`BearerTokenExtractor`: no trim; case-insensitive
 `Bearer`), then call
 `ApiKeyAuthenticator::authenticate($presentedToken, $context, $requiredScope)`:
 
-1. Pre-auth `FailedAttemptLimiter` (IPv4 `/32`, IPv6 `/64`; default 20/min in recipes) →
+1. Pre-auth `FailedAttemptLimiter` (IPv4 `/32`, IPv6 `/64`; default 20/min in
+   recipes): a full bucket refuses at once; an `invalid_token` outcome is
+   counted, and answered `429` when it goes over the limit →
 2. Token format (`TokenCodec::prefixOf`, including legacy matchers when configured) →
 3. Lookup by `key_prefix` / in-grace `previous_key_prefix` + `hash_equals`
    (dummy compare on miss; row `hash_algorithm`) →
 4. Refuse `credential_kind = oauth_grant` as `401 invalid_token` →
 5. Revoked / expired / unknown `token_version` →
-6. Actor (`KeyAuthorizer::authorizeActor`) →
+6. Actor (`KeyAuthorizer::authorizeActor`); then, the credential being valid,
+   a full failed-attempt bucket still answers `429` →
 7. IP allowlist →
 8. Request restrictions (`KeyRestrictions` / `RequestRestrictionsEvaluator`;
    malformed or denied → `403 request_not_allowed`; scheme/host compared
-   case-insensitively) →
+   case-insensitively). Origin wildcards must sit on a registrable domain:
+   `*.example.com` yes; `*.com`, `*.co.uk`, `*.github.io` (anyone can register
+   a sibling there) no, per a bundled snapshot of the Public Suffix List.
+   `new RequestRestrictions(...)` validates its own lists
+   and throws `InvalidArgumentException` on a pattern the evaluator would not
+   understand, so a hand-built instance cannot fail open →
 9. Scopes: expand → owner ceiling via `scopesCreatorMayGrant` on the **record**
    (C1: the product decides ownerless/creator-less keys; write may demote to
    read) → collapse highest-per-resource → required scope / `authorizeScopes` →
@@ -162,17 +256,21 @@ Extract the bearer first (`BearerTokenExtractor`: no trim; case-insensitive
 
 ### Wiring the failed-attempt brake (recipe default ON)
 
-```php
-$failedAttempts = new FailedAttemptLimiter(
-    limiter: $attemptLimiter, // your RateLimiter adapter
-    maxPerMinute: 20,         // ≤0 disables; leave ON unless you have a reason
-);
+The package binds `FailedAttemptLimiter` on the bound `AttemptLimiter`, sized by
+`api-keys.failed_attempts_per_minute` (`API_KEYS_FAILED_ATTEMPTS_PER_MINUTE`,
+default 20; `0` disables). Pass it to the authenticator; bind your own (for
+example with the IPv6 /48 tier) to replace it:
 
+```php
 $auth = new ApiKeyAuthenticator(
     // ...
-    failedAttemptLimiter: $failedAttempts,
+    failedAttemptLimiter: app(FailedAttemptLimiter::class),
 );
 ```
+
+`php artisan api-keys:check` also builds the token codec, so an empty
+`product_prefix`, a `token_version` other than 1 or 2, or an `environment` other
+than `live`/`test` fails the deploy check.
 
 Pass `KeyContext::ip` from `ClientIp::from($request)` only after `TrustProxies` is correct.
 Clients behind CGNAT / shared office egress share one IPv4 bucket — tune `maxPerMinute`
@@ -224,7 +322,7 @@ if ($result->legacyMatcherClass !== null) {
     ));
 }
 event(new ApiKeyAuthenticated(
-    $result->record->id(),
+    $result->record->publicId(), // the public UUID, never the internal row id
     $result->record->keyPrefix(),
     $result->usedPreviousSecret,
     $context->ip,
@@ -235,6 +333,23 @@ Pest helpers (`assertTokenAbsentFrom`, `assertInvalidToken`, `assertInsufficient
 `assertIpNotAllowed`, `assertLegacyTokenUsed`) ship under `Qiick\ApiKeys\Testing\` via
 **autoload-dev** only. Consumer apps should `require` `vendor/qiick/laravel-api-keys/src/Testing/functions.php`
 from their `Pest.php` (do not put them on production `autoload.files`).
+
+## Public API and deprecation policy
+
+The frozen public surface (classes, config keys, env names, commands, events and
+wire formats) is listed in [docs/public-api.md](./docs/public-api.md); anything
+else in `src/` is `@internal`. This package follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html):
+
+- **Deprecation in minor releases:** a deprecated public API (class, method,
+  interface, config key or environment variable) is marked `@deprecated` with
+  its replacement, recorded under "Deprecated" in `CHANGELOG.md` and in
+  `UPGRADING.md`, and keeps working for at least one minor release. A renamed
+  config key or env name is still read as a fallback until removal.
+- **Removal in major releases only:** nothing deprecated is removed within the
+  same major version; removals happen at the next major (`2.0.0`).
+- **Pre-1.0:** in `0.x`, breaking changes are recorded in `UPGRADING.md` before
+  each tagged release. From `1.0.0` the public API above is frozen.
 
 ## Development
 

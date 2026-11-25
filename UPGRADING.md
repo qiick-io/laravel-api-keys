@@ -16,7 +16,7 @@ authenticating after you upgrade, with no migration. Each CHANGELOG entry says
 whether the list changed; before upgrading, search stored `restrictions` for
 wildcards over the suffixes it names.
 
-## From 0.2.0 to the next release (0.3.0)
+## From 0.2.0 to 0.3.0-beta.1
 
 ### Contract breaks
 
@@ -97,7 +97,7 @@ pre-1.0 additions versus the 0.1.0 sketch:
 - New Artisan command: `api-keys:notify-expiring` (bind `ExpiryRecipientResolver`).
 - Day/month quotas (`rate_limit_per_day` / `rate_limit_per_month`) are windows of
   86_400 / 2_592_000 seconds, not calendar day/month buckets. Durable calendar
-  quotas remain LATER. (Since the next release they are counted by
+  quotas remain LATER. (Since 0.3.0-beta.1 they are counted by
   `CacheAttemptLimiter`, see above.)
 - Origin/referrer restriction patterns are structured: exact origin,
   `scheme://*.example.com[:port]` on the host-label boundary, and referrer path

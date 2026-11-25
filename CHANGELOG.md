@@ -13,6 +13,12 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Fixed
+
+- When the stored `scopes` do not decode, the 403 names the required scope
+  (`scope=` in `WWW-Authenticate` and the JSON), like the other
+  `insufficient_scope` refusals (#73).
+
 ## [0.3.0-beta.2] - 2026-11-25
 
 Second beta: Redis is no longer required, and the fixes found while adopting

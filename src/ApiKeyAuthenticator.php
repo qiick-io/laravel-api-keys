@@ -190,7 +190,7 @@ final class ApiKeyAuthenticator
         }
 
         $expanded = ScopeSet::parseStoredExpanded(
-            $this->decodedStoredJson($matched, 'scopes', $matched->rawScopes(), ApiKeyRejection::noUsableScopes(...)),
+            $this->decodedStoredJson($matched, 'scopes', $matched->rawScopes(), fn (): ApiKeyRejection => ApiKeyRejection::noUsableScopes($requiredScope?->value())),
             $this->vocabulary,
         );
         if ($expanded->isEmpty()) {

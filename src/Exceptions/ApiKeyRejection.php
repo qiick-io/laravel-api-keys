@@ -6,6 +6,7 @@ namespace Qiick\ApiKeys\Exceptions;
 
 use Illuminate\Http\JsonResponse;
 use Qiick\ApiKeys\KeyRejectionCode;
+use Qiick\ApiKeys\Scope;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /**
@@ -57,8 +58,17 @@ final class ApiKeyRejection extends HttpException
         );
     }
 
+    /**
+     * @throws \InvalidArgumentException when `$scope` is not a scope atom: it goes
+     *                                   into the `WWW-Authenticate` header verbatim,
+     *                                   so a quote or CRLF would inject into it
+     */
     public static function insufficientScope(string $scope): self
     {
+        if (Scope::tryFromString($scope) === null) {
+            throw new \InvalidArgumentException('The required scope must be a scope atom such as items:read.');
+        }
+
         return new self(
             403,
             self::translate(

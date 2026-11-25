@@ -86,16 +86,37 @@ refuses it when that count is over the limit. A refused request hands back the
 hits it took on every window, so it counts against none of them. It never
 checks and then counts in two steps.
 
-The package binds `CacheAttemptLimiter` on your default cache store. An unsupported store (Laravel's default is `database`) throws when the limiter is first resolved; boot does not check it, so artisan keeps working. Run `php artisan api-keys:check` in the deploy pipeline: it exits 1 on an unsupported store or invalid settings. It
-accepts only stores that can count atomically across workers and throws
-otherwise:
+`api-keys.attempt_limiter` (`API_KEYS_ATTEMPT_LIMITER`) picks the bound limiter.
+Redis is not required:
+
+| Setting | Limiter |
+| --- | --- |
+| `auto` (default) | `CacheAttemptLimiter` when the default cache store is Redis, Memcached or array; `DatabaseAttemptLimiter` on any other store (Laravel's default `database`, `file`, …). |
+| `cache` | Always `CacheAttemptLimiter`; any store but Redis, Memcached or array throws when the limiter is first resolved. |
+| `database` | Always `DatabaseAttemptLimiter`, on the default database connection. |
+
+Both count atomically across workers:
 
 | Store | How it stays atomic |
 | --- | --- |
 | Redis | One Lua script per call: `INCR` plus `EXPIRE` on the first hit; `DECR` only on an existing counter above zero. |
 | Memcached | Atomic `add` (with the window as TTL) then `increment`; `decrement` is a no-op on a missing key and floors at zero. |
 | Array | Single process only: tests and local development. |
-| Database, file, others | Refused: their `add` / `increment` are not atomic. |
+| Database (SQLite, MySQL 8.4, MariaDB 11.4, PostgreSQL 17) | Insert-or-ignore on the bucket's primary key, then one `UPDATE hits = hits + 1` (or a new window on a stale row) and the read-back in one transaction. |
+
+`DatabaseAttemptLimiter` needs the `api_key_attempts` table from
+[docs/reference-schema.md](./docs/reference-schema.md) (the table name is
+`api-keys.attempt_limiter_table`). Put it in your own migration: the package
+ships none. A row whose window has ended counts as empty; schedule
+`php artisan api-keys:prune-attempts` (hourly is plenty) to delete those rows.
+On SQLite, set a `busy_timeout` on the connection so parallel workers wait for
+the write lock instead of failing.
+
+Boot checks neither the cache store nor the table, so artisan keeps working.
+Run `php artisan api-keys:check` in the deploy pipeline: it prints the active
+limiter and exits 1 on an unsupported store, a missing table or invalid
+settings. If the store or the table is unavailable at request time, the
+authenticator answers `503 service_unavailable`: the limits are never skipped.
 
 A decrement that arrives after its window expired finds no counter and does
 nothing, so counts never go negative; if another request already opened the
@@ -105,10 +126,13 @@ across the boundary). Windows must last at least one second:
 on Redis. Do **not** adapt Laravel's
 `RateLimiter` instead: its `increment()` recreates counters with a non-atomic
 `put()` and its decrement can leave negative counters, so parallel requests
-overshoot the limit. To use a store other than the default, bind your own:
+overshoot the limit. To use a store or connection other than the default,
+bind your own:
 
 ```php
 $this->app->singleton(AttemptLimiter::class, fn () => new CacheAttemptLimiter(Cache::store('redis')));
+// or
+$this->app->singleton(AttemptLimiter::class, fn () => new DatabaseAttemptLimiter(DB::connection('tenant')));
 ```
 
 ## Expiry notices (claim lease)

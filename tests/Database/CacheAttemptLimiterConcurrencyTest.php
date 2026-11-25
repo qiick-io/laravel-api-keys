@@ -3,9 +3,10 @@
 declare(strict_types=1);
 
 /**
- * Real-store proof that CacheAttemptLimiter is atomic across processes.
+ * Real-store proof that CacheAttemptLimiter (redis, memcached) and
+ * DatabaseAttemptLimiter (sqlite, mysql, mariadb, pgsql) are atomic across processes.
  *
- * Runs only in the CI databases smoke job (API_KEYS_LIMITER_STORE=redis|memcached)
+ * Runs only in the CI databases smoke job (API_KEYS_LIMITER_STORE=<store>)
  * or locally against a reachable server; every worker is a separate PHP
  * process started at the same instant, like parallel PHP-FPM workers.
  */
@@ -14,7 +15,7 @@ function limiterStoreUnderTest(): ?string
     $store = getenv('API_KEYS_LIMITER_STORE');
 
     // "both" is the in-process mutation job; the races run once per store in the smoke matrix.
-    return in_array($store, ['redis', 'memcached'], true) ? $store : null;
+    return in_array($store, ['redis', 'memcached', 'sqlite', 'mysql', 'mariadb', 'pgsql'], true) ? $store : null;
 }
 
 /**
@@ -57,7 +58,11 @@ function limiterWorker(string $operation, string $target): string
 
 beforeEach(function (): void {
     if (limiterStoreUnderTest() === null) {
-        $this->markTestSkipped('Set API_KEYS_LIMITER_STORE=redis|memcached to race a real store.');
+        $this->markTestSkipped('Set API_KEYS_LIMITER_STORE=redis|memcached|sqlite|mysql|mariadb|pgsql to race a real store.');
+    }
+
+    if (! in_array(limiterStoreUnderTest(), ['redis', 'memcached'], true)) {
+        limiterWorker('setup', 'api_key_attempts');
     }
 
     limiterWorker('forget', 'api-key-failures:v4:203.0.113.10');

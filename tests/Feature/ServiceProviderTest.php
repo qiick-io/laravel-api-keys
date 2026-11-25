@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-use Illuminate\Support\Facades\File;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use Qiick\ApiKeys\CacheAttemptLimiter;
 use Qiick\ApiKeys\ConfigLifetimePolicy;
@@ -15,6 +15,7 @@ use Qiick\ApiKeys\DatabaseAttemptLimiter;
 use Qiick\ApiKeys\FailedAttemptLimiter;
 use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\RotationService;
+use Qiick\ApiKeys\Testing\FakeAttemptLimiter;
 use Qiick\ApiKeys\Testing\FixedClock;
 use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\Tests\Support\RegexLegacyTokenMatcher;
@@ -485,4 +486,37 @@ it('fails api-keys:prune-attempts when the table is missing', function (): void 
     $this->artisan('api-keys:prune-attempts')
         ->expectsOutputToContain('The api_key_attempts table is missing')
         ->assertFailed();
+});
+
+it('names an attempt limiter the application bound in api-keys:check', function (): void {
+    app()->instance(AttemptLimiter::class, new FakeAttemptLimiter);
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain('Attempt limiter: '.FakeAttemptLimiter::class.' (bound by the application).')
+        ->assertSuccessful();
+});
+
+it('prunes the table of the attempt limiter the application bound', function (): void {
+    Schema::create('tenant_attempts', function (Blueprint $blueprint): void {
+        $blueprint->string('bucket', 255)->primary();
+        $blueprint->unsignedInteger('hits')->default(0);
+        $blueprint->unsignedBigInteger('expires_at')->index();
+    });
+    $this->freezeTime();
+    $limiter = new DatabaseAttemptLimiter(DB::connection(), 'tenant_attempts');
+    app()->instance(AttemptLimiter::class, $limiter);
+    $limiter->hit('ended', 10);
+    $this->travel(10)->seconds();
+
+    $this->artisan('api-keys:prune-attempts')
+        ->expectsOutputToContain('Pruned 1 ended attempt windows.')
+        ->assertSuccessful();
+});
+
+it('has nothing to prune when the attempt limiter is the cache', function (): void {
+    useDefaultCacheStore('array');
+
+    $this->artisan('api-keys:prune-attempts')
+        ->expectsOutputToContain('The attempt limiter does not use the database: nothing to prune.')
+        ->assertSuccessful();
 });

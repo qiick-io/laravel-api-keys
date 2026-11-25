@@ -58,6 +58,18 @@ return [
     'failed_attempts_per_minute' => env('API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 20),
 
     /*
+     * Where the per-key limits and the failed-attempt brake count attempts.
+     * auto: the cache when the default store is redis or memcached (or array,
+     * in tests), the database otherwise. cache: always the cache store, which
+     * must be one of those. database: always the attempt table below, which
+     * the product creates from docs/reference-schema.md; schedule
+     * api-keys:prune-attempts to delete ended windows.
+     */
+    'attempt_limiter' => env('API_KEYS_ATTEMPT_LIMITER', 'auto'),
+
+    'attempt_limiter_table' => env('API_KEYS_ATTEMPT_LIMITER_TABLE', 'api_key_attempts'),
+
+    /*
      * Optional organisation max lifetime in days, enforced on rotation by the
      * default ConfigLifetimePolicy (a product binding of LifetimePolicy
      * replaces it). Unset disables it; any other value must be a whole number

@@ -16,6 +16,20 @@ authenticating after you upgrade, with no migration. Each CHANGELOG entry says
 whether the list changed; before upgrading, search stored `restrictions` for
 wildcards over the suffixes it names.
 
+## From 0.3.0-beta.1 to 0.3.0-beta.2
+
+- Redis or Memcached is no longer required. With the default
+  `API_KEYS_ATTEMPT_LIMITER=auto`, any default cache store other than Redis,
+  Memcached or array uses `DatabaseAttemptLimiter`, which needs the
+  `api_key_attempts` table from `docs/reference-schema.md`. Pre-1.0 products add
+  it to their `create_` migrations. Schedule `php artisan api-keys:prune-attempts`
+  (hourly is plenty).
+- Until the table exists, every authentication answers
+  `503 service_unavailable` (fail closed) and `api-keys:check` fails with a
+  message that names the table. To stay on the cache, use Redis or Memcached,
+  or set `API_KEYS_ATTEMPT_LIMITER=cache`.
+- Apps on Redis or Memcached change nothing.
+
 ## From 0.2.0 to 0.3.0-beta.1
 
 ### Contract breaks

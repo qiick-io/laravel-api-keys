@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Qiick\ApiKeys\Laravel;
 
+use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\MemcachedStore;
+use Illuminate\Cache\RedisStore;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Foundation\Application;
@@ -14,12 +17,14 @@ use Qiick\ApiKeys\CacheLegacyFormatWarningGate;
 use Qiick\ApiKeys\ConfigLifetimePolicy;
 use Qiick\ApiKeys\Console\Commands\CheckApiKeysConfigurationCommand;
 use Qiick\ApiKeys\Console\Commands\NotifyExpiringApiKeysCommand;
+use Qiick\ApiKeys\Console\Commands\PruneApiKeyAttemptsCommand;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
 use Qiick\ApiKeys\Contracts\RandomSource;
+use Qiick\ApiKeys\DatabaseAttemptLimiter;
 use Qiick\ApiKeys\FailedAttemptLimiter;
 use Qiick\ApiKeys\LegacyCutoff;
 use Qiick\ApiKeys\LegacyTokenMatcher;
@@ -74,10 +79,29 @@ final class ApiKeysServiceProvider extends ServiceProvider
         $this->app->singleton(RandomSource::class, RandomBytesSource::class);
         $this->app->singleton(LegacyFormatWarningGate::class, CacheLegacyFormatWarningGate::class);
 
-        // The default cache store must be redis or memcached (array in tests); a product binding wins.
+        $this->app->singleton(
+            DatabaseAttemptLimiter::class,
+            fn (Application $app): DatabaseAttemptLimiter => new DatabaseAttemptLimiter(
+                $app->make('db')->connection(),
+                $this->attemptLimiterTable(),
+            ),
+        );
+
+        // api-keys.attempt_limiter picks the store (see config/api-keys.php); a product binding wins.
         $this->app->singletonIf(
             AttemptLimiter::class,
-            fn (Application $app): AttemptLimiter => new CacheAttemptLimiter($app->make(CacheRepository::class)),
+            function (Application $app): AttemptLimiter {
+                $cache = $app->make(CacheRepository::class);
+                $store = $cache->getStore();
+
+                $isCacheLimiter = match ($this->attemptLimiterDriver()) {
+                    'cache' => true,
+                    'database' => false,
+                    'auto' => $store instanceof RedisStore || $store instanceof MemcachedStore || $store instanceof ArrayStore,
+                };
+
+                return $isCacheLimiter ? new CacheAttemptLimiter($cache) : $app->make(DatabaseAttemptLimiter::class);
+            },
         );
 
         // The brake products pass to ApiKeyAuthenticator, sized by api-keys.failed_attempts_per_minute.
@@ -168,6 +192,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
             $this->commands([
                 NotifyExpiringApiKeysCommand::class,
                 CheckApiKeysConfigurationCommand::class,
+                PruneApiKeyAttemptsCommand::class,
             ]);
         }
     }
@@ -189,6 +214,35 @@ final class ApiKeysServiceProvider extends ServiceProvider
         $this->assertWholeNumberAtLeast('api-keys.failed_attempts_per_minute', 'API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 0);
         $this->assertWholeNumberAtLeast('api-keys.expiry.claim_lease_seconds', 'API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 1);
         $this->assertWholeNumberAtLeast('api-keys.legacy.warn_days_before', 'API_KEYS_LEGACY_WARN_DAYS_BEFORE', 0);
+        $this->attemptLimiterDriver();
+        $this->attemptLimiterTable();
+    }
+
+    /**
+     * @return 'auto'|'cache'|'database'
+     *
+     * @throws \InvalidArgumentException on any other value: a typo must not pick a store silently
+     */
+    private function attemptLimiterDriver(): string
+    {
+        $driver = $this->config($this->app)->get('api-keys.attempt_limiter');
+
+        return match ($driver) {
+            'auto', 'cache', 'database' => $driver,
+            default => throw new \InvalidArgumentException('api-keys.attempt_limiter must be auto, cache or database.'),
+        };
+    }
+
+    /**
+     * @throws \InvalidArgumentException when the table name is empty or not a string
+     */
+    private function attemptLimiterTable(): string
+    {
+        $table = $this->config($this->app)->get('api-keys.attempt_limiter_table');
+
+        return is_string($table) && $table !== ''
+            ? $table
+            : throw new \InvalidArgumentException('api-keys.attempt_limiter_table must be a table name.');
     }
 
     /**

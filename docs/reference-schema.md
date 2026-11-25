@@ -1,6 +1,7 @@
 # Reference schema (products own migrations)
 
-This package ships **no migrations**. Products own Eloquent models and tables.
+This package ships **no migrations**. Products own Eloquent models and tables,
+`api_keys` and, for the database attempt limiter, `api_key_attempts`.
 The columns below are the fleet contract for adoption (see the approved
 `laravel-api-keys-standards-review` knowledge note, 2026-11-22).
 
@@ -71,6 +72,29 @@ keep the owner column nullable until the principals programme lands.
 `oauth_grant_uuid`, `max_lifetime_days`, and a separate `labels` column. Product
 content stays on the product; labels live under `metadata.labels`. The grant id
 **is** `api_keys.uuid`. Owner kind is read from the principal.
+
+## `api_key_attempts` (database attempt limiter)
+
+Needed only when the bound limiter is `DatabaseAttemptLimiter`: `api-keys.attempt_limiter`
+is `database`, or `auto` on a default cache store other than Redis, Memcached or
+array. Pre-1.0 products add it next to their `create_api_keys` migration; the
+table name is `api-keys.attempt_limiter_table`.
+
+| Column | Type | Null | Default | Index | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `bucket` | string(255) | no | — | PK | Limiter bucket, e.g. `api-key:{id}:day`, `api-key-failures:v4:{ip}` |
+| `hits` | unsignedInteger | no | `0` | — | Attempts in the current window |
+| `expires_at` | unsignedBigInteger | no | — | index | End of the window, Unix seconds (app clock); the row counts as empty from this second |
+
+```php
+Schema::create('api_key_attempts', function (Blueprint $table): void {
+    $table->string('bucket', 255)->primary();
+    $table->unsignedInteger('hits')->default(0);
+    $table->unsignedBigInteger('expires_at')->index();
+});
+```
+
+Schedule `api-keys:prune-attempts` to delete rows whose window has ended.
 
 ## `restrictions` JSON (version 1)
 

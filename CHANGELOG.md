@@ -13,6 +13,26 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Added
+
+- `DatabaseAttemptLimiter`: per-key limits and the failed-attempt brake on the
+  product's `api_key_attempts` table (docs/reference-schema.md), atomic across
+  workers on SQLite, MySQL 8.4, MariaDB 11.4 and PostgreSQL 17. Redis is no
+  longer required.
+- `api-keys.attempt_limiter` (`auto` | `cache` | `database`, default `auto`) and
+  `api-keys.attempt_limiter_table`. `auto` keeps the cache on Redis, Memcached
+  or array and uses the database on any other store.
+- `api-keys:prune-attempts` deletes ended attempt windows; `api-keys:check`
+  prints the active limiter and fails when its table is missing.
+- `illuminate/database` (`^12.0 || ^13.0`) is now a direct requirement.
+
+### Upgrade notes
+
+- With `auto`, an app whose default cache store is not Redis or Memcached now
+  gets `DatabaseAttemptLimiter` instead of a resolution error: create the
+  `api_key_attempts` table and schedule `api-keys:prune-attempts`, or set
+  `API_KEYS_ATTEMPT_LIMITER=cache` to keep the previous behaviour.
+
 ## [0.3.0-beta.1] - 2026-11-25
 
 First beta after the red-team and standards reviews: atomic limits, a frozen

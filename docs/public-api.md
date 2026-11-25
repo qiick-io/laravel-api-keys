@@ -25,6 +25,7 @@ Internal on purpose: `RequestRestrictionsEvaluator`, `AppEnvironmentResolver`,
 - `CacheLegacyFormatWarningGate` (class)
 - `ConfigLifetimePolicy` (class)
 - `CredentialKind` (enum)
+- `DatabaseAttemptLimiter` (class)
 - `ExpiryNoticeClaimSql` (class)
 - `ExpiryRecipient` (enum)
 - `FailedAttemptLimiter` (class)
@@ -55,6 +56,7 @@ Internal on purpose: `RequestRestrictionsEvaluator`, `AppEnvironmentResolver`,
 
 - `CheckApiKeysConfigurationCommand` (class)
 - `NotifyExpiringApiKeysCommand` (class)
+- `PruneApiKeyAttemptsCommand` (class)
 
 ### `Qiick\ApiKeys\Contracts`
 
@@ -134,6 +136,8 @@ documents each one.
 - `usage_bypass_throttle_on_ip_change`
 - `default_rate_limit_per_minute`
 - `failed_attempts_per_minute`
+- `attempt_limiter`
+- `attempt_limiter_table`
 - `max_lifetime_days`
 - `expiry.notice_days`
 - `expiry.claim_lease_seconds`
@@ -145,10 +149,13 @@ documents each one.
 - `legacy.warning_notification`
 
 The package also reads `app.timezone` (`api-keys:check` requires UTC) and the
-default cache store (`cache.default`) for the bound `AttemptLimiter`.
+default cache store (`cache.default`) and database connection (`database.default`)
+for the bound `AttemptLimiter`.
 
 ## Environment variables
 
+- `API_KEYS_ATTEMPT_LIMITER`
+- `API_KEYS_ATTEMPT_LIMITER_TABLE`
 - `API_KEYS_DEFAULT_RATE_LIMIT_PER_MINUTE`
 - `API_KEYS_ENVIRONMENT`
 - `API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS`
@@ -169,6 +176,7 @@ default cache store (`cache.default`) for the bound `AttemptLimiter`.
 
 - `api-keys:notify-expiring`
 - `api-keys:check`
+- `api-keys:prune-attempts`
 
 ## Publish tags
 
@@ -176,7 +184,8 @@ default cache store (`cache.default`) for the bound `AttemptLimiter`.
 
 ## Migrations
 
-None. Products own the `api_keys` table; the normative columns are in
+None. Products own the `api_keys` table and, for the database attempt limiter,
+the `api_key_attempts` table; the normative columns are in
 `docs/reference-schema.md`, and `Qiick\ApiKeys\ExpiryNoticeClaimSql` gives the
 claim statements for each engine.
 
@@ -195,6 +204,8 @@ Products may define these keys; each refusal falls back to an English message:
   `WWW-Authenticate` on `invalid_token` and `insufficient_scope`; `Retry-After`
   and `X-RateLimit-*` on `rate_limit_exceeded` (`X-RateLimit-Reset` in seconds
   until the reset, not an epoch timestamp).
+- `api_key_attempts` columns (`bucket`, `hits`, `expires_at` in Unix seconds)
+  and the limiter bucket names stored in `bucket`.
 - Stored values: `CredentialKind`, `RevocationReason`, `TokenEnvironment` and
   `ExpiryRecipient` backing values; the `restrictions` JSON shape version 1
   (`KeyRestrictions::VERSION`).

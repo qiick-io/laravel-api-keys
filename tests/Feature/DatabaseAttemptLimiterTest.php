@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -173,11 +174,19 @@ it('passes on other database errors unchanged', function (): void {
     });
 
     expect(fn () => databaseLimiter()->hit('bucket'))
-        ->toThrow(Illuminate\Database\QueryException::class);
+        ->toThrow(QueryException::class);
 });
 
 it('reports whether its table exists', function (): void {
     expect(databaseLimiter()->hasTable())->toBeTrue()
         ->and(databaseLimiter('missing_attempts')->hasTable())->toBeFalse()
         ->and(databaseLimiter()->table())->toBe('api_key_attempts');
+});
+
+it('fails closed when the counter row vanishes before it is counted', function (): void {
+    // Stands in for a prune that deletes a stale row between the insert and the update.
+    DB::statement('CREATE TRIGGER vanish AFTER INSERT ON api_key_attempts BEGIN DELETE FROM api_key_attempts WHERE bucket = NEW.bucket; END');
+
+    expect(fn () => databaseLimiter()->hit('bucket'))
+        ->toThrow(RuntimeException::class, 'The attempt counter vanished while it was counted.');
 });

@@ -13,25 +13,33 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
-### Added
+### Changed
 
-- `DatabaseAttemptLimiter`: per-key limits and the failed-attempt brake on the
-  product's `api_key_attempts` table (docs/reference-schema.md), atomic across
-  workers on SQLite, MySQL 8.4, MariaDB 11.4 and PostgreSQL 17. Redis is no
-  longer required.
-- `api-keys.attempt_limiter` (`auto` | `cache` | `database`, default `auto`) and
-  `api-keys.attempt_limiter_table`. `auto` keeps the cache on Redis, Memcached
-  or array and uses the database on any other store.
-- `api-keys:prune-attempts` deletes ended attempt windows; `api-keys:check`
-  prints the active limiter and fails when its table is missing.
-- `illuminate/database` (`^12.0 || ^13.0`) is now a direct requirement.
+- The attempt limiter counts with Laravel's own `RateLimiter` on any cache
+  store (`api-keys.cache_store`, default store when null): Redis is no longer
+  required. The package's Lua and Memcached code is gone. Laravel's
+  window-start race is accepted: a burst can admit a few more attempts than
+  the limit, at most once per window (docs/security.md).
+- `CacheAttemptLimiter::__construct()` takes an `Illuminate\Cache\RateLimiter`
+  instead of a cache repository.
+- `api-keys:check` prints the active limiter, fails on the null cache store and
+  warns on the file store and on the array store outside tests. It no longer
+  fails on the database or file store.
+
+### Fixed
+
+- A store that does not count an attempt (an unreachable Memcached, the null
+  store) answers `503 service_unavailable` instead of admitting the request.
+- A refund that arrives after its window expired no longer creates a negative
+  counter that cuts a day or month bucket to 60 seconds.
 
 ### Upgrade notes
 
-- With `auto`, an app whose default cache store is not Redis or Memcached now
-  gets `DatabaseAttemptLimiter` instead of a resolution error: create the
-  `api_key_attempts` table and schedule `api-keys:prune-attempts`, or set
-  `API_KEYS_ATTEMPT_LIMITER=cache` to keep the previous behaviour.
+- Apps on Redis or Memcached change nothing. Other stores now work instead of
+  failing at the first authentication; see UPGRADING.md for the file and
+  SQLite caveats.
+- Code that builds `new CacheAttemptLimiter($cache)` by hand now passes
+  `new RateLimiter($cache)`.
 
 ## [0.3.0-beta.1] - 2026-11-25
 

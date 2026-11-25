@@ -18,17 +18,22 @@ wildcards over the suffixes it names.
 
 ## From 0.3.0-beta.1 to 0.3.0-beta.2
 
-- Redis or Memcached is no longer required. With the default
-  `API_KEYS_ATTEMPT_LIMITER=auto`, any default cache store other than Redis,
-  Memcached or array uses `DatabaseAttemptLimiter`, which needs the
-  `api_key_attempts` table from `docs/reference-schema.md`. Pre-1.0 products add
-  it to their `create_` migrations. Schedule `php artisan api-keys:prune-attempts`
-  (hourly is plenty).
-- Until the table exists, every authentication answers
-  `503 service_unavailable` (fail closed) and `api-keys:check` fails with a
-  message that names the table. To stay on the cache, use Redis or Memcached,
-  or set `API_KEYS_ATTEMPT_LIMITER=cache`.
-- Apps on Redis or Memcached change nothing.
+- Redis or Memcached is no longer required. Attempts are counted with
+  Laravel's `RateLimiter` on `API_KEYS_CACHE_STORE`, or on the default cache
+  store when that is unset. Any store works, but only some are atomic across
+  workers; docs/security.md has the table.
+- **File store:** `api-keys:check` warns. Parallel workers can exceed the
+  limits, even on one server.
+- **SQLite database store:** set `'transaction_mode' => 'IMMEDIATE'` (PHP 8.4+)
+  and a `busy_timeout` on the connection. Otherwise parallel requests answer 503.
+- **Null store:** `api-keys:check` fails, because it keeps no counters.
+- For production, use Redis, Memcached, DynamoDB, or the database store on
+  MySQL or PostgreSQL.
+- `new CacheAttemptLimiter($cache)` becomes
+  `new CacheAttemptLimiter(new RateLimiter($cache))`.
+- The limits may admit a few attempts over the limit at the start of a window
+  (Laravel's `put()` reset, at most once per window). Earlier releases admitted
+  exactly the limit on Redis and Memcached.
 
 ## From 0.2.0 to 0.3.0-beta.1
 

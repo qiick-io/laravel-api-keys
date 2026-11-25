@@ -9,25 +9,26 @@ declare(strict_types=1);
  *
  * Usage: php attempt-limiter-worker.php <store> <operation> <ip-or-key> <max> <start-at>
  * Stores: redis and memcached (CacheAttemptLimiter); sqlite, mysql, mariadb and
- * pgsql (DatabaseAttemptLimiter, on the databases the CI smoke job starts).
+ * pgsql (Laravel's database cache store, on the databases the CI smoke job starts).
  * Operations on the failed-attempt brake for an IP: guess (a failed guess) and
  * request / slow-request (a key that authenticates).
  * Operations on a raw counter key: hit (give the attempt back when over max),
  * hit-short (hit with a one-second window), decrement, forget, and count
- * (prints the stored value, or "missing"). setup (re)creates the database table.
+ * (prints the stored value, or "missing"). setup (re)creates Laravel's cache table.
  */
 
+use Illuminate\Cache\DatabaseStore;
 use Illuminate\Cache\MemcachedConnector;
 use Illuminate\Cache\MemcachedStore;
+use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\RedisStore;
 use Illuminate\Cache\Repository;
 use Illuminate\Container\Container;
 use Illuminate\Database\Capsule\Manager as Capsule;
-use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Redis\RedisManager;
 use Qiick\ApiKeys\CacheAttemptLimiter;
-use Qiick\ApiKeys\DatabaseAttemptLimiter;
 use Qiick\ApiKeys\FailedAttemptLimiter;
 
 require __DIR__.'/../../vendor/autoload.php';
@@ -36,7 +37,7 @@ require __DIR__.'/../../vendor/autoload.php';
 
 $database = in_array($storeName, ['sqlite', 'mysql', 'mariadb', 'pgsql'], true) ? attemptLimiterRaceDatabase($storeName) : null;
 
-$store = $database !== null ? null : match ($storeName) {
+$store = $database !== null ? new DatabaseStore($database, 'cache', 'api-keys-limiter-test:') : match ($storeName) {
     'redis' => new RedisStore(
         new RedisManager(new Container, 'phpredis', [
             'default' => [
@@ -58,13 +59,13 @@ $store = $database !== null ? null : match ($storeName) {
     default => throw new InvalidArgumentException('Unknown store '.$storeName),
 };
 
-$limiter = $database !== null ? new DatabaseAttemptLimiter($database) : new CacheAttemptLimiter(new Repository($store));
+$limiter = new CacheAttemptLimiter(new RateLimiter(new Repository($store)));
 
 /**
  * The connection the CI databases smoke job starts for `$engine`. SQLite is a
  * shared file, since an in-memory database is private to each process.
  */
-function attemptLimiterRaceDatabase(string $engine): ConnectionInterface
+function attemptLimiterRaceDatabase(string $engine): Connection
 {
     $password = getenv('API_KEYS_CLAIM_PASSWORD') !== false ? (string) getenv('API_KEYS_CLAIM_PASSWORD') : 'password';
     $sqlitePath = sys_get_temp_dir().'/api-keys-limiter-race.sqlite';
@@ -72,7 +73,7 @@ function attemptLimiterRaceDatabase(string $engine): ConnectionInterface
     touch($sqlitePath);
     $capsule = new Capsule;
     $capsule->addConnection(match ($engine) {
-        'sqlite' => ['driver' => 'sqlite', 'database' => $sqlitePath, 'busy_timeout' => 10_000, 'journal_mode' => 'wal'],
+        'sqlite' => ['driver' => 'sqlite', 'database' => $sqlitePath, 'busy_timeout' => 10_000, 'journal_mode' => 'wal', 'transaction_mode' => 'IMMEDIATE'],
         'mysql' => ['driver' => 'mysql', 'host' => '127.0.0.1', 'port' => 3306, 'database' => 'api_keys_claim', 'username' => 'root', 'password' => $password],
         'mariadb' => ['driver' => 'mariadb', 'host' => '127.0.0.1', 'port' => 3307, 'database' => 'api_keys_claim', 'username' => 'root', 'password' => $password],
         'pgsql' => ['driver' => 'pgsql', 'host' => '127.0.0.1', 'port' => 5432, 'database' => 'api_keys_claim', 'username' => 'postgres', 'password' => $password],
@@ -82,22 +83,17 @@ function attemptLimiterRaceDatabase(string $engine): ConnectionInterface
 }
 
 /**
- * The reference schema in docs/reference-schema.md.
+ * Laravel's own cache table (its create_cache_table migration).
  */
-function createAttemptLimiterRaceTable(ConnectionInterface $database): void
+function createAttemptLimiterRaceTable(Connection $database): void
 {
     $schema = $database->getSchemaBuilder();
-    $schema->dropIfExists('api_key_attempts');
-    $schema->create('api_key_attempts', function (Blueprint $table): void {
-        $table->string('bucket', 255)->primary();
-        $table->unsignedInteger('hits')->default(0);
-        $table->unsignedBigInteger('expires_at')->index();
+    $schema->dropIfExists('cache');
+    $schema->create('cache', function (Blueprint $table): void {
+        $table->string('key')->primary();
+        $table->mediumText('value');
+        $table->integer('expiration')->index();
     });
-}
-
-// Start together: every worker waits for the same instant before touching the store.
-if ((float) $startAt > microtime(true)) {
-    time_sleep_until((float) $startAt);
 }
 
 $maxAttempts = (int) $maxAttempts;
@@ -141,12 +137,7 @@ echo match ($operation) {
 
         return 1;
     })(),
-    'forget' => $database !== null
-        ? $database->table('api_key_attempts')->where('bucket', $key)->delete() >= 0
-        : (int) $store->forget($key) & (int) $store->forget($key.':timer'),
-    // A stale database row counts as missing, as it does for the limiter.
-    'count' => is_numeric($counter = $database !== null
-        ? $database->table('api_key_attempts')->where('bucket', $key)->where('expires_at', '>', time())->value('hits')
-        : $store->get($key)) ? (string) (int) $counter : 'missing',
+    'forget' => (int) $store->forget($key) & (int) $store->forget($key.':timer'),
+    'count' => is_numeric($counter = $store->get($key)) ? (string) (int) $counter : 'missing',
     default => throw new InvalidArgumentException('Unknown operation '.$operation),
 };

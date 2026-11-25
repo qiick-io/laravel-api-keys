@@ -2,16 +2,13 @@
 
 declare(strict_types=1);
 
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Schema;
 use Qiick\ApiKeys\CacheAttemptLimiter;
 use Qiick\ApiKeys\ConfigLifetimePolicy;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
-use Qiick\ApiKeys\DatabaseAttemptLimiter;
 use Qiick\ApiKeys\FailedAttemptLimiter;
 use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\RotationService;
@@ -33,8 +30,7 @@ it('merges the package defaults into the api-keys config', function (): void {
         'usage_bypass_throttle_on_ip_change' => true,
         'default_rate_limit_per_minute' => 60,
         'failed_attempts_per_minute' => 20,
-        'attempt_limiter' => 'auto',
-        'attempt_limiter_table' => 'api_key_attempts',
+        'cache_store' => null,
         'legacy_matchers' => [],
     ]);
 
@@ -298,23 +294,87 @@ function useDefaultCacheStore(string $store): void
     app()->forgetInstance(AttemptLimiter::class);
 }
 
-it('boots on an unsupported cache store, so artisan and package discovery keep working', function (): void {
-    useDefaultCacheStore('database');
-    config(['api-keys.attempt_limiter' => 'cache']);
+it('counts attempts with Laravel\'s RateLimiter on the default cache store, or on api-keys.cache_store', function (): void {
+    useDefaultCacheStore('array');
+    $limiter = app(AttemptLimiter::class);
+    $limiter->hit('bucket');
 
-    app()->getProvider(ApiKeysServiceProvider::class)->boot();
+    expect($limiter)->toBeInstanceOf(CacheAttemptLimiter::class)
+        ->and(Cache::store('array')->get('bucket'))->toBe(1);
 
-    expect(fn () => app(AttemptLimiter::class))
-        ->toThrow(InvalidArgumentException::class, 'cannot increment atomically');
+    config(['api-keys.cache_store' => 'file', 'cache.stores.file.path' => sys_get_temp_dir().'/api-keys-cache-store-test']);
+    app()->forgetInstance(AttemptLimiter::class);
+    Cache::store('file')->flush();
+    app(AttemptLimiter::class)->hit('bucket');
+    app(AttemptLimiter::class)->hit('bucket');
+
+    expect(Cache::store('file')->get('bucket'))->toBe(2)
+        ->and(Cache::store('array')->get('bucket'))->toBe(1);
 });
 
-it('reports an unsupported cache store from api-keys:check, for deploy pipelines', function (): void {
-    useDefaultCacheStore('database');
-    config(['api-keys.attempt_limiter' => 'cache']);
+it('fails at boot on an api-keys.cache_store that is not a store name', function (mixed $value): void {
+    config(['api-keys.cache_store' => $value]);
+
+    expect(fn () => app()->getProvider(ApiKeysServiceProvider::class)->boot())
+        ->toThrow(InvalidArgumentException::class, 'api-keys.cache_store must be a cache store name, or null for the default store.');
+
+    useDefaultCacheStore('array');
+
+    expect(fn () => app(AttemptLimiter::class))
+        ->toThrow(InvalidArgumentException::class, 'api-keys.cache_store must be a cache store name, or null for the default store.');
+})->with(['', 0, false]);
+
+it('fails api-keys:check on the null cache store, which would switch the limits off', function (): void {
+    config(['cache.stores.none' => ['driver' => 'null'], 'api-keys.cache_store' => 'none']);
+    app()->forgetInstance(AttemptLimiter::class);
 
     $this->artisan('api-keys:check')
-        ->expectsOutputToContain('cannot increment atomically')
+        ->expectsOutputToContain('The null cache store keeps no attempt counters')
         ->assertFailed();
+});
+
+it('warns from api-keys:check on the file cache store, which is not atomic across workers', function (): void {
+    config(['cache.stores.file.path' => sys_get_temp_dir().'/api-keys-cache-store-test']);
+    useDefaultCacheStore('file');
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain('The file cache store does not increment atomically')
+        ->expectsOutputToContain('Attempt limiter: Laravel RateLimiter on the file cache store.')
+        ->expectsOutputToContain('API keys configuration is ready')
+        ->assertSuccessful();
+});
+
+it('warns from api-keys:check on the array cache store outside tests only', function (): void {
+    useDefaultCacheStore('array');
+
+    $this->artisan('api-keys:check')
+        ->doesntExpectOutputToContain('array cache store keeps')
+        ->expectsOutputToContain('Attempt limiter: Laravel RateLimiter on the array cache store.')
+        ->assertSuccessful();
+
+    app()->detectEnvironment(fn (): string => 'production');
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain('The array cache store keeps attempt counters per process')
+        ->assertSuccessful();
+});
+
+it('raises no store warning on an atomic store', function (): void {
+    useDefaultCacheStore('database');
+
+    $this->artisan('api-keys:check')
+        ->doesntExpectOutputToContain('does not increment atomically')
+        ->doesntExpectOutputToContain('keeps attempt counters per process')
+        ->expectsOutputToContain('Attempt limiter: Laravel RateLimiter on the database cache store.')
+        ->assertSuccessful();
+});
+
+it('names an attempt limiter the application bound in api-keys:check', function (): void {
+    app()->instance(AttemptLimiter::class, new FakeAttemptLimiter);
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain('Attempt limiter: '.FakeAttemptLimiter::class.' (bound by the application).')
+        ->assertSuccessful();
 });
 
 it('passes api-keys:check when the limiter and the settings are usable', function (): void {
@@ -378,145 +438,3 @@ it('builds the failed-attempt brake from api-keys.failed_attempts_per_minute', f
     'off' => ['0', 10],
     'five' => ['5', 5],
 ]);
-
-function createReferenceAttemptsTable(): void
-{
-    Schema::create('api_key_attempts', function (Blueprint $blueprint): void {
-        $blueprint->string('bucket', 255)->primary();
-        $blueprint->unsignedInteger('hits')->default(0);
-        $blueprint->unsignedBigInteger('expires_at')->index();
-    });
-}
-
-it('picks the attempt limiter from the cache store when set to auto', function (string $store, string $limiterClass): void {
-    config(['cache.stores.file.path' => sys_get_temp_dir()]);
-    useDefaultCacheStore($store);
-
-    expect(config('api-keys.attempt_limiter'))->toBe('auto')
-        ->and(app(AttemptLimiter::class))->toBeInstanceOf($limiterClass);
-})->with([
-    'redis' => ['redis', CacheAttemptLimiter::class],
-    'memcached' => ['memcached', CacheAttemptLimiter::class],
-    'array (tests)' => ['array', CacheAttemptLimiter::class],
-    'database' => ['database', DatabaseAttemptLimiter::class],
-    'file' => ['file', DatabaseAttemptLimiter::class],
-]);
-
-it('honours an explicit attempt limiter whatever the cache store', function (): void {
-    useDefaultCacheStore('redis');
-    config(['api-keys.attempt_limiter' => 'database', 'api-keys.attempt_limiter_table' => 'custom_attempts']);
-
-    $limiter = app(AttemptLimiter::class);
-
-    expect($limiter)->toBeInstanceOf(DatabaseAttemptLimiter::class)
-        ->and($limiter->table())->toBe('custom_attempts')
-        ->and(app(DatabaseAttemptLimiter::class))->toBe($limiter);
-
-    useDefaultCacheStore('array');
-    config(['api-keys.attempt_limiter' => 'cache']);
-
-    expect(app(AttemptLimiter::class))->toBeInstanceOf(CacheAttemptLimiter::class);
-});
-
-it('fails at boot on an unknown attempt limiter', function (mixed $value): void {
-    config(['api-keys.attempt_limiter' => $value]);
-
-    expect(fn () => app()->getProvider(ApiKeysServiceProvider::class)->boot())
-        ->toThrow(InvalidArgumentException::class, 'api-keys.attempt_limiter must be auto, cache or database.');
-
-    useDefaultCacheStore('array');
-
-    expect(fn () => app(AttemptLimiter::class))
-        ->toThrow(InvalidArgumentException::class, 'api-keys.attempt_limiter must be auto, cache or database.');
-})->with(['redis', '', null]);
-
-it('fails at boot on an empty attempt limiter table name', function (): void {
-    config(['api-keys.attempt_limiter_table' => '']);
-
-    expect(fn () => app()->getProvider(ApiKeysServiceProvider::class)->boot())
-        ->toThrow(InvalidArgumentException::class, 'api-keys.attempt_limiter_table must be a table name.');
-});
-
-it('names the active cache limiter in api-keys:check', function (): void {
-    useDefaultCacheStore('array');
-
-    $this->artisan('api-keys:check')
-        ->expectsOutputToContain('Attempt limiter: cache (array store).')
-        ->expectsOutputToContain('API keys configuration is ready')
-        ->assertSuccessful();
-});
-
-it('names the active database limiter and its table in api-keys:check', function (): void {
-    createReferenceAttemptsTable();
-    useDefaultCacheStore('database');
-
-    $this->artisan('api-keys:check')
-        ->expectsOutputToContain('Attempt limiter: database (table api_key_attempts).')
-        ->expectsOutputToContain('API keys configuration is ready')
-        ->assertSuccessful();
-});
-
-it('fails api-keys:check when the database limiter has no table', function (): void {
-    useDefaultCacheStore('database');
-
-    $this->artisan('api-keys:check')
-        ->expectsOutputToContain('The api_key_attempts table is missing: create it as docs/reference-schema.md describes.')
-        ->assertFailed();
-});
-
-it('prunes ended attempt windows with api-keys:prune-attempts', function (): void {
-    createReferenceAttemptsTable();
-    useDefaultCacheStore('database');
-    $this->freezeTime();
-    $limiter = app(DatabaseAttemptLimiter::class);
-    $limiter->hit('ended', 10);
-    $limiter->hit('live', 60);
-    $this->travel(10)->seconds();
-
-    $this->artisan('api-keys:prune-attempts')
-        ->expectsOutputToContain('Pruned 1 ended attempt windows.')
-        ->assertSuccessful();
-
-    expect(DB::table('api_key_attempts')->pluck('bucket')->all())->toBe(['live']);
-});
-
-it('fails api-keys:prune-attempts when the table is missing', function (): void {
-    useDefaultCacheStore('database');
-
-    $this->artisan('api-keys:prune-attempts')
-        ->expectsOutputToContain('The api_key_attempts table is missing')
-        ->assertFailed();
-});
-
-it('names an attempt limiter the application bound in api-keys:check', function (): void {
-    app()->instance(AttemptLimiter::class, new FakeAttemptLimiter);
-
-    $this->artisan('api-keys:check')
-        ->expectsOutputToContain('Attempt limiter: '.FakeAttemptLimiter::class.' (bound by the application).')
-        ->assertSuccessful();
-});
-
-it('prunes the table of the attempt limiter the application bound', function (): void {
-    Schema::create('tenant_attempts', function (Blueprint $blueprint): void {
-        $blueprint->string('bucket', 255)->primary();
-        $blueprint->unsignedInteger('hits')->default(0);
-        $blueprint->unsignedBigInteger('expires_at')->index();
-    });
-    $this->freezeTime();
-    $limiter = new DatabaseAttemptLimiter(DB::connection(), 'tenant_attempts');
-    app()->instance(AttemptLimiter::class, $limiter);
-    $limiter->hit('ended', 10);
-    $this->travel(10)->seconds();
-
-    $this->artisan('api-keys:prune-attempts')
-        ->expectsOutputToContain('Pruned 1 ended attempt windows.')
-        ->assertSuccessful();
-});
-
-it('has nothing to prune when the attempt limiter is the cache', function (): void {
-    useDefaultCacheStore('array');
-
-    $this->artisan('api-keys:prune-attempts')
-        ->expectsOutputToContain('The attempt limiter does not use the database: nothing to prune.')
-        ->assertSuccessful();
-});

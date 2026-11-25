@@ -58,16 +58,13 @@ return [
     'failed_attempts_per_minute' => env('API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 20),
 
     /*
-     * Where the per-key limits and the failed-attempt brake count attempts.
-     * auto: the cache when the default store is redis or memcached (or array,
-     * in tests), the database otherwise. cache: always the cache store, which
-     * must be one of those. database: always the attempt table below, which
-     * the product creates from docs/reference-schema.md; schedule
-     * api-keys:prune-attempts to delete ended windows.
+     * Cache store for the per-key limits and the failed-attempt brake, counted
+     * with Laravel's RateLimiter. Null uses the default store. For production
+     * pick a store that increments atomically: redis, memcached, dynamodb, or
+     * database on MySQL/PostgreSQL. The file store is not atomic across
+     * workers and api-keys:check warns about it.
      */
-    'attempt_limiter' => env('API_KEYS_ATTEMPT_LIMITER', 'auto'),
-
-    'attempt_limiter_table' => env('API_KEYS_ATTEMPT_LIMITER_TABLE', 'api_key_attempts'),
+    'cache_store' => env('API_KEYS_CACHE_STORE'),
 
     /*
      * Optional organisation max lifetime in days, enforced on rotation by the

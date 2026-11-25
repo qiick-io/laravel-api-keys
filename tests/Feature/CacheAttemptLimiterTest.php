@@ -2,78 +2,143 @@
 
 declare(strict_types=1);
 
+use Illuminate\Cache\RateLimiter;
+use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use Qiick\ApiKeys\CacheAttemptLimiter;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
 
 mutates(CacheAttemptLimiter::class);
 
 /**
- * Store-independent behaviour on the array store; the cross-process races run
- * against real Redis and Memcached in tests/Database.
+ * The same behaviour on every cache store Testbench can run in process: array,
+ * file, and database (in-memory SQLite). Real Redis and Memcached run in
+ * tests/Database/CacheAttemptLimiterStoreTest, and the cross-process races in
+ * tests/Database/CacheAttemptLimiterConcurrencyTest.
  */
-it('refuses cache stores that cannot count atomically across workers', function (string $store): void {
-    config(['cache.stores.file.path' => sys_get_temp_dir()]);
+function limiterCacheStore(string $store): Repository
+{
+    config(['cache.stores.file.path' => sys_get_temp_dir().'/api-keys-limiter-test']);
 
-    $storeClass = get_class(Cache::store($store)->getStore());
+    if ($store === 'database' && ! Schema::hasTable('cache')) {
+        // Laravel's own cache table (its create_cache_table migration).
+        Schema::create('cache', function (Blueprint $table): void {
+            $table->string('key')->primary();
+            $table->mediumText('value');
+            $table->integer('expiration')->index();
+        });
+    }
 
-    expect(fn () => new CacheAttemptLimiter(Cache::store($store)))
-        ->toThrow(
-            InvalidArgumentException::class,
-            'CacheAttemptLimiter needs a redis, memcached or array cache store; '.$storeClass.' cannot increment atomically across workers.',
-        );
-})->with(['database', 'file']);
+    $repository = Cache::store($store);
+    $repository->flush();
 
-it('opens a 60-second window by default and reports nothing for an unknown bucket', function (): void {
-    // A second boundary between hit() and availableIn() would read 59.
+    return $repository;
+}
+
+function cacheLimiter(string $store): CacheAttemptLimiter
+{
+    return new CacheAttemptLimiter(new RateLimiter(limiterCacheStore($store)));
+}
+
+dataset('in-process stores', ['array', 'file', 'database']);
+
+it('opens a 60-second window by default and reports nothing for an unknown bucket', function (string $store): void {
     $this->freezeTime();
-    $limiter = new CacheAttemptLimiter(Cache::store('array'));
+    $limiter = cacheLimiter($store);
 
     expect($limiter->availableIn('unknown'))->toBe(0)
+        ->and($limiter->remaining('unknown', 3))->toBe(3)
         ->and($limiter->hit('bucket'))->toBe(1)
         ->and($limiter->availableIn('bucket'))->toBe(60)
         ->and($limiter->hit('bucket'))->toBe(2)
         ->and($limiter->hit('bucket'))->toBe(3)
+        ->and($limiter->remaining('bucket', 5))->toBe(2)
         ->and($limiter->remaining('bucket', 2))->toBe(0);
-});
+})->with('in-process stores');
 
-it('counts hits in a window that its first hit opens', function (): void {
+it('keeps the window its first hit opened, then starts a new one once it expires', function (string $store): void {
     $this->freezeTime();
-    $limiter = new CacheAttemptLimiter(Cache::store('array'));
+    $limiter = cacheLimiter($store);
 
-    expect($limiter->hit('bucket', 60))->toBe(1)
-        ->and($limiter->hit('bucket', 60))->toBe(2)
-        ->and($limiter->remaining('bucket', 5))->toBe(3)
-        ->and($limiter->availableIn('bucket'))->toBe(60);
+    expect($limiter->hit('bucket', 60))->toBe(1);
 
     $this->travel(30)->seconds();
-    $limiter->hit('bucket', 60);
 
-    expect($limiter->availableIn('bucket'))->toBe(30);
+    expect($limiter->hit('bucket', 600))->toBe(2)
+        ->and($limiter->availableIn('bucket'))->toBe(30);
 
     $this->travel(31)->seconds();
 
+    expect($limiter->availableIn('bucket'))->toBe(0)
+        ->and($limiter->remaining('bucket', 5))->toBe(5)
+        ->and($limiter->hit('bucket', 10))->toBe(1)
+        ->and($limiter->availableIn('bucket'))->toBe(10);
+})->with('in-process stores');
+
+it('keeps buckets apart', function (string $store): void {
+    $limiter = cacheLimiter($store);
+
+    $limiter->hit('first');
+    $limiter->hit('first');
+
+    expect($limiter->hit('second'))->toBe(1)
+        ->and($limiter->remaining('first', 5))->toBe(3);
+})->with('in-process stores');
+
+it('takes back an attempt, never below zero', function (string $store): void {
+    $limiter = cacheLimiter($store);
+
+    $limiter->hit('bucket', 60);
+    $limiter->hit('bucket', 60);
+    $limiter->decrement('bucket');
+
+    expect($limiter->remaining('bucket', 5))->toBe(4);
+
+    $limiter->decrement('bucket');
+    $limiter->decrement('bucket');
+
     expect($limiter->remaining('bucket', 5))->toBe(5)
-        ->and($limiter->availableIn('bucket'))->toBe(0)
         ->and($limiter->hit('bucket', 60))->toBe(1);
+})->with('in-process stores');
+
+it('never brings back a missing or expired counter, so a long window keeps its length', function (string $store): void {
+    $this->freezeTime();
+    $limiter = cacheLimiter($store);
+
+    $limiter->decrement('missing');
+
+    expect(Cache::store($store)->get('missing'))->toBeNull();
+
+    $limiter->hit('day', 10);
+    $this->travel(11)->seconds();
+    $limiter->decrement('day');
+
+    // A decrement on the expired counter would have opened a 60-second window at -1.
+    expect($limiter->hit('day', 86_400))->toBe(1)
+        ->and($limiter->availableIn('day'))->toBe(86_400);
+})->with('in-process stores');
+
+it('refuses a window shorter than one second', function (int $decaySeconds): void {
+    expect(fn () => cacheLimiter('array')->hit('bucket', $decaySeconds))
+        ->toThrow(InvalidArgumentException::class, 'An attempt window must last at least one second.');
+})->with([0, -1]);
+
+it('accepts a one-second window', function (): void {
+    $this->freezeTime();
+    $limiter = cacheLimiter('array');
+
+    expect($limiter->hit('bucket', 1))->toBe(1)
+        ->and($limiter->availableIn('bucket'))->toBe(1);
 });
 
-it('never decrements below zero or brings back an expired counter', function (): void {
-    $limiter = new CacheAttemptLimiter(Cache::store('array'));
+it('fails closed when the store does not count the attempt', function (): void {
+    config(['cache.stores.none' => ['driver' => 'null']]);
+    $limiter = new CacheAttemptLimiter(new RateLimiter(Cache::store('none')));
 
-    $limiter->decrement('bucket');
-    expect($limiter->remaining('bucket', 5))->toBe(5);
-
-    $limiter->hit('bucket', 10);
-    $limiter->decrement('bucket');
-    $limiter->decrement('bucket');
-    expect($limiter->hit('bucket', 10))->toBe(1);
-
-    $this->travel(11)->seconds();
-    $limiter->decrement('bucket');
-
-    expect(Cache::store('array')->get('bucket'))->toBeNull()
-        ->and($limiter->hit('bucket', 10))->toBe(1);
+    expect(fn () => $limiter->hit('bucket'))
+        ->toThrow(RuntimeException::class, 'The cache store did not count the attempt.');
 });
 
 it('is the AttemptLimiter the package binds by default', function (): void {

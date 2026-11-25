@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace Qiick\ApiKeys\Laravel;
 
-use Illuminate\Cache\ArrayStore;
-use Illuminate\Cache\MemcachedStore;
-use Illuminate\Cache\RedisStore;
+use Illuminate\Cache\CacheManager;
+use Illuminate\Cache\RateLimiter;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Foundation\Application;
@@ -17,14 +16,12 @@ use Qiick\ApiKeys\CacheLegacyFormatWarningGate;
 use Qiick\ApiKeys\ConfigLifetimePolicy;
 use Qiick\ApiKeys\Console\Commands\CheckApiKeysConfigurationCommand;
 use Qiick\ApiKeys\Console\Commands\NotifyExpiringApiKeysCommand;
-use Qiick\ApiKeys\Console\Commands\PruneApiKeyAttemptsCommand;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
 use Qiick\ApiKeys\Contracts\RandomSource;
-use Qiick\ApiKeys\DatabaseAttemptLimiter;
 use Qiick\ApiKeys\FailedAttemptLimiter;
 use Qiick\ApiKeys\LegacyCutoff;
 use Qiick\ApiKeys\LegacyTokenMatcher;
@@ -79,29 +76,10 @@ final class ApiKeysServiceProvider extends ServiceProvider
         $this->app->singleton(RandomSource::class, RandomBytesSource::class);
         $this->app->singleton(LegacyFormatWarningGate::class, CacheLegacyFormatWarningGate::class);
 
-        $this->app->singleton(
-            DatabaseAttemptLimiter::class,
-            fn (Application $app): DatabaseAttemptLimiter => new DatabaseAttemptLimiter(
-                $app->make('db')->connection(),
-                $this->attemptLimiterTable(),
-            ),
-        );
-
-        // api-keys.attempt_limiter picks the store (see config/api-keys.php); a product binding wins.
+        // Laravel's RateLimiter on api-keys.cache_store (null: the default store); a product binding wins.
         $this->app->singletonIf(
             AttemptLimiter::class,
-            function (Application $app): AttemptLimiter {
-                $cache = $app->make(CacheRepository::class);
-                $store = $cache->getStore();
-
-                $isCacheLimiter = match ($this->attemptLimiterDriver()) {
-                    'cache' => true,
-                    'database' => false,
-                    'auto' => $store instanceof RedisStore || $store instanceof MemcachedStore || $store instanceof ArrayStore,
-                };
-
-                return $isCacheLimiter ? new CacheAttemptLimiter($cache) : $app->make(DatabaseAttemptLimiter::class);
-            },
+            fn (Application $app): AttemptLimiter => new CacheAttemptLimiter(new RateLimiter($this->attemptCacheStore())),
         );
 
         // The brake products pass to ApiKeyAuthenticator, sized by api-keys.failed_attempts_per_minute.
@@ -192,7 +170,6 @@ final class ApiKeysServiceProvider extends ServiceProvider
             $this->commands([
                 NotifyExpiringApiKeysCommand::class,
                 CheckApiKeysConfigurationCommand::class,
-                PruneApiKeyAttemptsCommand::class,
             ]);
         }
     }
@@ -200,10 +177,10 @@ final class ApiKeysServiceProvider extends ServiceProvider
     /**
      * Fails fast on settings that would otherwise be read wrong at runtime.
      * Runs at boot and from `api-keys:check`. The cache store behind the
-     * attempt limiter is deliberately not checked here: an unsupported store
-     * must not break every artisan command (package:discover, migrations,
-     * product tests); it fails when the limiter is first resolved, and
-     * `api-keys:check` reports it for deploy pipelines.
+     * attempt limiter is deliberately not resolved here: a store that cannot
+     * connect must not break every artisan command (package:discover,
+     * migrations, product tests); `api-keys:check` resolves it and judges it
+     * for deploy pipelines.
      *
      * @throws \InvalidArgumentException|\RuntimeException
      */
@@ -214,35 +191,32 @@ final class ApiKeysServiceProvider extends ServiceProvider
         $this->assertWholeNumberAtLeast('api-keys.failed_attempts_per_minute', 'API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 0);
         $this->assertWholeNumberAtLeast('api-keys.expiry.claim_lease_seconds', 'API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 1);
         $this->assertWholeNumberAtLeast('api-keys.legacy.warn_days_before', 'API_KEYS_LEGACY_WARN_DAYS_BEFORE', 0);
-        $this->attemptLimiterDriver();
-        $this->attemptLimiterTable();
+        $this->attemptCacheStoreName();
     }
 
     /**
-     * @return 'auto'|'cache'|'database'
+     * The cache store the attempt limiter counts on.
      *
-     * @throws \InvalidArgumentException on any other value: a typo must not pick a store silently
+     * @throws \InvalidArgumentException when api-keys.cache_store is set but not a store name
      */
-    private function attemptLimiterDriver(): string
+    private function attemptCacheStore(): CacheRepository
     {
-        $driver = $this->config($this->app)->get('api-keys.attempt_limiter');
+        /** @var CacheManager $cache */
+        $cache = $this->app->make('cache');
 
-        return match ($driver) {
-            'auto', 'cache', 'database' => $driver,
-            default => throw new \InvalidArgumentException('api-keys.attempt_limiter must be auto, cache or database.'),
-        };
+        return $cache->store($this->attemptCacheStoreName());
     }
 
     /**
-     * @throws \InvalidArgumentException when the table name is empty or not a string
+     * @throws \InvalidArgumentException when api-keys.cache_store is set but not a store name
      */
-    private function attemptLimiterTable(): string
+    private function attemptCacheStoreName(): ?string
     {
-        $table = $this->config($this->app)->get('api-keys.attempt_limiter_table');
+        $store = $this->config($this->app)->get('api-keys.cache_store');
 
-        return is_string($table) && $table !== ''
-            ? $table
-            : throw new \InvalidArgumentException('api-keys.attempt_limiter_table must be a table name.');
+        return $store === null || (is_string($store) && $store !== '')
+            ? $store
+            : throw new \InvalidArgumentException('api-keys.cache_store must be a cache store name, or null for the default store.');
     }
 
     /**

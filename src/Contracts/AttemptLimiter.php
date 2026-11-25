@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Qiick\ApiKeys\Contracts;
 
 use Qiick\ApiKeys\CacheAttemptLimiter;
-use Qiick\ApiKeys\DatabaseAttemptLimiter;
 
 /**
  * @api Counter store behind the per-key rate limits and the pre-auth brake.
@@ -17,12 +16,9 @@ use Qiick\ApiKeys\DatabaseAttemptLimiter;
  * not to count (over the limit, or a successful key on the failure brake) is
  * handed back with {@see decrement()}.
  *
- * The package ships {@see CacheAttemptLimiter} (Redis, Memcached) and
- * {@see DatabaseAttemptLimiter} (the `api_key_attempts` table), and binds one
- * of them by `api-keys.attempt_limiter`. Do not adapt Illuminate's `RateLimiter`:
- * its `increment()` recreates counters with a non-atomic `put()`, so parallel
- * requests overshoot the limit and counters go negative. Tests use the
- * in-memory fake.
+ * The package binds {@see CacheAttemptLimiter}: Laravel's `RateLimiter` on
+ * `api-keys.cache_store`, with the window-start race accepted in
+ * docs/security.md. Tests use the in-memory fake.
  */
 interface AttemptLimiter
 {

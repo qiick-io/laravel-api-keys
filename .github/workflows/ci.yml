@@ -134,8 +134,8 @@ jobs:
           - mysql
           - mariadb
           - pgsql
-          # CacheAttemptLimiter races on the stores it supports; the four
-          # engines above race DatabaseAttemptLimiter too.
+          # CacheAttemptLimiter races on Redis and Memcached; the four engines
+          # above race it on Laravel's database cache store too.
           - redis
           - memcached
     steps:
@@ -238,7 +238,7 @@ jobs:
           API_KEYS_LIMITER_STORE: ${{ matrix.engine }}
         run: vendor/bin/pest --filter='CacheAttemptLimiter(Concurrency|Store)'
 
-      - name: Database attempt limiter races (${{ matrix.engine }})
+      - name: Attempt limiter races on the database cache store (${{ matrix.engine }})
         if: matrix.engine != 'redis' && matrix.engine != 'memcached'
         env:
           API_KEYS_LIMITER_STORE: ${{ matrix.engine }}

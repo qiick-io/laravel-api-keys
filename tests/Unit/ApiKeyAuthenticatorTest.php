@@ -1544,3 +1544,19 @@ it('answers a typed 503 when the attempt store is down, and reports the cause', 
             ->and($reported)->toBe(['attempt store down']);
     }
 })->with(['failed-attempt brake', 'per-key limits']);
+
+it('names the required scope when the key holds no usable scopes', function (): void {
+    $seed = authenticator();
+    $fixture = authenticator([
+        'defaultRate' => 0,
+        'record' => new InMemoryApiKeyRecord(id: '42', keyPrefix: $seed['prefix'], keyHash: $seed['hash'], scopes: ['unknown:scope']),
+    ]);
+
+    try {
+        $fixture['auth']->authenticate($fixture['token'], keyContext(), Scope::tryFromString('items:read'));
+        $this->fail('expected insufficient_scope');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->render()->headers->get('WWW-Authenticate'))->toBe('Bearer error="insufficient_scope", scope="items:read"')
+            ->and($rejection->render()->getData(true)['scope'])->toBe('items:read');
+    }
+});

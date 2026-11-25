@@ -13,12 +13,13 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
-### Fixed
+## [0.3.0-beta.2] - 2026-11-25
 
-- `SystemClock` follows Laravel's clock (`Date::now()`, in UTC) inside a booted
-  app, so `Carbon::setTestNow()`, `travel()` and a product's `Date`
-  configuration apply to expiry, grace and lease checks without binding another
-  `Clock` (#62, found while adopting the package in signaculum).
+Second beta: Redis is no longer required, and the fixes found while adopting
+the package in signaculum and excubia. **0.x may still break;** read
+UPGRADING.md before adopting.
+
+Public Suffix List: unchanged since 0.3.0-beta.1.
 
 ### Added
 
@@ -27,12 +28,11 @@ were added; see UPGRADING.md.
   JSON `scope`, like `insufficient_scope` already did.
   `api-keys.resource_metadata_url` (`API_KEYS_RESOURCE_METADATA_URL`, absolute
   https) adds `resource_metadata="<url>"` (RFC 9728) to the `invalid_token` and
-  `insufficient_scope` challenges (#65, found while adopting the package in
-  excubia).
+  `insufficient_scope` challenges (#65, #66).
 - `503 service_unavailable` (`ApiKeyRejection::serviceUnavailable()`,
   `KeyRejectionCode::ServiceUnavailable`) when the attempt store is down: the
   request still fails closed, but with a typed, retryable refusal instead of a
-  500. The cause goes to the exception reporter.
+  500. The cause goes to the exception reporter (#42, #57).
 
 ### Changed
 
@@ -40,7 +40,7 @@ were added; see UPGRADING.md.
   store (`api-keys.cache_store`, default store when null): Redis is no longer
   required. The package's Lua and Memcached code is gone. Laravel's
   window-start race is accepted: one reset per window can let a window admit
-  up to just under twice its limit (docs/security.md).
+  up to just under twice its limit (docs/security.md) (#58, #59).
 - `api-keys:check` prints the active limiter, fails on the null cache store and
   warns on the file store and on the array store outside tests. It no longer
   fails on the database or file store.
@@ -51,26 +51,35 @@ were added; see UPGRADING.md.
   store) answers `503 service_unavailable` instead of admitting the request.
 - Refunds go through the cache's own `decrement()`, and only for a live
   counter above zero: Memcached refuses `RateLimiter::decrement()` (a negative
-  increment). A counter that expires between that check and the decrement is
-  put back to 0, instead of staying at -1 with no expiry and failing every
-  later attempt on that bucket.
+  increment). A counter that a raced refund leaves below zero is put back to 0,
+  instead of staying at -1 with no expiry and failing every later attempt on
+  that bucket.
+- `SystemClock` follows Laravel's clock (`Date::now()`, in UTC) inside a booted
+  app, so `Carbon::setTestNow()`, `travel()` and a product's `Date`
+  configuration apply to expiry, grace and lease checks without binding another
+  `Clock` (#62, #64).
+- `scripts/update-public-suffix-list.php` refuses an empty or unreadable list
+  and writes the snapshot atomically, so a failed download can never ship an
+  empty list (#41, #56).
 
 ### Security
 
 - Stored `scopes`, `ip_allowlist` and `restrictions` that are not valid JSON
   deny the key and are reported, instead of reading as "no restriction" when
-  a product's `array` cast turned them into null (#61, found while adopting
-  the package in signaculum). `ApiKeyRecord::raw*()` now return the columns as
-  stored; see UPGRADING.md.
+  a product's `array` cast turned them into null (#61, #63, #67).
+  `ApiKeyRecord::raw*()` now return the columns as stored; see UPGRADING.md.
 - `ApiKeyRejection::insufficientScope()` and `noUsableScopes()` refuse a scope
-  that is not a scope atom with `InvalidArgumentException`: it goes into `WWW-Authenticate`
-  verbatim, so a product passing quotes or CRLF could inject into the header.
+  that is not a scope atom with `InvalidArgumentException`: it goes into
+  `WWW-Authenticate` verbatim, so a product passing quotes or CRLF could inject
+  into the header (#67).
 
 ### Upgrade notes
 
-- Apps on Redis or Memcached change nothing. Other stores now work instead of
-  failing at the first authentication; see UPGRADING.md for the file and
-  SQLite caveats.
+- Apps on Redis or Memcached change nothing in their limits. Other stores now
+  work instead of failing at the first authentication; see UPGRADING.md for the
+  file and SQLite caveats.
+- Return `scopes`, `ip_allowlist` and `restrictions` from your `ApiKeyRecord`
+  as stored (`getRawOriginal()`), not through the `array` cast.
 
 ## [0.3.0-beta.1] - 2026-11-25
 
@@ -311,7 +320,8 @@ First pre-release. The API may still change before 1.0.0; see UPGRADING.md.
   (PHP 8.3/8.4/8.5 × Laravel 12/13 × lowest/stable) with `composer validate
   --strict`, `composer audit`, and SHA-pinned Actions.
 
-[Unreleased]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.1...HEAD
+[Unreleased]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.2...HEAD
+[0.3.0-beta.2]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.1...v0.3.0-beta.2
 [0.3.0-beta.1]: https://github.com/qiick-io/laravel-api-keys/compare/v0.2.0...v0.3.0-beta.1
 [0.2.0]: https://github.com/qiick-io/laravel-api-keys/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/qiick-io/laravel-api-keys/releases/tag/v0.1.0

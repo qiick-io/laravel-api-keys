@@ -13,6 +13,13 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Fixed
+
+- `SystemClock` follows Laravel's clock (`Date::now()`, in UTC) inside a booted
+  app, so `Carbon::setTestNow()`, `travel()` and a product's `Date`
+  configuration apply to expiry, grace and lease checks without binding another
+  `Clock` (#62, found while adopting the package in signaculum).
+
 ### Added
 
 - `503 service_unavailable` (`ApiKeyRejection::serviceUnavailable()`,

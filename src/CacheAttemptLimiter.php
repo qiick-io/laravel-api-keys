@@ -57,15 +57,24 @@ final class CacheAttemptLimiter implements AttemptLimiter
 
     /**
      * Only a live counter above zero is taken back, through the cache's own
-     * `decrement()`. `RateLimiter::decrement()` is an `increment()` by -1, which
-     * Memcached refuses (a negative offset) and which, on an expired counter,
-     * would create one at -1 with a fresh 60-second window, cutting a day or
-     * month bucket short.
+     * `decrement()`: `RateLimiter::decrement()` is an `increment()` by -1, which
+     * Memcached refuses (a negative offset).
+     *
+     * The counter can still expire between the check and the decrement. Redis,
+     * the file and the array store then create it at -1 with no expiry, and every
+     * later hit would count 0 and fail closed for good. Putting it back to 0 lets
+     * the next hit count 1, which Laravel's `RateLimiter` stores with a fresh window.
      */
     public function decrement(string $key): void
     {
-        if ($this->rateLimiter->attempts($key) > 0) {
-            $this->cache->decrement($this->rateLimiter->cleanRateLimiterKey($key));
+        if ($this->rateLimiter->attempts($key) <= 0) {
+            return;
+        }
+
+        $cleanKey = $this->rateLimiter->cleanRateLimiterKey($key);
+
+        if ($this->cache->decrement($cleanKey) < 0) {
+            $this->cache->increment($cleanKey);
         }
     }
 

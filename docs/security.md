@@ -36,10 +36,15 @@ holds. The cross-process tests in
   `CacheAttemptLimiter::hit()` throws and the authenticator answers
   `503 service_unavailable` instead of admitting the request.
 - `CacheAttemptLimiter::decrement()` only takes back a live counter above zero,
-  through the cache repository's `decrement()`. `RateLimiter::decrement()` is an
-  `increment()` by -1: Memcached refuses a negative offset (the refund would be
-  lost), and on an expired counter it would create one at -1 with a 60-second
-  window, cutting a day or month bucket short.
+  through the cache repository's `decrement()`: `RateLimiter::decrement()` is an
+  `increment()` by -1, which Memcached refuses (the refund would be lost).
+- A counter can expire between that check and the decrement. Redis, the file
+  and the array store then create it at -1 with no expiry, so every later hit
+  would count 0 and answer 503 for good. The limiter puts such a counter back
+  to 0: the next hit counts 1 and Laravel stores it with a fresh window. Two
+  side effects are left: a hit that lands between the two calls answers 503
+  once, and the time between the check and the decrement is never counted as a
+  refund.
 - Any exception from the store (Redis down, database locked) becomes a
   `503 service_unavailable`, reported to the exception handler. The limits are
   never skipped.

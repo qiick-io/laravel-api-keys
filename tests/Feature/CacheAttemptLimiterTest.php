@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use Qiick\ApiKeys\CacheAttemptLimiter;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
+use Qiick\ApiKeys\Tests\Support\RacedRefundCacheRepository;
 
 mutates(CacheAttemptLimiter::class);
 
@@ -118,6 +119,25 @@ it('never brings back a missing or expired counter, so a long window keeps its l
     expect($limiter->hit('day', 86_400))->toBe(1)
         ->and($limiter->availableIn('day'))->toBe(86_400);
 })->with('in-process stores');
+
+it('keeps counting after a refund races another worker below zero', function (string $store, string $race): void {
+    $this->freezeTime();
+    $limiter = new CacheAttemptLimiter(new RacedRefundCacheRepository(limiterCacheStore($store), $race));
+
+    $limiter->hit('bucket', 60);
+    $limiter->decrement('bucket');
+
+    // Left at -1, the next hit would count 0 and fail closed for good.
+    expect($limiter->hit('bucket', 60))->toBe(1)
+        ->and($limiter->hit('bucket', 60))->toBe(2)
+        ->and($limiter->availableIn('bucket'))->toBe(60);
+})->with([
+    'array, expired' => ['array', 'expired'],
+    'array, concurrent' => ['array', 'concurrent'],
+    'file, expired' => ['file', 'expired'],
+    'file, concurrent' => ['file', 'concurrent'],
+    'database, concurrent' => ['database', 'concurrent'],
+]);
 
 it('refuses a window shorter than one second', function (int $decaySeconds): void {
     expect(fn () => cacheLimiter('array')->hit('bucket', $decaySeconds))

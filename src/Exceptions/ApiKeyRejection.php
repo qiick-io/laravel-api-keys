@@ -110,6 +110,19 @@ final class ApiKeyRejection extends HttpException
     }
 
     /**
+     * 503 when the attempt store behind the rate limits is down: the request
+     * fails closed, and the client may retry.
+     */
+    public static function serviceUnavailable(): self
+    {
+        return new self(
+            503,
+            self::translate('api_keys.service_unavailable', 'API key verification is temporarily unavailable.'),
+            KeyRejectionCode::ServiceUnavailable,
+        );
+    }
+
+    /**
      * 429 with Retry-After and optional X-RateLimit-* headers.
      *
      * `$resetAfterSeconds` populates `X-RateLimit-Reset` when provided (L8).

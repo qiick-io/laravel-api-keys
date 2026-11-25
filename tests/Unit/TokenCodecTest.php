@@ -132,7 +132,7 @@ it('reissues a new secret behind the same public prefix', function (): void {
         ->and($second->keyHash)->not->toBe($first->keyHash);
 });
 
-it('matches current and previous hashes with hash_equals semantics', function (): void {
+it('matches current and previous hashes with hash_equals semantics (A2)', function (): void {
     $codec = codec();
     $current = $codec->issue();
     $rotated = $codec->reissueForPrefix($current->keyPrefix);
@@ -183,7 +183,7 @@ it('matches current and previous hashes with hash_equals semantics', function ()
         ->toBe(TokenMatch::None);
 });
 
-it('rejects non-canonical shapes from prefixOf and parse', function (): void {
+it('rejects non-canonical shapes, ek_-like strings included when no matcher is configured (A13b)', function (): void {
     $codec = codec();
     $now = codecNow();
 
@@ -299,7 +299,7 @@ it('rejects legacy prefixes once the matcher cut-off has passed', function (): v
         ->and($matcher->prefixOfCalls)->toBe(0);
 });
 
-it('is deterministic for the same FixedEnvironment and FixedRandomSource seed', function (): void {
+it('is deterministic for the same FixedEnvironment and FixedRandomSource seed (A18)', function (): void {
     $seed = 'same-seed-bytes-aaaaaaaaaaaaaaaaaaaa';
     $first = codec(seed: $seed)->issue();
     $second = codec(seed: $seed)->issue();
@@ -352,7 +352,7 @@ it('refills after a whole chunk of rejected bytes', function (): void {
         ->and(strlen($token->plainText) - strlen($token->keyPrefix))->toBe(38);
 });
 
-it('runs a dummy compare when asked and when match returns none', function (): void {
+it('runs a dummy compare when asked and when match returns none (A2)', function (): void {
     $codec = codec();
     $codec->performDummyMatch('tst_test_ABCDEFGH'.str_repeat('z', 32));
 
@@ -372,7 +372,9 @@ it('refuses a product prefix that is not three lowercase letters', function (): 
 
 it('computes the GitHub-style base62 CRC32 checksum, most significant digit first', function (): void {
     // Reference values from an independent implementation (Python zlib.crc32).
+    // 'a' has an odd CRC32 (3904355907), so the mask's lowest bit matters too.
     expect(codec()->checksumFor('hello'))->toBe('A9X58C')
+        ->and(codec()->checksumFor('a'))->toBe('EQORUX')
         ->and(codec()->checksumFor('tst_test_ABCDEFGH'.str_repeat('a', 32)))->toBe('BPbqju');
 });
 

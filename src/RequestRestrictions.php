@@ -138,7 +138,8 @@ final readonly class RequestRestrictions
      */
     private static function isWildcardableBase(string $base): bool
     {
-        if ($base === '' || str_ends_with($base, '.') || preg_match('/^[0-9.]+$/D', $base) === 1) {
+        // An empty base is a single (empty) label, which the list treats as a public suffix.
+        if (str_ends_with($base, '.') || preg_match('/^[0-9.]+$/D', $base) === 1) {
             return false;
         }
 

@@ -2,15 +2,20 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\File;
 use Qiick\ApiKeys\ConfigLifetimePolicy;
 use Qiick\ApiKeys\Contracts\AttemptLimiter;
+use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
+use Qiick\ApiKeys\FailedAttemptLimiter;
 use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\RotationService;
 use Qiick\ApiKeys\Testing\FixedClock;
 use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\Tests\Support\RegexLegacyTokenMatcher;
 use Qiick\ApiKeys\TokenCodec;
+
+mutates(ApiKeysServiceProvider::class);
 
 it('merges the package defaults into the api-keys config', function (): void {
     expect(config('api-keys'))->toMatchArray([
@@ -39,12 +44,19 @@ it('binds RotationService with config rotation_max_grace_hours', function (): vo
 });
 
 it('lets an app publish the config file', function (): void {
-    $this->artisan('vendor:publish', ['--tag' => 'api-keys-config', '--force' => true])
-        ->assertSuccessful();
+    $published = config_path('api-keys.php');
 
-    expect(config_path('api-keys.php'))->toBeFile();
+    try {
+        $this->artisan('vendor:publish', ['--tag' => 'api-keys-config', '--force' => true])
+            ->assertSuccessful();
 
-    unlink(config_path('api-keys.php'));
+        expect($published)->toBeFile()
+            ->and(file_get_contents($published))->toBe(file_get_contents(dirname(__DIR__, 2).'/config/api-keys.php'));
+    } finally {
+        // A mutated provider can publish a directory here; leaving it behind would
+        // break every later run that loads Testbench's config directory.
+        is_dir($published) ? File::deleteDirectory($published) : @unlink($published);
+    }
 });
 
 it('fails boot when legacy_matchers is set without API_KEYS_LEGACY_ACCEPT_UNTIL', function (): void {
@@ -228,13 +240,13 @@ it('fails boot when api-keys.max_lifetime_days is not a whole number of days >= 
     'leading zero' => '030',
 ]);
 
-it('boots with max_lifetime_days unset and allows any expiry', function (): void {
-    config(['api-keys.max_lifetime_days' => null]);
+it('boots with max_lifetime_days unset and allows any expiry', function (mixed $unset): void {
+    config(['api-keys.max_lifetime_days' => $unset]);
 
     app()->getProvider(ApiKeysServiceProvider::class)->boot();
 
     expect(app(LifetimePolicy::class)->allowsExpiry(null, new DateTimeImmutable))->toBeTrue();
-});
+})->with(['null' => [null], 'empty' => ['']]);
 
 it('fails boot when a brake or lease setting is not a whole number', function (string $key, mixed $configured): void {
     config([$key => $configured]);
@@ -245,21 +257,27 @@ it('fails boot when a brake or lease setting is not a whole number', function (s
     'brake typo' => ['api-keys.failed_attempts_per_minute', 'twenty'],
     'brake trailing garbage' => ['api-keys.failed_attempts_per_minute', '20abc'],
     'brake negative' => ['api-keys.failed_attempts_per_minute', '-1'],
+    'brake negative integer' => ['api-keys.failed_attempts_per_minute', -1],
     'brake padded' => ['api-keys.failed_attempts_per_minute', ' 20'],
     'brake empty' => ['api-keys.failed_attempts_per_minute', ''],
     'lease zero' => ['api-keys.expiry.claim_lease_seconds', '0'],
     'lease typo' => ['api-keys.expiry.claim_lease_seconds', '15min'],
+    'warning window negative' => ['api-keys.legacy.warn_days_before', '-1'],
+    'warning window negative integer' => ['api-keys.legacy.warn_days_before', -1],
+    'warning window typo' => ['api-keys.legacy.warn_days_before', 'ninety'],
 ]);
 
-it('boots with digit-only brake and lease settings from the environment', function (): void {
+it('boots with digit-only brake, lease and warning settings at their smallest values', function (): void {
     config([
         'api-keys.failed_attempts_per_minute' => '0',
-        'api-keys.expiry.claim_lease_seconds' => '600',
+        'api-keys.expiry.claim_lease_seconds' => '1',
+        'api-keys.legacy.warn_days_before' => '0',
+        'api-keys.max_lifetime_days' => '1',
     ]);
 
     app()->getProvider(ApiKeysServiceProvider::class)->boot();
 
-    expect(true)->toBeTrue();
+    expect(app()->getProvider(ApiKeysServiceProvider::class)->wholeNumberSetting('api-keys.expiry.claim_lease_seconds', 1))->toBe(1);
 });
 
 /**
@@ -314,3 +332,39 @@ it('fails api-keys:check when the application timezone is not UTC', function ():
         ->expectsOutputToContain('app.timezone must be UTC')
         ->assertFailed();
 });
+
+it('reports an unusable codec setting from api-keys:check', function (string $key, mixed $value, string $message): void {
+    useDefaultCacheStore('array');
+    config([$key => $value]);
+    app()->forgetInstance(TokenCodec::class);
+    app()->forgetInstance(EnvironmentResolver::class);
+
+    $this->artisan('api-keys:check')
+        ->expectsOutputToContain($message)
+        ->assertFailed();
+})->with([
+    'empty product prefix' => ['api-keys.product_prefix', '', 'api-keys.product_prefix must be set'],
+    'unknown token version' => ['api-keys.token_version', 3, 'api-keys.token_version must be 1 or 2.'],
+    'unknown environment' => ['api-keys.environment', 'foo', 'api-keys.environment must be "live" or "test" when set.'],
+]);
+
+it('builds the failed-attempt brake from api-keys.failed_attempts_per_minute', function (mixed $configured, int $blockedAfter): void {
+    config(['api-keys.failed_attempts_per_minute' => $configured, 'cache.default' => 'array']);
+    app()->forgetInstance('cache.store');
+    app()->forgetInstance(AttemptLimiter::class);
+    app()->forgetInstance(FailedAttemptLimiter::class);
+
+    $brake = app(FailedAttemptLimiter::class);
+    $countedBeforeBlock = 0;
+
+    while (! $brake->isBlocked('203.0.113.10') && $countedBeforeBlock < 10) {
+        $brake->countFailure('203.0.113.10');
+        $countedBeforeBlock++;
+    }
+
+    expect($brake->maxPerMinute())->toBe((int) $configured)
+        ->and($countedBeforeBlock)->toBe($blockedAfter);
+})->with([
+    'off' => ['0', 10],
+    'five' => ['5', 5],
+]);

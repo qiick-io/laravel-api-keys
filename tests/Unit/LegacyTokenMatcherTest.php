@@ -11,6 +11,8 @@ use Qiick\ApiKeys\TokenEnvironment;
 
 use function Qiick\ApiKeys\Testing\assertLegacyTokenUsed;
 
+mutates(TokenCodec::class);
+
 it('accepts a real Externa ek_+9+31 token and refuses prefix-equal-to-token', function (): void {
     $acceptUntil = new DateTimeImmutable('2099-01-01T00:00:00+00:00');
     $matcher = RegexLegacyTokenMatcher::externaEkStyle($acceptUntil);

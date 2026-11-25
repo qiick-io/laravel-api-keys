@@ -17,12 +17,15 @@ Public Suffix List: first snapshot (2026-11-24).
 
 ### Fixed
 
+- `api-keys.failed_attempts_per_minute` now sizes a bound `FailedAttemptLimiter`
+  (it was read by nothing), and `api-keys:check` fails on an unusable codec
+  setting (empty product prefix, token version other than 1 or 2, unknown
+  environment).
 - A config published before a nested key existed (`expiry.*`, `legacy.*`) now
   reads that key's package default instead of null: `mergeConfigFrom()` merges
   only the top level, so the provider fills the missing nested keys.
-
-- `api-keys.failed_attempts_per_minute` and `api-keys.expiry.claim_lease_seconds`
-  are no longer cast with `(int)`: anything but digits (and below 0 or 1
+- `api-keys.failed_attempts_per_minute`, `api-keys.expiry.claim_lease_seconds`
+  and `api-keys.legacy.warn_days_before` are no longer cast with `(int)`: anything but digits (and below 0 or 1
   respectively) fails at boot, so a typo cannot silently switch the brake off.
 - Rate limits and the failed-attempt brake are atomic: the authenticator counts
   first with `AttemptLimiter::hit()` (which now returns the count) and refuses

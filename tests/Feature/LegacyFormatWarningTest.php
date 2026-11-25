@@ -18,6 +18,8 @@ use Qiick\ApiKeys\Testing\FakeLegacyFormatWarningGate;
 use Qiick\ApiKeys\Testing\FixedClock;
 use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 
+mutates(NotifyExpiringApiKeysCommand::class);
+
 it('N2: warns active token_version 0 keys within warn_days_before accept_until, once', function (): void {
     Notification::fake();
     Event::fake([ApiKeyLegacyFormatWarningSent::class]);

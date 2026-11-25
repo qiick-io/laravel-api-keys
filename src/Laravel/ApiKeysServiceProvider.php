@@ -20,6 +20,8 @@ use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Contracts\LifetimePolicy;
 use Qiick\ApiKeys\Contracts\RandomSource;
+use Qiick\ApiKeys\FailedAttemptLimiter;
+use Qiick\ApiKeys\LegacyCutoff;
 use Qiick\ApiKeys\LegacyTokenMatcher;
 use Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification;
 use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
@@ -78,6 +80,15 @@ final class ApiKeysServiceProvider extends ServiceProvider
             fn (Application $app): AttemptLimiter => new CacheAttemptLimiter($app->make(CacheRepository::class)),
         );
 
+        // The brake products pass to ApiKeyAuthenticator, sized by api-keys.failed_attempts_per_minute.
+        $this->app->singletonIf(
+            FailedAttemptLimiter::class,
+            fn (Application $app): FailedAttemptLimiter => new FailedAttemptLimiter(
+                $app->make(AttemptLimiter::class),
+                $this->wholeNumberSetting('api-keys.failed_attempts_per_minute', 0),
+            ),
+        );
+
         $this->app->singleton(EnvironmentResolver::class, function (Application $app): EnvironmentResolver {
             $configured = $this->config($app)->get('api-keys.environment');
 
@@ -92,7 +103,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
                 return new AppEnvironmentResolver($environment === TokenEnvironment::Live);
             }
 
-            return new AppEnvironmentResolver((bool) $app->environment('production'));
+            return new AppEnvironmentResolver($app->environment('production'));
         });
 
         $this->app->singleton(TokenCodec::class, function (Application $app): TokenCodec {
@@ -108,7 +119,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
                 $legacyMatchers = [];
             }
 
-            $legacyAcceptUntil = $this->validatedLegacyAcceptUntil($app);
+            $legacyAcceptUntil = $this->validatedLegacyAcceptUntil();
             $tokenVersion = $this->config($app)->get('api-keys.token_version', TokenCodec::DEFAULT_TOKEN_VERSION);
             if (! is_int($tokenVersion) || ($tokenVersion !== 1 && $tokenVersion !== 2)) {
                 throw new \InvalidArgumentException(
@@ -141,7 +152,7 @@ final class ApiKeysServiceProvider extends ServiceProvider
         // A product's own policy (bound before this provider, or after it) wins.
         $this->app->singletonIf(
             LifetimePolicy::class,
-            fn (Application $app): LifetimePolicy => new ConfigLifetimePolicy($this->validatedMaxLifetimeDays($app)),
+            fn (): LifetimePolicy => new ConfigLifetimePolicy($this->validatedMaxLifetimeDays()),
         );
     }
 
@@ -177,6 +188,23 @@ final class ApiKeysServiceProvider extends ServiceProvider
         $this->validatedMaxLifetimeDays();
         $this->assertWholeNumberAtLeast('api-keys.failed_attempts_per_minute', 'API_KEYS_FAILED_ATTEMPTS_PER_MINUTE', 0);
         $this->assertWholeNumberAtLeast('api-keys.expiry.claim_lease_seconds', 'API_KEYS_EXPIRY_CLAIM_LEASE_SECONDS', 1);
+        $this->assertWholeNumberAtLeast('api-keys.legacy.warn_days_before', 'API_KEYS_LEGACY_WARN_DAYS_BEFORE', 0);
+    }
+
+    /**
+     * A whole-number setting that boot already validated against the same minimum.
+     *
+     * @throws \InvalidArgumentException when it was changed to something else after boot
+     */
+    public function wholeNumberSetting(string $key, int $minimum): int
+    {
+        $value = $this->wholeNumber($this->config($this->app)->get($key));
+
+        if ($value === null || $value < $minimum) {
+            throw new \InvalidArgumentException("{$key} must be a whole number >= {$minimum}.");
+        }
+
+        return $value;
     }
 
     /**
@@ -203,31 +231,22 @@ final class ApiKeysServiceProvider extends ServiceProvider
      *
      * A bad value fails during boot rather than lazily on first TokenCodec resolve.
      */
-    private function validatedLegacyAcceptUntil(?Application $app = null): ?\DateTimeImmutable
+    private function validatedLegacyAcceptUntil(): ?\DateTimeImmutable
     {
-        $application = $app ?? $this->app;
-        $legacyMatchers = $this->config($application)->get('api-keys.legacy_matchers', []);
+        $legacyMatchers = $this->config($this->app)->get('api-keys.legacy_matchers', []);
         if (! is_array($legacyMatchers)) {
             $legacyMatchers = [];
         }
 
-        $acceptUntil = $this->config($application)->get('api-keys.legacy.accept_until');
+        $acceptUntil = LegacyCutoff::parse($this->config($this->app)->get('api-keys.legacy.accept_until'));
 
-        if ($acceptUntil === null || $acceptUntil === '') {
-            if ($legacyMatchers !== []) {
-                throw new \RuntimeException(
-                    'api-keys.legacy.accept_until (API_KEYS_LEGACY_ACCEPT_UNTIL) is required when legacy_matchers is non-empty.'
-                );
-            }
-
-            return null;
+        if ($acceptUntil === null && $legacyMatchers !== []) {
+            throw new \RuntimeException(
+                'api-keys.legacy.accept_until (API_KEYS_LEGACY_ACCEPT_UNTIL) is required when legacy_matchers is non-empty.'
+            );
         }
 
-        if (! is_string($acceptUntil)) {
-            throw $this->invalidLegacyAcceptUntilException();
-        }
-
-        return $this->parseAbsoluteAcceptUntil($acceptUntil);
+        return $acceptUntil;
     }
 
     /**
@@ -237,17 +256,17 @@ final class ApiKeysServiceProvider extends ServiceProvider
      * number of days >= 1: a typo such as `30abc` or `thirty` would otherwise
      * be cast to 30 or to 0 and silently change or switch off enforcement.
      */
-    private function validatedMaxLifetimeDays(?Application $app = null): ?int
+    private function validatedMaxLifetimeDays(): ?int
     {
-        $configured = $this->config($app ?? $this->app)->get('api-keys.max_lifetime_days');
+        $configured = $this->config($this->app)->get('api-keys.max_lifetime_days');
 
         if ($configured === null || $configured === '') {
             return null;
         }
 
-        $days = $this->wholeNumber($configured) ?? 0;
+        $days = $this->wholeNumber($configured);
 
-        if ($days < 1) {
+        if ($days === null || $days < 1) {
             throw new \InvalidArgumentException(
                 'api-keys.max_lifetime_days (API_KEYS_MAX_LIFETIME_DAYS) must be a whole number of days >= 1, or unset to disable.',
             );
@@ -265,9 +284,9 @@ final class ApiKeysServiceProvider extends ServiceProvider
      */
     private function assertWholeNumberAtLeast(string $key, string $envName, int $minimum): void
     {
-        $value = $this->wholeNumber($this->config($this->app)->get($key));
-
-        if ($value === null || $value < $minimum) {
+        try {
+            $this->wholeNumberSetting($key, $minimum);
+        } catch (\InvalidArgumentException) {
             throw new \InvalidArgumentException("{$key} ({$envName}) must be a whole number >= {$minimum}.");
         }
     }
@@ -277,54 +296,11 @@ final class ApiKeysServiceProvider extends ServiceProvider
      */
     private function wholeNumber(mixed $configured): ?int
     {
-        return match (true) {
-            is_int($configured) => $configured,
-            is_string($configured) && preg_match('/^(0|[1-9][0-9]*)$/D', $configured) === 1 => (int) $configured,
-            default => null,
-        };
-    }
-
-    /**
-     * Absolute ISO-8601 with offset ({@see \DateTimeInterface::ATOM}) or UTC "Z".
-     * Relative strings (`now`, `tomorrow`, `+10 years`) and date-only values are rejected.
-     */
-    private function parseAbsoluteAcceptUntil(string $acceptUntil): \DateTimeImmutable
-    {
-        $parsed = $this->parseAbsoluteAcceptUntilFormat($acceptUntil, \DateTimeInterface::ATOM);
-        if ($parsed instanceof \DateTimeImmutable) {
-            return $parsed;
+        if (is_int($configured)) {
+            return $configured;
         }
 
-        if (str_ends_with($acceptUntil, 'Z')) {
-            $normalized = substr($acceptUntil, 0, -1).'+00:00';
-            $parsedZulu = $this->parseAbsoluteAcceptUntilFormat($normalized, \DateTimeInterface::ATOM);
-            if ($parsedZulu instanceof \DateTimeImmutable) {
-                return $parsedZulu;
-            }
-        }
-
-        throw $this->invalidLegacyAcceptUntilException();
-    }
-
-    private function parseAbsoluteAcceptUntilFormat(string $acceptUntil, string $format): ?\DateTimeImmutable
-    {
-        $parsed = \DateTimeImmutable::createFromFormat($format, $acceptUntil);
-        $errors = \DateTimeImmutable::getLastErrors();
-        $hasErrors = is_array($errors)
-            && (($errors['warning_count'] ?? 0) > 0 || ($errors['error_count'] ?? 0) > 0);
-
-        if ($parsed === false || $hasErrors || $parsed->format($format) !== $acceptUntil) {
-            return null;
-        }
-
-        return $parsed;
-    }
-
-    private function invalidLegacyAcceptUntilException(): \RuntimeException
-    {
-        return new \RuntimeException(
-            'api-keys.legacy.accept_until (API_KEYS_LEGACY_ACCEPT_UNTIL) must be an absolute ISO-8601 timestamp with offset (DATE_ATOM) or UTC Z, e.g. 2027-01-01T00:00:00Z or 2027-01-01T00:00:00+00:00.',
-        );
+        return is_string($configured) && preg_match('/^(0|[1-9][0-9]*)$/D', $configured) === 1 ? (int) $configured : null;
     }
 
     /**

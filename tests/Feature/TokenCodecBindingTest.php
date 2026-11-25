@@ -5,8 +5,11 @@ declare(strict_types=1);
 use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\EnvironmentResolver;
 use Qiick\ApiKeys\Contracts\RandomSource;
+use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\TokenCodec;
 use Qiick\ApiKeys\TokenEnvironment;
+
+mutates(ApiKeysServiceProvider::class);
 
 it('binds clock, environment, random source and token codec', function (): void {
     expect(app(Clock::class))->toBeInstanceOf(Clock::class)

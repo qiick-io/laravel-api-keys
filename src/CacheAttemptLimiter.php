@@ -22,10 +22,11 @@ use Qiick\ApiKeys\Contracts\AttemptLimiter;
  *   `api-keys:check` warns about it.
  * - The array store keeps counters per process: tests only.
  *
- * One small race is accepted by design (docs/security.md): when a window
- * renews, Laravel resets the counter with a `put()`, so attempts that arrive
- * at that exact instant can each read 1. For a brake on high-entropy keys this
- * lets a handful of extra guesses through per window, never an unbounded number.
+ * One race is accepted by design (docs/security.md): when a window opens,
+ * Laravel resets the counter with a `put()` that can land after other workers
+ * counted, erasing their hits. It happens at most once per window, so a window
+ * admits fewer than twice its limit. For a brake on high-entropy keys that is
+ * a bounded number of extra guesses, never an unbounded one.
  */
 final class CacheAttemptLimiter implements AttemptLimiter
 {

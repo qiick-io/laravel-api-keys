@@ -98,8 +98,9 @@ Memcached, DynamoDB, or the database store on MySQL or PostgreSQL.
 - **SQLite database store:** needs `transaction_mode => 'IMMEDIATE'` (PHP 8.4+)
   and a `busy_timeout`. Without them, parallel requests answer 503.
 - **Window-start race:** Laravel resets a counter with `put()` when a window
-  opens, so a burst can admit a few attempts more than the limit, at most once
-  per window. This is accepted by design.
+  opens. Under load that reset can erase most of the window's count, so a
+  window can admit up to just under twice its limit. It happens at most once
+  per window and is accepted by design.
 
 [docs/security.md](./docs/security.md) has the decision, the measurements and
 the table of stores.

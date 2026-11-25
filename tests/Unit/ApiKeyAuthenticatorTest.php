@@ -7,6 +7,7 @@ use Qiick\ApiKeys\ApiKeyAuthenticator;
 use Qiick\ApiKeys\AuthorizationDecision;
 use Qiick\ApiKeys\Contracts\ApiKeyRecord;
 use Qiick\ApiKeys\Contracts\ApiKeyRepository;
+use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\UsageSideEffect;
 use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
 use Qiick\ApiKeys\FailedAttemptLimiter;
@@ -24,6 +25,7 @@ use Qiick\ApiKeys\Testing\FixedEnvironment;
 use Qiick\ApiKeys\Testing\FixedRandomSource;
 use Qiick\ApiKeys\Testing\InMemoryApiKeyRecord;
 use Qiick\ApiKeys\Tests\Support\RegexLegacyTokenMatcher;
+use Qiick\ApiKeys\Tests\Support\UnavailableAttemptLimiter;
 use Qiick\ApiKeys\TokenCodec;
 use Qiick\ApiKeys\TokenEnvironment;
 use Qiick\ApiKeys\UsageRecorder;
@@ -45,7 +47,7 @@ function makeCodec(?DummyMatchProbe $probe = null): TokenCodec
  * @param  array{
  *     repository?: FakeApiKeyRepository,
  *     authorizer?: FakeKeyAuthorizer,
- *     limiter?: FakeAttemptLimiter,
+ *     limiter?: AttemptLimiter,
  *     failedLimiter?: FailedAttemptLimiter|null,
  *     clock?: FixedClock,
  *     throttle?: int,
@@ -1517,3 +1519,28 @@ it('refuses a rate-limit window shorter than one second', function (int $decaySe
     expect(fn () => new RateLimitDecision('bucket', 10, $decaySeconds))
         ->toThrow(InvalidArgumentException::class, 'decaySeconds');
 })->with([0, -5]);
+
+it('answers a typed 503 when the attempt store is down, and reports the cause', function (string $whichLimiter): void {
+    $reported = [];
+    $down = new UnavailableAttemptLimiter;
+    $fixture = authenticator([
+        'limiter' => $whichLimiter === 'per-key limits' ? $down : new FakeAttemptLimiter,
+        'failedLimiter' => $whichLimiter === 'failed-attempt brake' ? new FailedAttemptLimiter($down) : null,
+        'exceptionReporter' => function (Throwable $exception) use (&$reported): void {
+            $reported[] = $exception->getMessage();
+        },
+    ]);
+
+    try {
+        $fixture['auth']->authenticate($fixture['token'], keyContext());
+        $this->fail('expected service_unavailable');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->getStatusCode())->toBe(503)
+            ->and($rejection->errorCode())->toBe('service_unavailable')
+            ->and($rejection->render()->getData(true))->toBe([
+                'message' => 'API key verification is temporarily unavailable.',
+                'error' => 'service_unavailable',
+            ])
+            ->and($reported)->toBe(['attempt store down']);
+    }
+})->with(['failed-attempt brake', 'per-key limits']);

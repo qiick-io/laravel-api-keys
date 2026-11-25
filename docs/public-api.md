@@ -187,7 +187,7 @@ claim statements for each engine.
 
 Products may define these keys; each refusal falls back to an English message:
 `api_keys.invalid_token`, `api_keys.insufficient_scope`, `api_keys.ip_not_allowed`,
-`api_keys.no_usable_scopes`, `api_keys.rate_limit_exceeded`,
+`api_keys.no_usable_scopes`, `api_keys.rate_limit_exceeded`, `api_keys.service_unavailable`,
 `api_keys.request_not_allowed`.
 
 ## Wire and storage formats
@@ -197,7 +197,8 @@ Products may define these keys; each refusal falls back to an English message:
 - Refusal `error` codes: `KeyRejectionCode` backing values; RFC 6750
   `WWW-Authenticate` on `invalid_token` and `insufficient_scope`; `Retry-After`
   and `X-RateLimit-*` on `rate_limit_exceeded` (`X-RateLimit-Reset` in seconds
-  until the reset, not an epoch timestamp).
+  until the reset, not an epoch timestamp); `503 service_unavailable` when the
+  attempt store is down.
 - Stored values: `CredentialKind`, `RevocationReason`, `TokenEnvironment` and
   `ExpiryRecipient` backing values; the `restrictions` JSON shape version 1
   (`KeyRestrictions::VERSION`).

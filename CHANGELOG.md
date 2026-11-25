@@ -13,6 +13,13 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Added
+
+- `503 service_unavailable` (`ApiKeyRejection::serviceUnavailable()`,
+  `KeyRejectionCode::ServiceUnavailable`) when the attempt store is down: the
+  request still fails closed, but with a typed, retryable refusal instead of a
+  500. The cause goes to the exception reporter.
+
 ### Changed
 
 - The attempt limiter counts with Laravel's own `RateLimiter` on any cache
@@ -29,9 +36,10 @@ were added; see UPGRADING.md.
 - A store that does not count an attempt (an unreachable Memcached, the null
   store) answers `503 service_unavailable` instead of admitting the request.
 - Refunds go through the cache's own `decrement()`, and only for a live
-  counter above zero. `RateLimiter::decrement()` is refused by Memcached, and
-  on an expired counter it would create one at -1 that cuts a day or month
-  bucket to 60 seconds.
+  counter above zero: Memcached refuses `RateLimiter::decrement()` (a negative
+  increment). A counter that expires between that check and the decrement is
+  put back to 0, instead of staying at -1 with no expiry and failing every
+  later attempt on that bucket.
 
 ### Upgrade notes
 

@@ -134,6 +134,7 @@ documents each one.
 - `usage_bypass_throttle_on_ip_change`
 - `default_rate_limit_per_minute`
 - `failed_attempts_per_minute`
+- `resource_metadata_url`
 - `cache_store`
 - `max_lifetime_days`
 - `expiry.notice_days`
@@ -161,6 +162,7 @@ default cache store (`cache.default`) when `cache_store` is null, for the bound
 - `API_KEYS_LEGACY_WARN_DAYS_BEFORE`
 - `API_KEYS_MAX_LIFETIME_DAYS`
 - `API_KEYS_PRODUCT_PREFIX`
+- `API_KEYS_RESOURCE_METADATA_URL`
 - `API_KEYS_ROTATION_GRACE_HOURS`
 - `API_KEYS_ROTATION_MAX_GRACE_HOURS`
 - `API_KEYS_TOKEN_VERSION`

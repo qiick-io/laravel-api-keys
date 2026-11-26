@@ -170,8 +170,10 @@ The adapter and orchestrator have these responsibilities.
 
 - Capture the user's principal and API key UUIDs in the encrypted erasure
   request before principal cleanup. Keep the original map of owned key UUIDs to
-  internal IDs in that snapshot so the adapter can return it on retries, even
-  after the rows have gone. Block new writes for the subject and drain
+  internal IDs in that snapshot. Implement `keyIdsFromSnapshot($userPublicId)`
+  on the adapter to read the map from the current request. The eraser uses
+  those IDs for cache cleanup even after the rows have gone, and takes live
+  IDs when the same UUID appears in both maps. Block new writes for the subject and drain
   in-flight usage and warning work before erasing credentials.
 - Match ownership via the principal directory and the trusted public IDs.
   Include direct owners on installations without principals. In `delete`
@@ -181,7 +183,9 @@ The adapter and orchestrator have these responsibilities.
   the foreign key is required). Scrub user attribution, usage IP and agent,
   claim data, names, notes, metadata, restrictions, and any other personal
   values. In both modes preserve other owners' keys while unlinking
-  `created_by` and `revoked_by` references and scrubbing personal free text.
+  `created_by` and `revoked_by` references. Scrub the supplied identifiers from
+  names, descriptions, metadata and revocation notes even on keys where the
+  subject has no attribution link.
   The user row belongs to the product's later access step.
 - Suppress model events and identifying diagnostics such as query bindings.
   Return accurate row counts, including attribution-only updates, with the same
@@ -193,7 +197,9 @@ The adapter and orchestrator have these responsibilities.
   default per-key minute, day and month counters and timers on
   `api-keys.cache_store` (or the default store), and the current-cutoff
   legacy markers and leases on the default store. Shared pre-auth IP buckets
-  are independent of any credential or user and expire after 60 seconds.
+  expire after 60 seconds. They can include requests from several users at the
+  same network address, so the eraser leaves them to expire and excludes them
+  from subject retention counts.
 
 After the outermost commit, the eraser clears the cache entries and dispatches
 `SubjectErasedEvent` with aggregate counts. A rollback leaves the cache alone.

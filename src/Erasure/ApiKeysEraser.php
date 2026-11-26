@@ -51,7 +51,8 @@ final class ApiKeysEraser
         try {
             return $connection->transaction(function () use ($connection, $userId, $userPublicId, $mode, $publicIds, $identifiers, $dryRun): ErasureReport {
                 $result = $this->repository->eraseForUser($userId, $userPublicId, $mode, $publicIds, $identifiers, $dryRun);
-                $cacheKeys = $this->cacheKeys($result['keyIdsByPublicId'], $publicIds);
+                $keyIdsByPublicId = $result['keyIdsByPublicId'] + $this->repository->keyIdsFromSnapshot($userPublicId);
+                $cacheKeys = $this->cacheKeys($keyIdsByPublicId, $publicIds);
                 $stores = [
                     'api_keys' => $this->counts($result['deleted'], $result['anonymised']),
                     ...$this->cacheCounts($cacheKeys),

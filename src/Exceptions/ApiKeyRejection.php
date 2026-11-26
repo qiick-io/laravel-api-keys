@@ -27,9 +27,8 @@ final class ApiKeyRejection extends HttpException
     private static $translator = null;
 
     /**
-     * RFC 9728 protected-resource metadata URL, added to the `invalid_token` and
-     * `insufficient_scope` challenges so OAuth / MCP clients can discover how to
-     * get a token with the right scopes. Null leaves it out.
+     * RFC 9728 protected-resource metadata URL for Bearer challenges, so OAuth
+     * and MCP clients can discover how to get a token. Null leaves it out.
      */
     private static ?string $resourceMetadataUrl = null;
 
@@ -75,12 +74,24 @@ final class ApiKeyRejection extends HttpException
 
     public static function invalidToken(?string $message = null): self
     {
+        return self::tokenRejection(KeyRejectionCode::InvalidToken->value, $message);
+    }
+
+    /** RFC 6750 §3.1 omits the challenge error when credentials are absent. */
+    public static function missingToken(): self
+    {
+        // Keep the JSON code stable and count the refusal in the failed-attempt brake.
+        return self::tokenRejection(null);
+    }
+
+    private static function tokenRejection(?string $challengeError, ?string $message = null): self
+    {
         return new self(
             401,
             $message ?? self::translate('api_keys.invalid_token', 'The API key is not valid.'),
             KeyRejectionCode::InvalidToken,
             null,
-            ['WWW-Authenticate' => self::challenge('invalid_token')],
+            ['WWW-Authenticate' => self::challenge($challengeError)],
         );
     }
 
@@ -246,13 +257,14 @@ final class ApiKeyRejection extends HttpException
     }
 
     /**
-     * RFC 6750 §3 challenge: `Bearer error="…"[, scope="…"][, resource_metadata="…"]`.
+     * RFC 6750 §3 challenge with a realm for absent credentials or an error for
+     * rejected credentials, followed by any scope and resource metadata.
      * Scopes are checked by assertScopeAtom() and the URL on the way in, so
      * neither can break out of its quotes.
      */
-    private static function challenge(string $error, ?string $scope = null): string
+    private static function challenge(?string $error, ?string $scope = null): string
     {
-        $challenge = 'Bearer error="'.$error.'"';
+        $challenge = $error === null ? 'Bearer realm="api-keys"' : 'Bearer error="'.$error.'"';
 
         if ($scope !== null) {
             $challenge .= ', scope="'.$scope.'"';

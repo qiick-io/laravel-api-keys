@@ -21,6 +21,20 @@ it('renders invalid_token as 401 with RFC 6750 WWW-Authenticate (A11)', function
         ]);
 });
 
+it('keeps the JSON error and advertises configured metadata in a missing-token challenge', function (): void {
+    $url = 'https://api.example.com/.well-known/oauth-protected-resource';
+    ApiKeyRejection::setResourceMetadataUrl($url);
+
+    $response = ApiKeyRejection::missingToken()->render();
+
+    expect($response->getStatusCode())->toBe(401)
+        ->and($response->headers->get('WWW-Authenticate'))->toBe('Bearer realm="api-keys", resource_metadata="'.$url.'"')
+        ->and($response->getData(true))->toBe([
+            'message' => 'The API key is not valid.',
+            'error' => 'invalid_token',
+        ]);
+});
+
 it('renders insufficient_scope with scope in body and challenge (A11)', function (): void {
     $rejection = ApiKeyRejection::insufficientScope('items:write');
     $response = $rejection->render();

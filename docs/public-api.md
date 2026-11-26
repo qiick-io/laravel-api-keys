@@ -209,6 +209,9 @@ Products may define these keys; each refusal falls back to an English message:
   and `X-RateLimit-*` on `rate_limit_exceeded` (`X-RateLimit-Reset` in seconds
   until the reset, not an epoch timestamp); `503 service_unavailable` when the
   attempt store is down.
+- `ApiKeyRejection::missingToken()` returns `401` with the `invalid_token` JSON
+  body and `WWW-Authenticate: Bearer realm="api-keys"`, plus `resource_metadata`
+  when configured.
 - Stored values: `CredentialKind`, `RevocationReason`, `TokenEnvironment` and
   `ExpiryRecipient` backing values; the `restrictions` JSON shape version 1
   (`KeyRestrictions::VERSION`).

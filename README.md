@@ -290,10 +290,14 @@ up only if false lockouts outweigh credential-stuffing risk.
 
 Refusals are `ApiKeyRejection`: `401 invalid_token` and `403 insufficient_scope`
 carry RFC 6750 `WWW-Authenticate`; `403 ip_not_allowed`, `403 request_not_allowed`,
-and rate-limit responses do not. Every `insufficient_scope` names the scope the
+and rate-limit responses do not. Pass an empty string to the authenticator when
+the extractor returns `null`. This case uses `ApiKeyRejection::missingToken()`
+and challenges with `Bearer realm="api-keys"` without an `error` parameter
+(RFC 6750 §3.1). The JSON still carries `invalid_token` and the failed-attempt
+brake still counts the refusal. Every `insufficient_scope` names the scope the
 request required (`scope="items:write"`, and `scope` in the JSON) when there is
 one. With `api-keys.resource_metadata_url` set to your RFC 9728
-protected-resource metadata (absolute https), both challenges also carry
+protected-resource metadata (absolute https), Bearer challenges also carry
 `resource_metadata="<url>"`, as the MCP authorization spec asks. When the attempt store (Redis, Memcached) is
 down, the request fails closed as `503 service_unavailable` (the cause goes to
 the exception reporter), never a bare 500. Format-miss and hash-miss share the same

@@ -84,8 +84,8 @@ final class ApiKeyAuthenticator
     }
 
     /**
-     * The evaluation order itself. Every credential failure is the same
-     * `invalid_token` refusal (A2b), which is what the brake counts.
+     * The evaluation order itself. The brake counts `invalid_token` refusals,
+     * including an empty token passed by the HTTP adapter.
      *
      * @throws ApiKeyRejection
      */
@@ -94,6 +94,10 @@ final class ApiKeyAuthenticator
         KeyContext $context,
         ?Scope $requiredScope,
     ): AuthenticationResult {
+        if ($presentedToken === '') {
+            throw ApiKeyRejection::missingToken();
+        }
+
         $clientIp = $context->ip;
 
         $now = $this->clock->now();

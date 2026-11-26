@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Schema;
@@ -15,6 +17,8 @@ use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\UsageSideEffect;
 use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
 use Qiick\ApiKeys\FailedAttemptLimiter;
+use Qiick\ApiKeys\Http\BearerTokenExtractor;
+use Qiick\ApiKeys\Http\KeyContextFactory;
 use Qiick\ApiKeys\IpAllowlist;
 use Qiick\ApiKeys\KeyContext;
 use Qiick\ApiKeys\RateLimitDecision;
@@ -253,6 +257,36 @@ it('accepts the previous secret inside the grace window (A3)', function (): void
 
     expect($result->usedPreviousSecret)->toBeTrue()
         ->and($result->record->id())->toBe('7');
+});
+
+it('challenges a request without credentials without a Bearer error and still counts the refusal', function (): void {
+    $failures = new FakeAttemptLimiter;
+    $fixture = authenticator([
+        'failedLimiter' => new FailedAttemptLimiter($failures, maxPerMinute: 2),
+    ]);
+    $extractor = new BearerTokenExtractor;
+    $ip = '203.0.113.10';
+
+    $challenge = function (Request $request) use ($extractor, $fixture): JsonResponse {
+        try {
+            $fixture['auth']->authenticate($extractor->fromRequest($request) ?? '', KeyContextFactory::fromRequest($request));
+            $this->fail('expected an authentication refusal');
+        } catch (ApiKeyRejection $rejection) {
+            return $rejection->render();
+        }
+    };
+
+    $missing = $challenge(Request::create('/', server: ['REMOTE_ADDR' => $ip]));
+    $malformed = $challenge(Request::create('/', server: [
+        'REMOTE_ADDR' => $ip,
+        'HTTP_AUTHORIZATION' => 'Bearer malformed',
+    ]));
+
+    expect($missing->getStatusCode())->toBe(401)
+        ->and($missing->headers->get('WWW-Authenticate'))->toBe('Bearer realm="api-keys"')
+        ->and($missing->getData(true))->toBe($malformed->getData(true))
+        ->and($malformed->headers->get('WWW-Authenticate'))->toBe('Bearer error="invalid_token"')
+        ->and($failures->hitsFor('api-key-failures:v4:'.$ip))->toBe(2);
 });
 
 it('returns identical invalid_token for format-miss and hash-miss (A2b)', function (): void {

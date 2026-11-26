@@ -18,31 +18,6 @@ wildcards over the suffixes it names.
 
 ## From 0.3.0-beta.2 to 0.3.0-beta.3
 
-- A JSON literal `null` (the stored text `null`) in `scopes`, `ip_allowlist`
-  or `restrictions` now denies the key and is reported. So does `null` in a
-  request list field (`methods`, `route_names`, `origins`, `referrers`).
-  - SQL NULL keeps its meaning: in `ip_allowlist` or `restrictions` it means
-    "none", and in `scopes` it still denies (no usable scopes). An empty
-    allowlist `[]` still allows every IP.
-  - When repairing rows, restore the intended scopes, and use SQL NULL only for
-    an allowlist or restrictions document that is meant to be absent.
-  - The distinction only reaches the package through the raw accessor
-    (`ApiKeyRecord::rawIpAllowlist()` and its siblings returning
-    `getRawOriginal()`): Laravel's `array` cast turns both into PHP `null`
-    before the authenticator can check.
-- `KeyRestrictions::parse()` denies `[]`, `''` and any document without
-  `v` = 1; only null is unrestricted. Store null, not `{}` or `[]`, for a key
-  without restrictions, or those keys stop authenticating (fail closed).
-- A stored `scopes` or `ip_allowlist` that is a JSON object instead of a list
-  denies the key and is reported.
-- `restrictions` shapes are checked at every depth (docs/reference-schema.md).
-  An array cannot tell `{}` from `[]`, so a decoded array with an empty section
-  (`['v' => 1, 'request' => []]`) now denies. Pass the stored string
-  (`getRawOriginal('restrictions')`) as the contract asks.
-- An `ip_allowlist` entry whose prefix has a leading zero (`203.0.113.0/024`,
-  `10.0.0.1/00`) is now invalid, and a list holding one denies the key. Write
-  prefixes without leading zeros; `IpAllowlist::isValidEntry()` validates form
-  input by the same rules.
 - **Contract break, `ApiKeyRepository`:** the expiry-notice claim is bound to
   a token and to the selected expiry.
   - Add `expiry_notice_claim_token` (string(64), nullable) to `api_keys`.
@@ -61,6 +36,32 @@ wildcards over the suffixes it names.
     the column's other timestamps (same layout; an explicit offset for
     `TIMESTAMPTZ`), or no claim ever matches. `api-keys:notify-expiring` warns
     when it claims none of the notices it tried.
+- A JSON literal `null` (the stored text `null`) in `scopes`, `ip_allowlist`
+  or `restrictions` now denies the key and is reported. So does `null` in a
+  request list field (`methods`, `route_names`, `origins`, `referrers`).
+  - SQL NULL keeps its meaning: in `ip_allowlist` or `restrictions` it means
+    "none", and in `scopes` it still denies (no usable scopes). An empty
+    allowlist `[]` still allows every IP.
+  - When repairing rows, restore the intended scopes, and use SQL NULL only for
+    an allowlist or restrictions document that is meant to be absent.
+  - The distinction only reaches the package through the raw accessor
+    (`ApiKeyRecord::rawIpAllowlist()` and its siblings returning
+    `getRawOriginal()`): Laravel's `array` cast turns both into PHP `null`
+    before the authenticator can check.
+- `KeyRestrictions::parse()` denies `[]`, `''` and any document without
+  `v` = 1; only SQL NULL (PHP `null`) is unrestricted. Store SQL NULL, not
+  `{}` or `[]`, for a key without restrictions, or those keys stop
+  authenticating (fail closed).
+- A stored `scopes` or `ip_allowlist` that is a JSON object instead of a list
+  denies the key and is reported.
+- `restrictions` shapes are checked at every depth (docs/reference-schema.md).
+  An array cannot tell `{}` from `[]`, so a decoded array with an empty section
+  (`['v' => 1, 'request' => []]`) now denies. Pass the stored string
+  (`getRawOriginal('restrictions')`) as the contract asks.
+- An `ip_allowlist` entry whose prefix has a leading zero (`203.0.113.0/024`,
+  `10.0.0.1/00`) is now invalid, and a list holding one denies the key. Write
+  prefixes without leading zeros; `IpAllowlist::isValidEntry()` validates form
+  input by the same rules.
 
 ## From 0.3.0-beta.1 to 0.3.0-beta.2
 

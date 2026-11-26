@@ -24,7 +24,7 @@ Part of the qiick fleet. Binding design:
 
 ## Status
 
-Beta `0.3.0-beta.2`. Public APIs may change in any 0.x release; see
+Beta `0.3.0-beta.3`. Public APIs may change in any 0.x release; see
 [UPGRADING.md](./UPGRADING.md). Pin an exact version.
 
 ## Requirements
@@ -35,7 +35,7 @@ Beta `0.3.0-beta.2`. Public APIs may change in any 0.x release; see
 ## Install
 
 ```bash
-composer require qiick/laravel-api-keys:0.3.0-beta.2
+composer require qiick/laravel-api-keys:0.3.0-beta.3
 php artisan vendor:publish --tag=api-keys-config
 ```
 

@@ -13,6 +13,11 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Added
+
+- `IpAllowlist::isValidEntry()` validates one allowlist entry by the same rules
+  `allows()` applies, for forms that edit an allowlist (#76).
+
 ### Fixed
 
 - When the stored `scopes` do not decode, the 403 names the required scope
@@ -27,15 +32,7 @@ were added; see UPGRADING.md.
   denies instead of reading as unrestricted; only null is unrestricted. Nested
   shapes are checked too: an object where a list belongs, or the reverse, at
   any depth denies (#72).
-- The expiry-notice claim is bound to a random claim token
-  (`expiry_notice_claim_token`) and to the selected `expires_at`. A run whose
-  lease expired can no longer mark or release the next run's claim, and a
-  rotation between claim and mark is not stamped as notified. `expires_at` is
-  matched within a one-second window (`ExpiryNoticeClaimSql::expiryWindow()`),
-  so a different sub-second precision still matches.
-  `api-keys:notify-expiring` warns when a sent notice could not be marked, and
-  when it claims none of the notices it tried.
-  **Contract break** in `ApiKeyRepository`; see UPGRADING.md (#78).
+
 
 ## [0.3.0-beta.2] - 2026-11-25
 

@@ -27,6 +27,10 @@ wildcards over the suffixes it names.
   An array cannot tell `{}` from `[]`, so a decoded array with an empty section
   (`['v' => 1, 'request' => []]`) now denies. Pass the stored string
   (`getRawOriginal('restrictions')`) as the contract asks.
+- An `ip_allowlist` entry whose prefix has a leading zero (`203.0.113.0/024`,
+  `10.0.0.1/00`) is now invalid, and a list holding one denies the key. Write
+  prefixes without leading zeros; `IpAllowlist::isValidEntry()` validates form
+  input by the same rules.
 - **Contract break, `ApiKeyRepository`:** the expiry-notice claim is bound to
   a token and to the selected expiry.
   - Add `expiry_notice_claim_token` (string(64), nullable) to `api_keys`.

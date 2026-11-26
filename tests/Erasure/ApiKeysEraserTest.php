@@ -20,6 +20,10 @@ use Qiick\ApiKeys\Tests\Support\ReferenceErasureRepository;
 require_once __DIR__.'/Support/ErasureFixture.php';
 require_once __DIR__.'/Support/ErasurePerson.php';
 
+it('runs on the database engine requested by the erasure matrix', function (): void {
+    expect(DB::connection()->getDriverName())->toBe(getenv('API_KEYS_ERASURE_DB_ENGINE') ?: 'sqlite');
+});
+
 it('clears owned credential caches quietly at the outer commit and preserves third-party credentials', function (): void {
     $fixture = require __DIR__.'/fixture.php';
     $subject = $fixture->makePerson();

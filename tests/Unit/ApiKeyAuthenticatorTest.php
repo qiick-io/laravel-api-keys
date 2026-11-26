@@ -1711,3 +1711,51 @@ it('denies stored restrictions whose nested shape is not recognised, and accepts
         ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"resources":{}}')[0])->toBe('request_not_allowed')
         ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"request":{}}'))->toBe(['authenticated', []]);
 });
+
+it('tells SQL NULL from a JSON null literal through an Eloquent model read as the contract asks', function (): void {
+    Schema::create('api_keys', function (Blueprint $table): void {
+        $table->id();
+        $table->json('ip_allowlist')->nullable();
+    });
+    DB::table('api_keys')->insert([['ip_allowlist' => null], ['ip_allowlist' => 'null']]);
+    $model = new class extends Model
+    {
+        protected $table = 'api_keys';
+
+        protected function casts(): array
+        {
+            return ['ip_allowlist' => 'array'];
+        }
+    };
+    [$sqlNull, $jsonNull] = $model->newQuery()->orderBy('id')->get()->all();
+
+    // The cast reads both as PHP null; only the raw value tells them apart.
+    expect($sqlNull->ip_allowlist)->toBeNull()
+        ->and($jsonNull->ip_allowlist)->toBeNull()
+        ->and(authenticateWithStoredColumn('ip_allowlist', $sqlNull->getRawOriginal('ip_allowlist')))->toBe(['authenticated', []]);
+
+    [$outcome, $reported] = authenticateWithStoredColumn('ip_allowlist', $jsonNull->getRawOriginal('ip_allowlist'));
+
+    expect($outcome)->toBe('ip_not_allowed')
+        ->and($reported)->toHaveCount(1);
+});
+
+it('denies stored request list fields holding JSON null', function (string $field): void {
+    expect(authenticateWithStoredColumn('restrictions', '{"v":1,"request":{"'.$field.'":null}}')[0])->toBe('request_not_allowed');
+})->with(['methods', 'route_names', 'origins', 'referrers']);
+
+it('names the required scope when the stored scopes are a JSON null literal', function (): void {
+    $seed = authenticator();
+    $fixture = authenticator([
+        'defaultRate' => 0,
+        'record' => new InMemoryApiKeyRecord(id: '42', keyPrefix: $seed['prefix'], keyHash: $seed['hash'], scopes: 'null'),
+        'exceptionReporter' => function (Throwable $exception): void {},
+    ]);
+
+    try {
+        $fixture['auth']->authenticate($fixture['token'], keyContext(), Scope::tryFromString('items:read'));
+        $this->fail('expected insufficient_scope');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->render()->headers->get('WWW-Authenticate'))->toBe('Bearer error="insufficient_scope", scope="items:read"');
+    }
+});

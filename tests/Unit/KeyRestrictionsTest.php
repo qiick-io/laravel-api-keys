@@ -447,3 +447,9 @@ it('denies a JSON null string, and reads only a PHP null as unrestricted', funct
     expect(KeyRestrictions::parse('null')->isDenied)->toBeTrue()
         ->and(KeyRestrictions::parse(null)->isDenied)->toBeFalse();
 });
+
+it('denies a request list field holding JSON null instead of a list', function (string $field): void {
+    expect(KeyRestrictions::parse('{"v":1,"request":{"'.$field.'":null}}')->isDenied)->toBeTrue()
+        // Absent, the field is unrestricted.
+        ->and(KeyRestrictions::parse('{"v":1,"request":{}}')->isDenied)->toBeFalse();
+})->with(['methods', 'route_names', 'origins', 'referrers']);

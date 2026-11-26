@@ -23,6 +23,10 @@ wildcards over the suffixes it names.
   without restrictions, or those keys stop authenticating (fail closed).
 - A stored `scopes` or `ip_allowlist` that is a JSON object instead of a list
   denies the key and is reported.
+- `restrictions` shapes are checked at every depth (docs/reference-schema.md).
+  An array cannot tell `{}` from `[]`, so a decoded array with an empty section
+  (`['v' => 1, 'request' => []]`) now denies. Pass the stored string
+  (`getRawOriginal('restrictions')`) as the contract asks.
 
 ## From 0.3.0-beta.1 to 0.3.0-beta.2
 

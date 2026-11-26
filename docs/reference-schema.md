@@ -106,6 +106,10 @@ content stays on the product; labels live under `metadata.labels`. The grant id
 - Null, or an absent section, means unrestricted. A malformed value, a missing
   or unknown `v` (an empty `{}` or `[]` included), or an unknown key denies
   (fail closed, like `ip_allowlist`).
+- Shapes are checked at every depth: the document, `request` and each resource
+  entry are objects; `methods`, `route_names`, `origins`, `referrers`,
+  `resources` and `values` are lists; `v` is the integer `1`. Any other shape
+  (`"request": []`, `"methods": {}`, `"v": "1"`) denies.
 - `request` is generic HTTP; the package evaluates it (methods, route names,
   origins, referrers). A denial is `403 request_not_allowed`.
 - Origin patterns: exact origin, or `https://*.example.com` (optional port) on

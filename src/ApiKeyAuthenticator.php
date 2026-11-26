@@ -331,8 +331,9 @@ final class ApiKeyAuthenticator
      * Decoding to arrays loses the difference between a JSON object and a list:
      * `{}` would become `[]`, an open allowlist. So the shape is checked on the
      * object decode first, and a column that must be a list but holds anything
-     * else is denied and reported the same way. `restrictions` is an object;
-     * {@see KeyRestrictions::parse()} denies one without `v` = 1.
+     * else is denied and reported the same way. The value is returned as that
+     * object decode: `restrictions` is an object, and
+     * {@see KeyRestrictions::parse()} checks its shape at every depth.
      *
      * @param  callable(): ApiKeyRejection  $denial
      *
@@ -364,7 +365,9 @@ final class ApiKeyAuthenticator
             throw $denial();
         }
 
-        return json_decode($stored, true);
+        // The tree as decoded: `scopes` and `ip_allowlist` are lists of strings either way, and
+        // KeyRestrictions needs objects kept apart from lists at every depth.
+        return $shape;
     }
 
     private function reportException(\Throwable $exception): void

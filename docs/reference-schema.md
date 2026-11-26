@@ -77,9 +77,12 @@ that does not decode (an empty string included) denies the key
 (`ip_not_allowed`, `request_not_allowed` or `insufficient_scope`) and is
 reported to the exception handler. So does a JSON object in `scopes` or
 `ip_allowlist`, which must be lists (`{}` would otherwise read as an empty,
-open allowlist). Only SQL `NULL` means no restriction: a stored JSON `null`
-is a value someone wrote, and it denies the key and is reported like any
-other unreadable value. The model can keep the cast for its own UI code.
+open allowlist). So does a JSON literal `null`: it is a value someone wrote,
+not an absent one. SQL `NULL` keeps its meaning: none for `ip_allowlist` and
+`restrictions`, and no usable scopes (deny) for `scopes`; an empty allowlist
+`[]` still allows every IP. The model can keep the cast for its own UI code,
+but the cast turns both SQL `NULL` and the JSON literal into PHP `null`, so
+the `raw*()` accessors must return `getRawOriginal()`.
 
 ### Not in this schema
 
@@ -111,7 +114,9 @@ content stays on the product; labels live under `metadata.labels`. The grant id
 - Shapes are checked at every depth: the document, `request` and each resource
   entry are objects; `methods`, `route_names`, `origins`, `referrers`,
   `resources` and `values` are lists; `v` is the integer `1`. Any other shape
-  (`"request": []`, `"methods": {}`, `"v": "1"`) denies.
+  (`"request": []`, `"methods": {}` or `null`, `"v": "1"`) denies. Only the
+  `request` and `resources` sections may be `null` or absent; an absent list
+  field is empty (unrestricted).
 - `request` is generic HTTP; the package evaluates it (methods, route names,
   origins, referrers). A denial is `403 request_not_allowed`.
 - Origin patterns: exact origin, or `https://*.example.com` (optional port) on

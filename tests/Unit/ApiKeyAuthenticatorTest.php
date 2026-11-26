@@ -848,14 +848,17 @@ it('keeps authentication when recordUsage throws (audit stamp must not 500)', fu
                 return [];
             }
 
-            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt, string $claimToken): bool
+            {
+                return false;
+            }
 
-            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds): bool
+            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds, string $claimToken): bool
             {
                 return true;
             }
 
-            public function releaseExpiryNotice(ApiKeyRecord $record): void {}
+            public function releaseExpiryNotice(ApiKeyRecord $record, string $claimToken): void {}
 
             public function findActiveLegacy(): iterable
             {
@@ -934,14 +937,17 @@ it('never leaks the presented token via SensitiveParameter in traces (A14)', fun
                 return [];
             }
 
-            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt, string $claimToken): bool
+            {
+                return false;
+            }
 
-            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds): bool
+            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds, string $claimToken): bool
             {
                 return true;
             }
 
-            public function releaseExpiryNotice(ApiKeyRecord $record): void {}
+            public function releaseExpiryNotice(ApiKeyRecord $record, string $claimToken): void {}
 
             public function findActiveLegacy(): iterable
             {
@@ -1293,14 +1299,17 @@ it('reports usage failures via the Laravel report() helper when no reporter is w
                 return [];
             }
 
-            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt, string $claimToken): bool
+            {
+                return false;
+            }
 
-            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds): bool
+            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds, string $claimToken): bool
             {
                 return true;
             }
 
-            public function releaseExpiryNotice(ApiKeyRecord $record): void {}
+            public function releaseExpiryNotice(ApiKeyRecord $record, string $claimToken): void {}
 
             public function findActiveLegacy(): iterable
             {
@@ -1363,14 +1372,17 @@ it('does not count repository exceptions as failed attempts', function (): void 
                 return [];
             }
 
-            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt, string $claimToken): bool
+            {
+                return false;
+            }
 
-            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds): bool
+            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds, string $claimToken): bool
             {
                 return true;
             }
 
-            public function releaseExpiryNotice(ApiKeyRecord $record): void {}
+            public function releaseExpiryNotice(ApiKeyRecord $record, string $claimToken): void {}
 
             public function findActiveLegacy(): iterable
             {
@@ -1628,12 +1640,24 @@ it('decodes stored JSON columns and applies them', function (): void {
         ->and(authenticateWithStoredColumn('scopes', '["items:read"]'))->toBe(['authenticated', []]);
 });
 
-it('reads a SQL NULL or a JSON null as no restriction, and decoded arrays as before', function (): void {
+it('reads only a SQL NULL as no restriction, and decoded arrays as before', function (): void {
     expect(authenticateWithStoredColumn('ip_allowlist', null))->toBe(['authenticated', []])
-        ->and(authenticateWithStoredColumn('ip_allowlist', 'null'))->toBe(['authenticated', []])
-        ->and(authenticateWithStoredColumn('restrictions', 'null'))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('restrictions', null))->toBe(['authenticated', []])
         ->and(authenticateWithStoredColumn('ip_allowlist', ['198.51.100.1']))->toBe(['ip_not_allowed', []]);
 });
+
+it('denies and reports a stored JSON null, which is not SQL NULL', function (string $column, string $errorCode): void {
+    [$outcome, $reported] = authenticateWithStoredColumn($column, 'null');
+
+    expect($outcome)->toBe($errorCode)
+        ->and($reported)->toBe([
+            "UnexpectedValueException: The stored {$column} of API key 00000000-0000-7000-8000-000000000001 is JSON null; only SQL NULL means no restriction: the key is denied.",
+        ]);
+})->with([
+    'ip allowlist' => ['ip_allowlist', 'ip_not_allowed'],
+    'restrictions' => ['restrictions', 'request_not_allowed'],
+    'scopes' => ['scopes', 'insufficient_scope'],
+]);
 
 it('denies a corrupted JSON column read from an Eloquent model as the contract asks, which its array cast would hide', function (): void {
     Schema::create('api_keys', function (Blueprint $table): void {
@@ -1667,4 +1691,100 @@ it('denies a corrupted JSON column read from an Eloquent model as the contract a
 
     expect($outcome)->toBe('ip_not_allowed')
         ->and($reported)->toHaveCount(1);
+});
+
+it('names the required scope when the stored scopes do not decode', function (): void {
+    $seed = authenticator();
+    $fixture = authenticator([
+        'defaultRate' => 0,
+        'record' => new InMemoryApiKeyRecord(id: '42', keyPrefix: $seed['prefix'], keyHash: $seed['hash'], scopes: '{"broken'),
+        'exceptionReporter' => function (Throwable $exception): void {},
+    ]);
+
+    try {
+        $fixture['auth']->authenticate($fixture['token'], keyContext(), Scope::tryFromString('items:read'));
+        $this->fail('expected insufficient_scope');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->render()->headers->get('WWW-Authenticate'))->toBe('Bearer error="insufficient_scope", scope="items:read"')
+            ->and($rejection->render()->getData(true)['scope'])->toBe('items:read');
+    }
+});
+
+it('denies and reports a stored JSON object where a list is expected', function (string $column, string $stored, string $errorCode): void {
+    [$outcome, $reported] = authenticateWithStoredColumn($column, $stored);
+
+    expect($outcome)->toBe($errorCode)
+        ->and($reported)->toBe([
+            "UnexpectedValueException: The stored {$column} of API key 00000000-0000-7000-8000-000000000001 is not a JSON list: the key is denied.",
+        ]);
+})->with([
+    'empty object as ip allowlist' => ['ip_allowlist', '{}', 'ip_not_allowed'],
+    'numbered object as ip allowlist' => ['ip_allowlist', '{"0":"203.0.113.10"}', 'ip_not_allowed'],
+    'empty object as scopes' => ['scopes', '{}', 'insufficient_scope'],
+    'numbered object as scopes' => ['scopes', '{"0":"items:read"}', 'insufficient_scope'],
+    'string as ip allowlist' => ['ip_allowlist', '"203.0.113.10"', 'ip_not_allowed'],
+]);
+
+it('denies stored restrictions without version 1', function (string $stored): void {
+    expect(authenticateWithStoredColumn('restrictions', $stored)[0])->toBe('request_not_allowed');
+})->with(['{}', '[]', '{"request":{}}']);
+
+it('still reads an empty JSON list as an open allowlist, and a version-1 object as restrictions', function (): void {
+    expect(authenticateWithStoredColumn('ip_allowlist', '[]'))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1}'))->toBe(['authenticated', []]);
+});
+
+it('denies stored restrictions whose nested shape is not recognised, and accepts an empty request object', function (): void {
+    expect(authenticateWithStoredColumn('restrictions', '{"v":1,"request":[]}')[0])->toBe('request_not_allowed')
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"request":{"methods":{}}}')[0])->toBe('request_not_allowed')
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"resources":{}}')[0])->toBe('request_not_allowed')
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"request":{}}'))->toBe(['authenticated', []]);
+});
+
+it('tells SQL NULL from a JSON null literal through an Eloquent model read as the contract asks', function (): void {
+    Schema::create('api_keys', function (Blueprint $table): void {
+        $table->id();
+        $table->json('ip_allowlist')->nullable();
+    });
+    DB::table('api_keys')->insert([['ip_allowlist' => null], ['ip_allowlist' => 'null']]);
+    $model = new class extends Model
+    {
+        protected $table = 'api_keys';
+
+        protected function casts(): array
+        {
+            return ['ip_allowlist' => 'array'];
+        }
+    };
+    [$sqlNull, $jsonNull] = $model->newQuery()->orderBy('id')->get()->all();
+
+    // The cast reads both as PHP null; only the raw value tells them apart.
+    expect($sqlNull->ip_allowlist)->toBeNull()
+        ->and($jsonNull->ip_allowlist)->toBeNull()
+        ->and(authenticateWithStoredColumn('ip_allowlist', $sqlNull->getRawOriginal('ip_allowlist')))->toBe(['authenticated', []]);
+
+    [$outcome, $reported] = authenticateWithStoredColumn('ip_allowlist', $jsonNull->getRawOriginal('ip_allowlist'));
+
+    expect($outcome)->toBe('ip_not_allowed')
+        ->and($reported)->toHaveCount(1);
+});
+
+it('denies stored request list fields holding JSON null', function (string $field): void {
+    expect(authenticateWithStoredColumn('restrictions', '{"v":1,"request":{"'.$field.'":null}}')[0])->toBe('request_not_allowed');
+})->with(['methods', 'route_names', 'origins', 'referrers']);
+
+it('names the required scope when the stored scopes are a JSON null literal', function (): void {
+    $seed = authenticator();
+    $fixture = authenticator([
+        'defaultRate' => 0,
+        'record' => new InMemoryApiKeyRecord(id: '42', keyPrefix: $seed['prefix'], keyHash: $seed['hash'], scopes: 'null'),
+        'exceptionReporter' => function (Throwable $exception): void {},
+    ]);
+
+    try {
+        $fixture['auth']->authenticate($fixture['token'], keyContext(), Scope::tryFromString('items:read'));
+        $this->fail('expected insufficient_scope');
+    } catch (ApiKeyRejection $rejection) {
+        expect($rejection->render()->headers->get('WWW-Authenticate'))->toBe('Bearer error="insufficient_scope", scope="items:read"');
+    }
 });

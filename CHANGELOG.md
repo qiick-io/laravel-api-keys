@@ -13,6 +13,62 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+## [0.3.0-beta.3] - 2026-11-26
+
+Third beta: fail-closed JSON shapes and literal `null`, the expiry-notice claim
+bound to its run, and the findings from the signaculum and excubia adoptions.
+**0.x may still break;** read UPGRADING.md before adopting: `ApiKeyRepository`
+changed and `api_keys` gains a column.
+
+Public Suffix List: unchanged since 0.3.0-beta.2.
+
+### Added
+
+- `IpAllowlist::isValidEntry()` validates one allowlist entry by the same rules
+  `allows()` applies, for forms that edit an allowlist (#76, #77).
+
+### Fixed
+
+- When the stored `scopes` do not decode, the 403 names the required scope
+  (`scope=` in `WWW-Authenticate` and the JSON), like the other
+  `insufficient_scope` refusals (#73, #75).
+
+### Security
+
+- A JSON literal `null` stored in `scopes`, `ip_allowlist` or `restrictions`
+  denies the key and is reported, as does `null` in a request list field
+  (`methods`, `route_names`, `origins`, `referrers`), which used to skip that
+  check. SQL NULL keeps its meaning. The authenticator and
+  `KeyRestrictions::parse('null')` now agree; the distinction needs the raw
+  accessor (`getRawOriginal()`), not the `array` cast (#80, #81).
+- A stored `scopes` or `ip_allowlist` that is a JSON object instead of a list
+  (`{}` included) denies the key and is reported: decoded to an array, `{}`
+  read as an open allowlist. `restrictions` without `v` = 1 (`{}`, `[]`, `''`)
+  denies instead of reading as unrestricted. Nested shapes are checked too:
+  an object where a list belongs, or the reverse, at any depth denies (#72,
+  #74).
+- An allowlist prefix written with a leading zero (`/00`, `/024`) is invalid
+  and denies the allowlist, instead of reading as `/0` (every address) or
+  `/24` (#76, #77).
+- The expiry-notice claim is bound to a random claim token
+  (`expiry_notice_claim_token`) and to the selected `expires_at`. A run whose
+  lease expired can no longer mark or release the next run's claim, and a
+  rotation between claim and mark is not stamped as notified. `expires_at` is
+  matched within a one-second window (`ExpiryNoticeClaimSql::expiryWindow()`),
+  so a different sub-second precision still matches.
+  `api-keys:notify-expiring` warns when a sent notice could not be marked, and
+  when it claims none of the notices it tried.
+  **Contract break** in `ApiKeyRepository`; see UPGRADING.md (#78, #79).
+
+### Upgrade notes
+
+- Implement the new `ApiKeyRepository` claim signatures and add
+  `expiry_notice_claim_token` to `api_keys`.
+- Return the JSON columns as stored (`getRawOriginal()`), and store SQL NULL,
+  not `{}`, `[]` or a JSON `null`, for a key without an allowlist or
+  restrictions.
+- Remove leading zeros from allowlist prefixes.
+
 ## [0.3.0-beta.2] - 2026-11-25
 
 Second beta: Redis is no longer required, and the fixes found while adopting
@@ -320,7 +376,8 @@ First pre-release. The API may still change before 1.0.0; see UPGRADING.md.
   (PHP 8.3/8.4/8.5 × Laravel 12/13 × lowest/stable) with `composer validate
   --strict`, `composer audit`, and SHA-pinned Actions.
 
-[Unreleased]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.2...HEAD
+[Unreleased]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.3...HEAD
+[0.3.0-beta.3]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.2...v0.3.0-beta.3
 [0.3.0-beta.2]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.1...v0.3.0-beta.2
 [0.3.0-beta.1]: https://github.com/qiick-io/laravel-api-keys/compare/v0.2.0...v0.3.0-beta.1
 [0.2.0]: https://github.com/qiick-io/laravel-api-keys/compare/v0.1.0...v0.2.0

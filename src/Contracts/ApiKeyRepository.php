@@ -41,29 +41,39 @@ interface ApiKeyRepository
     public function expiringUnnotified(\DateTimeImmutable $until): iterable;
 
     /**
-     * Final success stamp: set `expiry_notified_at` and clear
-     * `expiry_notice_claimed_at`. Call only after a successful send.
+     * Final success stamp: set `expiry_notified_at` and clear the claim
+     * (`expiry_notice_claimed_at`, `expiry_notice_claim_token`), only while the
+     * row still holds this claim's token and the `expires_at` the record was
+     * selected with ({@see ExpiryNoticeClaimSql::markNotified()}). Call only
+     * after a successful send.
+     *
+     * @return bool false when the claim was taken by another run (its lease
+     *              expired) or a rotation changed `expires_at`: nothing is stamped
      */
-    public function markExpiryNotified(ApiKeyRecord $record, \DateTimeImmutable $notifiedAt): void;
+    public function markExpiryNotified(ApiKeyRecord $record, \DateTimeImmutable $notifiedAt, string $claimToken): bool;
 
     /**
-     * Atomic claim lease on `expiry_notice_claimed_at` (see
-     * {@see ExpiryNoticeClaimSql::claim()}). Wins when the
-     * notice is unsent and either unclaimed or the prior claim is older than
-     * `$leaseSeconds`. Claim before send; {@see releaseExpiryNotice()} on
-     * send failure; {@see markExpiryNotified()} after success.
+     * Atomic claim lease ({@see ExpiryNoticeClaimSql::claim()}): set
+     * `expiry_notice_claimed_at` to `$now` and `expiry_notice_claim_token` to
+     * `$claimToken`. Wins when the notice is unsent, the row still has the
+     * `expires_at` the record was selected with, and it is either unclaimed or
+     * the prior claim is older than `$leaseSeconds`. Claim before send;
+     * {@see releaseExpiryNotice()} on send failure; {@see markExpiryNotified()}
+     * after success, both with the same token.
      */
     public function claimExpiryNotice(
         ApiKeyRecord $record,
         \DateTimeImmutable $now,
         int $leaseSeconds,
+        string $claimToken,
     ): bool;
 
     /**
-     * Clear `expiry_notice_claimed_at` after a failed send so the next run
-     * can reclaim immediately (without waiting for the lease).
+     * Clear the claim after a failed send so the next run can reclaim at once
+     * (without waiting for the lease), only while the row still holds this
+     * claim's token and selected `expires_at` ({@see ExpiryNoticeClaimSql::release()}).
      */
-    public function releaseExpiryNotice(ApiKeyRecord $record): void;
+    public function releaseExpiryNotice(ApiKeyRecord $record, string $claimToken): void;
 
     /**
      * Non-revoked `api_key` rows still on token_version 0 (product legacy format).

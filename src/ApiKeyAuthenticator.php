@@ -172,14 +172,14 @@ final class ApiKeyAuthenticator
             throw $this->failedAttemptsExceeded($brake, $clientIp);
         }
 
-        $ipAllowlist = $this->decodedStoredJson($matched, 'ip_allowlist', $matched->rawIpAllowlist(), ApiKeyRejection::ipNotAllowed(...));
+        $ipAllowlist = $this->decodedStoredJson($matched, 'ip_allowlist', $matched->rawIpAllowlist(), ApiKeyRejection::ipNotAllowed(...), isList: true);
 
         if (! $this->ipAllowlist->allows($clientIp, $ipAllowlist)) {
             throw ApiKeyRejection::ipNotAllowed();
         }
 
         $restrictions = KeyRestrictions::parse(
-            $this->decodedStoredJson($matched, 'restrictions', $matched->rawRestrictions(), ApiKeyRejection::requestNotAllowed(...)),
+            $this->decodedStoredJson($matched, 'restrictions', $matched->rawRestrictions(), ApiKeyRejection::requestNotAllowed(...), isList: false),
         );
         if ($restrictions->isDenied) {
             throw ApiKeyRejection::requestNotAllowed();
@@ -190,7 +190,7 @@ final class ApiKeyAuthenticator
         }
 
         $expanded = ScopeSet::parseStoredExpanded(
-            $this->decodedStoredJson($matched, 'scopes', $matched->rawScopes(), ApiKeyRejection::noUsableScopes(...)),
+            $this->decodedStoredJson($matched, 'scopes', $matched->rawScopes(), fn (): ApiKeyRejection => ApiKeyRejection::noUsableScopes($requiredScope?->value()), isList: true),
             $this->vocabulary,
         );
         if ($expanded->isEmpty()) {
@@ -328,18 +328,25 @@ final class ApiKeyAuthenticator
      * (an empty string included) denies the key and is reported, so a corrupted
      * row never authenticates without its limits.
      *
+     * Decoding to arrays loses the difference between a JSON object and a list:
+     * `{}` would become `[]`, an open allowlist. So the shape is checked on the
+     * object decode first, and a column that must be a list but holds anything
+     * else is denied and reported the same way. The value is returned as that
+     * object decode: `restrictions` is an object, and
+     * {@see KeyRestrictions::parse()} checks its shape at every depth.
+     *
      * @param  callable(): ApiKeyRejection  $denial
      *
-     * @throws ApiKeyRejection when the stored string is not valid JSON
+     * @throws ApiKeyRejection when the stored string is not valid JSON, or not a list where one is required
      */
-    private function decodedStoredJson(ApiKeyRecord $record, string $column, mixed $stored, callable $denial): mixed
+    private function decodedStoredJson(ApiKeyRecord $record, string $column, mixed $stored, callable $denial, bool $isList): mixed
     {
         if (! is_string($stored)) {
             return $stored;
         }
 
         try {
-            return json_decode($stored, true, flags: JSON_THROW_ON_ERROR);
+            $shape = json_decode($stored, false, flags: JSON_THROW_ON_ERROR);
         } catch (\JsonException $exception) {
             $this->reportException(new \UnexpectedValueException(
                 "The stored {$column} of API key {$record->publicId()} is not valid JSON: the key is denied.",
@@ -348,6 +355,29 @@ final class ApiKeyAuthenticator
 
             throw $denial();
         }
+
+        // Only SQL NULL (a PHP null from the record) means "not set": a stored JSON null is a
+        // value someone wrote, and reading it as "no restriction" would fail open.
+        if ($shape === null) {
+            $this->reportException(new \UnexpectedValueException(
+                "The stored {$column} of API key {$record->publicId()} is JSON null; only SQL NULL means no restriction: the key is denied.",
+            ));
+
+            throw $denial();
+        }
+
+        // A JSON list decodes to a PHP array, an object to stdClass.
+        if ($isList && ! is_array($shape)) {
+            $this->reportException(new \UnexpectedValueException(
+                "The stored {$column} of API key {$record->publicId()} is not a JSON list: the key is denied.",
+            ));
+
+            throw $denial();
+        }
+
+        // The tree as decoded: `scopes` and `ip_allowlist` are lists of strings either way, and
+        // KeyRestrictions needs objects kept apart from lists at every depth.
+        return $shape;
     }
 
     private function reportException(\Throwable $exception): void

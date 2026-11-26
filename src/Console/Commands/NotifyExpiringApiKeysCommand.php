@@ -11,6 +11,7 @@ use Qiick\ApiKeys\Contracts\ApiKeyRepository;
 use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\ExpiryRecipientResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
+use Qiick\ApiKeys\Contracts\RandomSource;
 use Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSent;
 use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSent;
 use Qiick\ApiKeys\ExpiryRecipient;
@@ -23,7 +24,8 @@ use Qiick\ApiKeys\LegacyCutoff;
  * Expiry: non-revoked `api_key` rows with `expires_at` within
  * `api-keys.expiry.notice_days` and null `expiry_notified_at`.
  * Claim takes a lease on `expiry_notice_claimed_at` (app clock, not DB
- * `NOW()`); success stamps `expiry_notified_at`. A dead worker after claim
+ * `NOW()`) with a fresh `expiry_notice_claim_token`, for the `expires_at` it
+ * selected; success stamps `expiry_notified_at` with the same token. A dead worker after claim
  * is reclaimable once `api-keys.expiry.claim_lease_seconds` elapses. Keep
  * that lease above worst-case send latency, and keep worker clocks on
  * shared NTP UTC — skew or a send longer than the lease can double-notify.
@@ -45,6 +47,7 @@ final class NotifyExpiringApiKeysCommand extends Command
         Clock $clock,
         Dispatcher $events,
         LegacyFormatWarningGate $legacyWarningGate,
+        RandomSource $random,
     ): int {
         $configuredNoticeDays = config('api-keys.expiry.notice_days');
         $noticeDays = filter_var(
@@ -82,6 +85,8 @@ final class NotifyExpiringApiKeysCommand extends Command
         }
 
         $notified = 0;
+        $claimsTried = 0;
+        $claimsWon = 0;
 
         foreach ($repository->expiringUnnotified($until) as $record) {
             $expiresAt = $record->expiresAt();
@@ -94,29 +99,44 @@ final class NotifyExpiringApiKeysCommand extends Command
                 continue;
             }
 
-            // Lease claim before send; dead workers are reclaimable after TTL.
-            if (! $repository->claimExpiryNotice($record, $now, $leaseSeconds)) {
+            // Lease claim before send; dead workers are reclaimable after TTL. A fresh token per
+            // claim keeps a run whose lease expired from marking or releasing the next run's claim.
+            $claimToken = bin2hex($random->bytes(16));
+
+            $claimsTried++;
+
+            if (! $repository->claimExpiryNotice($record, $now, $leaseSeconds, $claimToken)) {
                 continue;
             }
+
+            $claimsWon++;
 
             $notification = new $notificationClass($record, $expiresAt);
 
             try {
                 Notification::send($recipients, $notification);
             } catch (\Throwable $exception) {
-                $repository->releaseExpiryNotice($record);
+                $repository->releaseExpiryNotice($record, $claimToken);
                 $this->error('Expiry notice failed for '.$record->publicId().': '.$exception->getMessage());
 
                 continue;
             }
 
-            $repository->markExpiryNotified($record, $now);
+            if (! $repository->markExpiryNotified($record, $now, $claimToken)) {
+                $this->warn('Expiry notice for '.$record->publicId().' was sent, but its claim was taken by another run or the key\'s expiry changed: not marked as notified.');
+            }
+
             $events->dispatch(new ApiKeyExpiryNoticeSent(
                 apiKeyId: $record->publicId(),
                 expiresAt: $expiresAt,
                 notifiedAt: $now,
             ));
             $notified++;
+        }
+
+        // A race loses some claims; losing every one points to an expires_at binding that never matches.
+        if ($claimsTried > 0 && $claimsWon === 0) {
+            $this->warn("None of the {$claimsTried} expiry notices could be claimed: another run may hold them, or expires_at is bound in a different format or time zone than it is stored (see ExpiryNoticeClaimSql::expiryWindow()).");
         }
 
         $this->info("Expiry notices sent: {$notified}");

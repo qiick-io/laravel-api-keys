@@ -77,7 +77,9 @@ that does not decode (an empty string included) denies the key
 (`ip_not_allowed`, `request_not_allowed` or `insufficient_scope`) and is
 reported to the exception handler. So does a JSON object in `scopes` or
 `ip_allowlist`, which must be lists (`{}` would otherwise read as an empty,
-open allowlist). SQL `NULL` and JSON `null` still mean no restriction. The model can keep the cast for its own UI code.
+open allowlist). Only SQL `NULL` means no restriction: a stored JSON `null`
+is a value someone wrote, and it denies the key and is reported like any
+other unreadable value. The model can keep the cast for its own UI code.
 
 ### Not in this schema
 

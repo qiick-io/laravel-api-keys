@@ -15,6 +15,9 @@ were added; see UPGRADING.md.
 
 ### Security
 
+- A stored JSON `null` in `scopes`, `ip_allowlist` or `restrictions` denies the
+  key and is reported; only SQL NULL means no restriction. The authenticator
+  and `KeyRestrictions::parse('null')` now agree (#80).
 - A stored `scopes` or `ip_allowlist` that is a JSON object instead of a list
   (`{}` included) denies the key and is reported: decoded to an array, `{}`
   read as an open allowlist. `restrictions` without `v` = 1 (`{}`, `[]`, `''`)

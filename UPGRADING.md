@@ -18,6 +18,9 @@ wildcards over the suffixes it names.
 
 ## From 0.3.0-beta.2 to 0.3.0-beta.3
 
+- Only SQL NULL means "no restriction". A stored JSON `null` (the string
+  `null`) in `scopes`, `ip_allowlist` or `restrictions` now denies the key and
+  is reported. Store SQL NULL for a key without an allowlist or restrictions.
 - `KeyRestrictions::parse()` denies `[]`, `''` and any document without
   `v` = 1; only null is unrestricted. Store null, not `{}` or `[]`, for a key
   without restrictions, or those keys stop authenticating (fail closed).

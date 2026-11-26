@@ -93,6 +93,12 @@ final readonly class KeyRestrictions
      */
     private static function jsonTree(mixed $raw): mixed
     {
+        // The authenticator hands over its own object decode: no need to encode and decode it again.
+        // Equivalent mutant: without the shortcut the round trip yields the same tree.
+        if ($raw instanceof \stdClass) {
+            return $raw; // @pest-mutate-ignore
+        }
+
         try {
             $json = is_string($raw) ? $raw : json_encode($raw, JSON_THROW_ON_ERROR);
 

@@ -18,6 +18,12 @@ were added; see UPGRADING.md.
 - `IpAllowlist::isValidEntry()` validates one allowlist entry by the same rules
   `allows()` applies, for forms that edit an allowlist (#76).
 
+### Security
+
+- An allowlist prefix written with a leading zero (`/00`, `/024`) is invalid
+  and denies the allowlist, instead of reading as `/0` (every address) or
+  `/24` (#76).
+
 ## [0.3.0-beta.2] - 2026-11-25
 
 Second beta: Redis is no longer required, and the fixes found while adopting

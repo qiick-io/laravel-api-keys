@@ -15,7 +15,8 @@ use Symfony\Component\HttpFoundation\IpUtils;
  * - IPv4-mapped addresses (::ffff:a.b.c.d / ::ffff:0:0/96) expand to dotted IPv4
  * - IPv4-compatible (::a.b.c.d) are NOT unwrapped (deprecated; ::1 and :: stay IPv6)
  * - Mapped CIDR: prefix ≥ 96 → IPv4 with prefix−96; prefix < 96 → malformed deny
- * - Prefix out of range for the family (IPv4 0–32, IPv6 0–128) → deny
+ * - Prefix out of range for the family (IPv4 0–32, IPv6 0–128), or written with
+ *   a leading zero (`/00`, `/024`) → deny
  */
 final class IpAllowlist
 {
@@ -122,12 +123,13 @@ final class IpAllowlist
         }
 
         $parts = explode('/', $entry);
-        if (count($parts) !== 2 || ! ctype_digit($parts[1])) {
+        // Digits without a leading zero: "/00" or "/024" would read as /0 or /24, and a typo
+        // must never turn into the match-all /0.
+        if (count($parts) !== 2 || preg_match('/^(0|[1-9][0-9]*)$/D', $parts[1]) !== 1) {
             return null;
         }
 
         $address = $parts[0];
-        // "00" must become 0: IpUtils treats only an integer-looking "0" as the match-all prefix.
         $prefixLength = (int) $parts[1];
         $wasMapped = $this->isIpv4Mapped($address);
         $expanded = $this->expandMapped($address);

@@ -93,16 +93,6 @@ it('fail-closes when a prefix is out of range for the address family', function 
         ->and(allowlist()->allows('10.0.0.5', ['10.0.0.5', '::ffff:10.0.0.0/129']))->toBeFalse();
 });
 
-it('reads a zero-padded CIDR prefix as its number', function (): void {
-    $allowlist = new IpAllowlist;
-
-    // '::/00' is /0: every IPv6 address. Kept as the string "00", IpUtils would not see a zero prefix.
-    expect($allowlist->allows('2001:db8::1', ['::/00']))->toBeTrue()
-        ->and($allowlist->allows('fe80::1', ['::/00']))->toBeTrue()
-        ->and($allowlist->allows('203.0.113.10', ['203.0.113.0/024']))->toBeTrue()
-        ->and($allowlist->allows('203.0.114.10', ['203.0.113.0/024']))->toBeFalse();
-});
-
 it('validates a single entry with the rules allows() applies', function (mixed $entry, bool $isValid): void {
     expect(allowlist()->isValidEntry($entry))->toBe($isValid)
         // A list holding only that entry is usable exactly when the entry is valid.
@@ -129,4 +119,4 @@ it('validates a single entry with the rules allows() applies', function (mixed $
 it('refuses a zero-padded prefix, which would otherwise read as /0 and match every address', function (string $entry): void {
     expect(allowlist()->isValidEntry($entry))->toBeFalse()
         ->and(allowlist()->allows('198.51.100.7', [$entry]))->toBeFalse();
-})->with(['203.0.113.1/00', '203.0.113.0/024', '2001:db8::/032', '::ffff:203.0.113.0/0120']);
+})->with(['203.0.113.1/00', '203.0.113.0/024', '::/00', '2001:db8::/032', '::ffff:203.0.113.0/0120']);

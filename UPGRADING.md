@@ -16,6 +16,13 @@ authenticating after you upgrade, with no migration. Each CHANGELOG entry says
 whether the list changed; before upgrading, search stored `restrictions` for
 wildcards over the suffixes it names.
 
+## From 0.3.0-beta.2 to 0.3.0-beta.3
+
+- An `ip_allowlist` entry whose prefix has a leading zero (`203.0.113.0/024`,
+  `10.0.0.1/00`) is now invalid, and a list holding one denies the key. Write
+  prefixes without leading zeros; `IpAllowlist::isValidEntry()` validates form
+  input by the same rules.
+
 ## From 0.3.0-beta.1 to 0.3.0-beta.2
 
 - Redis or Memcached is no longer required. Attempts are counted with

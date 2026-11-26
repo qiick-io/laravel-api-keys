@@ -18,6 +18,18 @@ wildcards over the suffixes it names.
 
 ## From 0.3.0-beta.2 to 0.3.0-beta.3
 
+- A JSON literal `null` (the stored text `null`) in `scopes`, `ip_allowlist`
+  or `restrictions` now denies the key and is reported. So does `null` in a
+  request list field (`methods`, `route_names`, `origins`, `referrers`).
+  - SQL NULL keeps its meaning: in `ip_allowlist` or `restrictions` it means
+    "none", and in `scopes` it still denies (no usable scopes). An empty
+    allowlist `[]` still allows every IP.
+  - When repairing rows, restore the intended scopes, and use SQL NULL only for
+    an allowlist or restrictions document that is meant to be absent.
+  - The distinction only reaches the package through the raw accessor
+    (`ApiKeyRecord::rawIpAllowlist()` and its siblings returning
+    `getRawOriginal()`): Laravel's `array` cast turns both into PHP `null`
+    before the authenticator can check.
 - `KeyRestrictions::parse()` denies `[]`, `''` and any document without
   `v` = 1; only null is unrestricted. Store null, not `{}` or `[]`, for a key
   without restrictions, or those keys stop authenticating (fail closed).

@@ -132,6 +132,19 @@ final readonly class KeyRestrictions
     }
 
     /**
+     * A list field of a section: absent is an empty list (unrestricted), but a
+     * present JSON null, like any other non-list, is malformed. Reading it as
+     * empty would skip that check.
+     *
+     * @param  array<mixed>  $section
+     * @return array<mixed>|null
+     */
+    private static function listField(array $section, string $field): ?array
+    {
+        return array_key_exists($field, $section) ? self::items($section[$field]) : [];
+    }
+
+    /**
      * @return RequestRestrictions|null null when malformed
      */
     private static function parseRequest(mixed $raw): ?RequestRestrictions
@@ -146,10 +159,10 @@ final readonly class KeyRestrictions
             return null;
         }
 
-        $methods = self::items($section['methods'] ?? []);
-        $routeNames = self::items($section['route_names'] ?? []);
-        $origins = self::items($section['origins'] ?? []);
-        $referrers = self::items($section['referrers'] ?? []);
+        $methods = self::listField($section, 'methods');
+        $routeNames = self::listField($section, 'route_names');
+        $origins = self::listField($section, 'origins');
+        $referrers = self::listField($section, 'referrers');
 
         if ($methods === null || $routeNames === null || $origins === null || $referrers === null) {
             return null;

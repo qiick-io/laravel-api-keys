@@ -356,8 +356,18 @@ final class ApiKeyAuthenticator
             throw $denial();
         }
 
-        // A JSON list decodes to a PHP array, an object to stdClass; null means "not set".
-        if ($isList && $shape !== null && ! is_array($shape)) {
+        // Only SQL NULL (a PHP null from the record) means "not set": a stored JSON null is a
+        // value someone wrote, and reading it as "no restriction" would fail open.
+        if ($shape === null) {
+            $this->reportException(new \UnexpectedValueException(
+                "The stored {$column} of API key {$record->publicId()} is JSON null; only SQL NULL means no restriction: the key is denied.",
+            ));
+
+            throw $denial();
+        }
+
+        // A JSON list decodes to a PHP array, an object to stdClass.
+        if ($isList && ! is_array($shape)) {
             $this->reportException(new \UnexpectedValueException(
                 "The stored {$column} of API key {$record->publicId()} is not a JSON list: the key is denied.",
             ));

@@ -23,14 +23,19 @@ wildcards over the suffixes it names.
   - Add `expiry_notice_claim_token` (string(64), nullable) to `api_keys`.
     Pre-1.0 products put it in their `create_api_keys` migration.
   - `claimExpiryNotice($record, $now, $leaseSeconds, string $claimToken): bool`
-    also sets the token, and wins only while `expires_at` equals
-    `$record->expiresAt()`.
+    also sets the token, and wins only while `expires_at` is still the
+    selected expiry, matched within `ExpiryNoticeClaimSql::expiryWindow()`:
+    from the start of its second to one second later.
   - `markExpiryNotified($record, $notifiedAt, string $claimToken): bool` and
     `releaseExpiryNotice($record, string $claimToken): void` apply only while
     the row holds that token and `expires_at`. Both clear the token, and the
     mark returns false when the claim was lost.
-  - `ExpiryNoticeClaimSql` has the statements and their new bindings. Bind
-    `expires_at` exactly as you read it, so the equality holds on your engine.
+  - `ExpiryNoticeClaimSql` has the statements and their new bindings.
+    `expires_from` and `expires_until` come from
+    `ExpiryNoticeClaimSql::expiryWindow($record->expiresAt())`. Bind them like
+    the column's other timestamps (same layout; an explicit offset for
+    `TIMESTAMPTZ`), or no claim ever matches. `api-keys:notify-expiring` warns
+    when it claims none of the notices it tried.
 
 ## From 0.3.0-beta.1 to 0.3.0-beta.2
 

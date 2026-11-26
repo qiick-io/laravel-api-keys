@@ -227,9 +227,10 @@ final class FakeApiKeyRepository implements ApiKeyRepository
         }
 
         $this->casVersions[$publicId] = $observedVersion + 1;
-        $this->claimTokens[$publicId] = $claimToken;
 
+        // Only a record the fake can stamp holds a claim, as only a stored row can in SQL.
         if ($current instanceof InMemoryApiKeyRecord) {
+            $this->claimTokens[$publicId] = $claimToken;
             $this->replaceRecord($publicId, $current->withExpiryNoticeClaimedAt($now));
         }
 
@@ -264,9 +265,21 @@ final class FakeApiKeyRepository implements ApiKeyRepository
             && $this->isSameExpiry($current, $selected);
     }
 
+    /**
+     * Within {@see ExpiryNoticeClaimSql::expiryWindow()}, as the SQL matches it.
+     */
     private function isSameExpiry(ApiKeyRecord $current, ApiKeyRecord $selected): bool
     {
-        return $current->expiresAt()?->format('U.u') === $selected->expiresAt()?->format('U.u');
+        $currentExpiry = $current->expiresAt();
+        $selectedExpiry = $selected->expiresAt();
+
+        if ($currentExpiry === null || $selectedExpiry === null) {
+            return $currentExpiry === $selectedExpiry;
+        }
+
+        [$from, $until] = ExpiryNoticeClaimSql::expiryWindow($selectedExpiry);
+
+        return $currentExpiry >= $from && $currentExpiry <= $until;
     }
 
     public function findActiveLegacy(): iterable

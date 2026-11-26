@@ -85,6 +85,8 @@ final class NotifyExpiringApiKeysCommand extends Command
         }
 
         $notified = 0;
+        $claimsTried = 0;
+        $claimsWon = 0;
 
         foreach ($repository->expiringUnnotified($until) as $record) {
             $expiresAt = $record->expiresAt();
@@ -101,9 +103,13 @@ final class NotifyExpiringApiKeysCommand extends Command
             // claim keeps a run whose lease expired from marking or releasing the next run's claim.
             $claimToken = bin2hex($random->bytes(16));
 
+            $claimsTried++;
+
             if (! $repository->claimExpiryNotice($record, $now, $leaseSeconds, $claimToken)) {
                 continue;
             }
+
+            $claimsWon++;
 
             $notification = new $notificationClass($record, $expiresAt);
 
@@ -126,6 +132,11 @@ final class NotifyExpiringApiKeysCommand extends Command
                 notifiedAt: $now,
             ));
             $notified++;
+        }
+
+        // A race loses some claims; losing every one points to an expires_at binding that never matches.
+        if ($claimsTried > 0 && $claimsWon === 0) {
+            $this->warn("None of the {$claimsTried} expiry notices could be claimed: another run may hold them, or expires_at is bound in a different format or time zone than it is stored (see ExpiryNoticeClaimSql::expiryWindow()).");
         }
 
         $this->info("Expiry notices sent: {$notified}");

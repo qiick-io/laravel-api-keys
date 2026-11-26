@@ -357,4 +357,3 @@ it('matches the selected expiry within the second, as the SQL does', function ()
     expect($repository->claimExpiryNotice($selected, $now, 900, 'token-a'))->toBeTrue()
         ->and($repository->markExpiryNotified($selected, $now, 'token-a'))->toBeTrue();
 });
-

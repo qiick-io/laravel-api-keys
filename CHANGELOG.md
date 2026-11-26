@@ -32,7 +32,18 @@ were added; see UPGRADING.md.
   denies instead of reading as unrestricted; only null is unrestricted. Nested
   shapes are checked too: an object where a list belongs, or the reverse, at
   any depth denies (#72).
-
+- An allowlist prefix written with a leading zero (`/00`, `/024`) is invalid
+  and denies the allowlist, instead of reading as `/0` (every address) or
+  `/24` (#76).
+- The expiry-notice claim is bound to a random claim token
+  (`expiry_notice_claim_token`) and to the selected `expires_at`. A run whose
+  lease expired can no longer mark or release the next run's claim, and a
+  rotation between claim and mark is not stamped as notified. `expires_at` is
+  matched within a one-second window (`ExpiryNoticeClaimSql::expiryWindow()`),
+  so a different sub-second precision still matches.
+  `api-keys:notify-expiring` warns when a sent notice could not be marked, and
+  when it claims none of the notices it tried.
+  **Contract break** in `ApiKeyRepository`; see UPGRADING.md (#78).
 
 ## [0.3.0-beta.2] - 2026-11-25
 

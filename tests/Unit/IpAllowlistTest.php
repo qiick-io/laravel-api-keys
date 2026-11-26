@@ -125,3 +125,8 @@ it('validates a single entry with the rules allows() applies', function (mixed $
     'not a string' => [3232235777, false],
     'null' => [null, false],
 ]);
+
+it('refuses a zero-padded prefix, which would otherwise read as /0 and match every address', function (string $entry): void {
+    expect(allowlist()->isValidEntry($entry))->toBeFalse()
+        ->and(allowlist()->allows('198.51.100.7', [$entry]))->toBeFalse();
+})->with(['203.0.113.1/00', '203.0.113.0/024', '2001:db8::/032', '::ffff:203.0.113.0/0120']);

@@ -359,3 +359,31 @@ it('warns when a sent notice could not be marked because its claim was taken or 
 
     Event::assertDispatched(ApiKeyExpiryNoticeSent::class);
 });
+
+it('warns when it could claim none of the notices it tried, which a bound format mismatch would cause', function (): void {
+    Notification::fake();
+    $records = [commandRecord('d1'), commandRecord('d2')];
+    $repository = new ScriptedApiKeyRepository($records, lostClaimPublicIds: [$records[0]->publicId(), $records[1]->publicId()]);
+    bindCommand($repository, new RecordingRecipientResolver([
+        $records[0]->publicId() => [commandNotifiable(1)],
+        $records[1]->publicId() => [commandNotifiable(2)],
+    ]));
+
+    $this->artisan(NotifyExpiringApiKeysCommand::class)
+        ->expectsOutputToContain('None of the 2 expiry notices could be claimed: another run may hold them, or expires_at is bound in a different format or time zone than it is stored (see ExpiryNoticeClaimSql::expiryWindow()).')
+        ->assertSuccessful();
+});
+
+it('does not warn when some claims were won', function (): void {
+    Notification::fake();
+    $records = [commandRecord('d3'), commandRecord('d4')];
+    $repository = new ScriptedApiKeyRepository($records, lostClaimPublicIds: [$records[0]->publicId()]);
+    bindCommand($repository, new RecordingRecipientResolver([
+        $records[0]->publicId() => [commandNotifiable(1)],
+        $records[1]->publicId() => [commandNotifiable(2)],
+    ]));
+
+    $this->artisan(NotifyExpiringApiKeysCommand::class)
+        ->doesntExpectOutputToContain('could be claimed')
+        ->assertSuccessful();
+});

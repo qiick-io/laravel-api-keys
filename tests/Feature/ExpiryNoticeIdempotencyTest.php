@@ -347,3 +347,14 @@ it('claims with a token from the RandomSource', function (): void {
 
     expect($repository->claimTokensUsed)->toBe([bin2hex(substr('claim-token-seed-0123456789abcdef', 0, 16))]);
 });
+
+it('matches the selected expiry within the second, as the SQL does', function (): void {
+    $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
+    $stored = expiringRecord('a5')->withExpiresAt(new DateTimeImmutable('2026-01-15T00:00:00.400000+00:00'));
+    $selected = $stored->withExpiresAt(new DateTimeImmutable('2026-01-15T00:00:00+00:00'));
+    $repository = new FakeApiKeyRepository([$stored], $now);
+
+    expect($repository->claimExpiryNotice($selected, $now, 900, 'token-a'))->toBeTrue()
+        ->and($repository->markExpiryNotified($selected, $now, 'token-a'))->toBeTrue();
+});
+

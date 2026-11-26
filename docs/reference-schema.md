@@ -38,6 +38,7 @@ divergence: there `id` is the public id.
 | `expires_at` | **dateTime** | yes | null | index | Future-dated; index serves the expiry command |
 | `expiry_notified_at` | timestamp | yes | null | — | Final success stamp for expiry notices |
 | `expiry_notice_claimed_at` | timestamp | yes | null | — | In-flight claim lease (app clock); reclaimable after `api-keys.expiry.claim_lease_seconds` (keep above send latency; NTP-sync workers) |
+| `expiry_notice_claim_token` | string(64) | yes | null | — | Token of the in-flight claim (random, from the command). Mark and release match it and the selected `expires_at`, so a run whose lease expired cannot touch the next run's claim and a rotation is never stamped as notified |
 | `last_used_at` | timestamp | yes | null | — | Written via `saveQuietly` |
 | `last_used_ip` | string(45) | yes | null | — | |
 | `last_used_user_agent` | string(512) | yes | null | — | Package truncates to 512 |

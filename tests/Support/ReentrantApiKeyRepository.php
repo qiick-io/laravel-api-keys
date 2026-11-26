@@ -49,19 +49,19 @@ final class ReentrantApiKeyRepository implements ApiKeyRepository
         return $this->inner->expiringUnnotified($until);
     }
 
-    public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void
+    public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt, string $claimToken): bool
     {
-        $this->inner->markExpiryNotified($record, $notifiedAt);
+        return $this->inner->markExpiryNotified($record, $notifiedAt, $claimToken);
     }
 
-    public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds): bool
+    public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds, string $claimToken): bool
     {
-        return $this->inner->claimExpiryNotice($record, $now, $leaseSeconds);
+        return $this->inner->claimExpiryNotice($record, $now, $leaseSeconds, $claimToken);
     }
 
-    public function releaseExpiryNotice(ApiKeyRecord $record): void
+    public function releaseExpiryNotice(ApiKeyRecord $record, string $claimToken): void
     {
-        $this->inner->releaseExpiryNotice($record);
+        $this->inner->releaseExpiryNotice($record, $claimToken);
     }
 
     public function findActiveLegacy(): iterable

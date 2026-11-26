@@ -848,14 +848,17 @@ it('keeps authentication when recordUsage throws (audit stamp must not 500)', fu
                 return [];
             }
 
-            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt, string $claimToken): bool
+            {
+                return false;
+            }
 
-            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds): bool
+            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds, string $claimToken): bool
             {
                 return true;
             }
 
-            public function releaseExpiryNotice(ApiKeyRecord $record): void {}
+            public function releaseExpiryNotice(ApiKeyRecord $record, string $claimToken): void {}
 
             public function findActiveLegacy(): iterable
             {
@@ -934,14 +937,17 @@ it('never leaks the presented token via SensitiveParameter in traces (A14)', fun
                 return [];
             }
 
-            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt, string $claimToken): bool
+            {
+                return false;
+            }
 
-            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds): bool
+            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds, string $claimToken): bool
             {
                 return true;
             }
 
-            public function releaseExpiryNotice(ApiKeyRecord $record): void {}
+            public function releaseExpiryNotice(ApiKeyRecord $record, string $claimToken): void {}
 
             public function findActiveLegacy(): iterable
             {
@@ -1293,14 +1299,17 @@ it('reports usage failures via the Laravel report() helper when no reporter is w
                 return [];
             }
 
-            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt, string $claimToken): bool
+            {
+                return false;
+            }
 
-            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds): bool
+            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds, string $claimToken): bool
             {
                 return true;
             }
 
-            public function releaseExpiryNotice(ApiKeyRecord $record): void {}
+            public function releaseExpiryNotice(ApiKeyRecord $record, string $claimToken): void {}
 
             public function findActiveLegacy(): iterable
             {
@@ -1363,14 +1372,17 @@ it('does not count repository exceptions as failed attempts', function (): void 
                 return [];
             }
 
-            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt): void {}
+            public function markExpiryNotified(ApiKeyRecord $record, DateTimeImmutable $notifiedAt, string $claimToken): bool
+            {
+                return false;
+            }
 
-            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds): bool
+            public function claimExpiryNotice(ApiKeyRecord $record, DateTimeImmutable $now, int $leaseSeconds, string $claimToken): bool
             {
                 return true;
             }
 
-            public function releaseExpiryNotice(ApiKeyRecord $record): void {}
+            public function releaseExpiryNotice(ApiKeyRecord $record, string $claimToken): void {}
 
             public function findActiveLegacy(): iterable
             {

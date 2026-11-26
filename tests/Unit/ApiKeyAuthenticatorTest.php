@@ -1692,3 +1692,10 @@ it('still reads an empty JSON list as an open allowlist, and a version-1 object 
     expect(authenticateWithStoredColumn('ip_allowlist', '[]'))->toBe(['authenticated', []])
         ->and(authenticateWithStoredColumn('restrictions', '{"v":1}'))->toBe(['authenticated', []]);
 });
+
+it('denies stored restrictions whose nested shape is not recognised, and accepts an empty request object', function (): void {
+    expect(authenticateWithStoredColumn('restrictions', '{"v":1,"request":[]}')[0])->toBe('request_not_allowed')
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"request":{"methods":{}}}')[0])->toBe('request_not_allowed')
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"resources":{}}')[0])->toBe('request_not_allowed')
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"request":{}}'))->toBe(['authenticated', []]);
+});

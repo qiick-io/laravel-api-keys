@@ -15,15 +15,24 @@ mutates(RequestRestrictions::class);
 mutates(ResourceRestrictions::class);
 mutates(ResourceRestriction::class);
 
-it('treats null and empty JSON as unrestricted', function (): void {
+it('treats only null as unrestricted', function (): void {
     expect(KeyRestrictions::parse(null)->isDenied)->toBeFalse()
         ->and(KeyRestrictions::parse(null)->request->isUnrestricted())->toBeTrue()
         ->and(KeyRestrictions::parse(null)->resources->isEmpty())->toBeTrue()
-        ->and(KeyRestrictions::parse('')->isDenied)->toBeFalse()
-        ->and(KeyRestrictions::parse([])->isDenied)->toBeFalse()
         ->and(KeyRestrictions::unrestricted()->isDenied)->toBeFalse()
         ->and(KeyRestrictions::denied()->isDenied)->toBeTrue();
 });
+
+it('denies a document without version 1, empty ones included', function (mixed $raw): void {
+    expect(KeyRestrictions::parse($raw)->isDenied)->toBeTrue();
+})->with([
+    'empty array' => [[]],
+    'empty string' => [''],
+    'empty JSON object' => ['{}'],
+    'empty JSON list' => ['[]'],
+    'request without v' => ['{"request":{}}'],
+    'request without v, as array' => [['request' => []]],
+]);
 
 it('parses a valid version-1 document from array and JSON string', function (): void {
     $document = [
@@ -398,4 +407,38 @@ it('keeps route wildcard prefix length exact (substr -1, not -2)', function (): 
 it('pins KeyRestrictions::VERSION to 1', function (): void {
     expect(KeyRestrictions::VERSION)->toBe(1)
         ->and(KeyRestrictions::parse(['v' => KeyRestrictions::VERSION])->isDenied)->toBeFalse();
+});
+
+it('denies every nested shape it does not recognise', function (string $document): void {
+    expect(KeyRestrictions::parse($document)->isDenied)->toBeTrue();
+})->with([
+    'request as a list' => ['{"v":1,"request":[]}'],
+    'request as a string' => ['{"v":1,"request":"GET"}'],
+    'methods as an object' => ['{"v":1,"request":{"methods":{}}}'],
+    'methods as a numbered object' => ['{"v":1,"request":{"methods":{"0":"GET"}}}'],
+    'origins as an object' => ['{"v":1,"request":{"origins":{"0":"https://app.example.com"}}}'],
+    'resources as an object' => ['{"v":1,"resources":{}}'],
+    'resources as a numbered object' => ['{"v":1,"resources":{"0":{"type":"collection","values":["news"]}}}'],
+    'resource entry as a list' => ['{"v":1,"resources":[["collection",["news"]]]}'],
+    'values as an object' => ['{"v":1,"resources":[{"type":"collection","values":{}}]}'],
+    'values as a numbered object' => ['{"v":1,"resources":[{"type":"collection","values":{"0":"news"}}]}'],
+    'v as a string' => ['{"v":"1"}'],
+    'v as a float' => ['{"v":1.0}'],
+]);
+
+it('accepts the recognised shapes, empty sections included', function (string $document): void {
+    expect(KeyRestrictions::parse($document)->isDenied)->toBeFalse();
+})->with([
+    'version only' => ['{"v":1}'],
+    'empty request object' => ['{"v":1,"request":{}}'],
+    'null sections' => ['{"v":1,"request":null,"resources":null}'],
+    'empty resource list' => ['{"v":1,"resources":[]}'],
+    'full document' => ['{"v":1,"request":{"methods":["GET"]},"resources":[{"type":"collection","values":["news"]}]}'],
+]);
+
+it('reads a decoded array a product passes by the same shape rules', function (): void {
+    expect(KeyRestrictions::parse(['v' => 1, 'request' => ['methods' => ['GET']]])->isDenied)->toBeFalse()
+        ->and(KeyRestrictions::parse(['v' => 1, 'request' => ['methods' => ['0' => 'GET', '2' => 'POST']]])->isDenied)->toBeTrue()
+        // An array cannot tell {} from []: an empty section read from an array is a list, so it denies.
+        ->and(KeyRestrictions::parse(['v' => 1, 'request' => []])->isDenied)->toBeTrue();
 });

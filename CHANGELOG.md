@@ -13,6 +13,12 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Fixed
+
+- When the stored `scopes` do not decode, the 403 names the required scope
+  (`scope=` in `WWW-Authenticate` and the JSON), like the other
+  `insufficient_scope` refusals (#73).
+
 ### Security
 
 - A stored JSON `null` in `scopes`, `ip_allowlist` or `restrictions` denies the

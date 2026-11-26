@@ -1668,3 +1668,34 @@ it('denies a corrupted JSON column read from an Eloquent model as the contract a
     expect($outcome)->toBe('ip_not_allowed')
         ->and($reported)->toHaveCount(1);
 });
+
+it('denies and reports a stored JSON object where a list is expected', function (string $column, string $stored, string $errorCode): void {
+    [$outcome, $reported] = authenticateWithStoredColumn($column, $stored);
+
+    expect($outcome)->toBe($errorCode)
+        ->and($reported)->toBe([
+            "UnexpectedValueException: The stored {$column} of API key 00000000-0000-7000-8000-000000000001 is not a JSON list: the key is denied.",
+        ]);
+})->with([
+    'empty object as ip allowlist' => ['ip_allowlist', '{}', 'ip_not_allowed'],
+    'numbered object as ip allowlist' => ['ip_allowlist', '{"0":"203.0.113.10"}', 'ip_not_allowed'],
+    'empty object as scopes' => ['scopes', '{}', 'insufficient_scope'],
+    'numbered object as scopes' => ['scopes', '{"0":"items:read"}', 'insufficient_scope'],
+    'string as ip allowlist' => ['ip_allowlist', '"203.0.113.10"', 'ip_not_allowed'],
+]);
+
+it('denies stored restrictions without version 1', function (string $stored): void {
+    expect(authenticateWithStoredColumn('restrictions', $stored)[0])->toBe('request_not_allowed');
+})->with(['{}', '[]', '{"request":{}}']);
+
+it('still reads an empty JSON list as an open allowlist, and a version-1 object as restrictions', function (): void {
+    expect(authenticateWithStoredColumn('ip_allowlist', '[]'))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1}'))->toBe(['authenticated', []]);
+});
+
+it('denies stored restrictions whose nested shape is not recognised, and accepts an empty request object', function (): void {
+    expect(authenticateWithStoredColumn('restrictions', '{"v":1,"request":[]}')[0])->toBe('request_not_allowed')
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"request":{"methods":{}}}')[0])->toBe('request_not_allowed')
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"resources":{}}')[0])->toBe('request_not_allowed')
+        ->and(authenticateWithStoredColumn('restrictions', '{"v":1,"request":{}}'))->toBe(['authenticated', []]);
+});

@@ -18,8 +18,20 @@ were added; see UPGRADING.md.
 - `IpAllowlist::isValidEntry()` validates one allowlist entry by the same rules
   `allows()` applies, for forms that edit an allowlist (#76).
 
+### Fixed
+
+- When the stored `scopes` do not decode, the 403 names the required scope
+  (`scope=` in `WWW-Authenticate` and the JSON), like the other
+  `insufficient_scope` refusals (#73).
+
 ### Security
 
+- A stored `scopes` or `ip_allowlist` that is a JSON object instead of a list
+  (`{}` included) denies the key and is reported: decoded to an array, `{}`
+  read as an open allowlist. `restrictions` without `v` = 1 (`{}`, `[]`, `''`)
+  denies instead of reading as unrestricted; only null is unrestricted. Nested
+  shapes are checked too: an object where a list belongs, or the reverse, at
+  any depth denies (#72).
 - An allowlist prefix written with a leading zero (`/00`, `/024`) is invalid
   and denies the allowlist, instead of reading as `/0` (every address) or
   `/24` (#76).

@@ -41,6 +41,14 @@ final readonly class KeyRestrictions
 
     /**
      * Parse stored JSON / array. Fail closed on any structural surprise.
+     *
+     * Every input is read as a JSON tree, where an object is a `stdClass` and a
+     * list a PHP list, so `{}` and `[]` never stand in for each other at any
+     * depth: a JSON string is decoded as is, a decoded tree (`stdClass`) is
+     * taken as is, and an array a product passes is re-encoded first. An array
+     * cannot tell `{}` from `[]`, so an empty section read from one is a list
+     * and denies; products pass the stored string instead
+     * ({@see Contracts\ApiKeyRecord::rawRestrictions()}).
      */
     public static function parse(mixed $raw): self
     {
@@ -48,48 +56,27 @@ final readonly class KeyRestrictions
             return self::unrestricted();
         }
 
-        if (is_string($raw)) {
-            if ($raw === '') {
-                return self::unrestricted();
-            }
+        $document = self::fields(self::jsonTree($raw));
 
-            try {
-                // Equivalent mutant: a document deeper than the schema is denied by the shape checks
-                // anyway; the depth only caps decoder work on stored data.
-                $decoded = json_decode($raw, true, 32, JSON_THROW_ON_ERROR); // @pest-mutate-ignore: IncrementInteger,DecrementInteger
-            } catch (\JsonException) {
-                return self::denied();
-            }
-
-            $raw = $decoded;
-        }
-
-        if (! is_array($raw)) {
+        if ($document === null) {
             return self::denied();
         }
 
-        if ($raw === []) {
-            return self::unrestricted();
-        }
-
-        if (! array_key_exists('v', $raw)) {
+        // `v` must be the integer 1: "1" or 1.0 is an unknown version.
+        if (($document['v'] ?? null) !== self::VERSION) {
             return self::denied();
         }
 
-        if ($raw['v'] !== self::VERSION) {
+        if (! self::hasOnlyKeys($document, ['v', 'request', 'resources'])) {
             return self::denied();
         }
 
-        if (! self::hasOnlyKeys($raw, ['v', 'request', 'resources'])) {
-            return self::denied();
-        }
-
-        $request = self::parseRequest($raw['request'] ?? null);
+        $request = self::parseRequest($document['request'] ?? null);
         if ($request === null) {
             return self::denied();
         }
 
-        $resources = self::parseResources($raw['resources'] ?? null);
+        $resources = self::parseResources($document['resources'] ?? null);
         if ($resources === null) {
             return self::denied();
         }
@@ -102,6 +89,49 @@ final readonly class KeyRestrictions
     }
 
     /**
+     * The input as a JSON tree (objects as `stdClass`), or null when it is not JSON.
+     */
+    private static function jsonTree(mixed $raw): mixed
+    {
+        // The authenticator hands over its own object decode: no need to encode and decode it again.
+        // Equivalent mutant: without the shortcut the round trip yields the same tree.
+        if ($raw instanceof \stdClass) {
+            return $raw; // @pest-mutate-ignore
+        }
+
+        try {
+            $json = is_string($raw) ? $raw : json_encode($raw, JSON_THROW_ON_ERROR);
+
+            // Equivalent mutant: a document deeper than the schema is denied by the shape checks
+            // anyway; the depth only caps decoder work on stored data.
+            return json_decode($json, false, 32, JSON_THROW_ON_ERROR); // @pest-mutate-ignore: IncrementInteger,DecrementInteger
+        } catch (\JsonException) {
+            return null;
+        }
+    }
+
+    /**
+     * The fields of a JSON object, or null for anything else (a list included).
+     *
+     * @return array<mixed>|null
+     */
+    private static function fields(mixed $node): ?array
+    {
+        return $node instanceof \stdClass ? get_object_vars($node) : null;
+    }
+
+    /**
+     * A JSON list, or null for anything else (an object included): in the tree only
+     * a JSON list decodes to a PHP array.
+     *
+     * @return array<mixed>|null
+     */
+    private static function items(mixed $node): ?array
+    {
+        return is_array($node) ? $node : null;
+    }
+
+    /**
      * @return RequestRestrictions|null null when malformed
      */
     private static function parseRequest(mixed $raw): ?RequestRestrictions
@@ -110,20 +140,18 @@ final readonly class KeyRestrictions
             return new RequestRestrictions;
         }
 
-        if (! is_array($raw)) {
+        $section = self::fields($raw);
+
+        if ($section === null || ! self::hasOnlyKeys($section, ['methods', 'route_names', 'origins', 'referrers'])) {
             return null;
         }
 
-        if (! self::hasOnlyKeys($raw, ['methods', 'route_names', 'origins', 'referrers'])) {
-            return null;
-        }
+        $methods = self::items($section['methods'] ?? []);
+        $routeNames = self::items($section['route_names'] ?? []);
+        $origins = self::items($section['origins'] ?? []);
+        $referrers = self::items($section['referrers'] ?? []);
 
-        $methods = $raw['methods'] ?? [];
-        $routeNames = $raw['route_names'] ?? [];
-        $origins = $raw['origins'] ?? [];
-        $referrers = $raw['referrers'] ?? [];
-
-        if (! is_array($methods) || ! is_array($routeNames) || ! is_array($origins) || ! is_array($referrers)) {
+        if ($methods === null || $routeNames === null || $origins === null || $referrers === null) {
             return null;
         }
 
@@ -149,22 +177,18 @@ final readonly class KeyRestrictions
             return new ResourceRestrictions;
         }
 
-        if (! is_array($raw)) {
-            return null;
-        }
+        $list = self::items($raw);
 
-        if (! array_is_list($raw)) {
+        if ($list === null) {
             return null;
         }
 
         $entries = [];
 
-        foreach ($raw as $entry) {
-            if (! is_array($entry)) {
-                return null;
-            }
+        foreach ($list as $item) {
+            $entry = self::fields($item);
 
-            if (! self::hasOnlyKeys($entry, ['type', 'values', 'mode'])) {
+            if ($entry === null || ! self::hasOnlyKeys($entry, ['type', 'values', 'mode'])) {
                 return null;
             }
 
@@ -214,13 +238,15 @@ final readonly class KeyRestrictions
      */
     private static function stringList(mixed $raw): ?array
     {
-        if (! is_array($raw) || ! array_is_list($raw)) {
+        $items = self::items($raw);
+
+        if ($items === null) {
             return null;
         }
 
         $values = [];
 
-        foreach ($raw as $item) {
+        foreach ($items as $item) {
             if (! is_string($item) || $item === '') {
                 return null;
             }

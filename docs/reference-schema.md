@@ -29,8 +29,8 @@ divergence: there `id` is the public id.
 | `owner_principal_id` | FK principals (uuid) | no\* | — | index | Restrict, or null plus a revoke job; never silent cascade |
 | `created_by` | FK users | yes | null | index | `nullOnDelete` |
 | `scopes` | json | no | — | — | Parsed fail-closed by `ScopeSet` |
-| `ip_allowlist` | json | yes | null | — | A JSON list. Null or `[]` → allow all; an object (`{}` included) or anything malformed → deny |
-| `restrictions` | json | yes | null | — | Versioned object below; null → unrestricted; anything without `v` = 1 (`{}`, `[]` included) → deny |
+| `ip_allowlist` | json | yes | null | — | A JSON list. SQL NULL or `[]` → allow all; JSON `null`, an object (`{}` included) or anything malformed → deny |
+| `restrictions` | json | yes | null | — | Versioned object below; SQL NULL → unrestricted; JSON `null` or anything without `v` = 1 (`{}`, `[]` included) → deny |
 | `rate_limit_per_minute` | unsignedInteger | yes | null | — | Null → package default |
 | `rate_limit_per_day` | unsignedInteger | yes | null | — | Null → no day bucket (rolling 86_400 s, not calendar) |
 | `rate_limit_per_month` | unsignedInteger | yes | null | — | Null → no month bucket (rolling 2_592_000 s, not calendar) |

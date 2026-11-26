@@ -15,6 +15,7 @@ use Qiick\ApiKeys\Contracts\ApiKeyErasureRepositoryContract;
 use Qiick\ApiKeys\Erasure\ApiKeysEraser;
 use Qiick\ApiKeys\Events\SubjectErasedEvent;
 use Qiick\ApiKeys\Tests\Support\ErasureTestCase;
+use Qiick\ApiKeys\Tests\Support\ReferenceErasureRepository;
 
 require_once __DIR__.'/Support/ErasureFixture.php';
 require_once __DIR__.'/Support/ErasurePerson.php';
@@ -87,7 +88,43 @@ it('uses the default attempt store when none is configured and counts cache valu
         'api_keys' => ['deleted' => 0, 'anonymised' => 1, 'kept' => 0, 'reason' => null],
         'cache:erasure-shared' => ['deleted' => 7, 'anonymised' => 0, 'kept' => 0, 'reason' => null],
     ])->and($store->all())->toBe([]);
+
+    $tombstone = DB::table('api_keys')->sole();
+    expect($tombstone->credential_kind)->toBe('api_key')->and($tombstone->oauth_client_id)->toBeNull();
 });
+
+it('scrubs the subject from third-party free text without an attribution match', function (string $mode): void {
+    $fixture = require __DIR__.'/fixture.php';
+    $subject = $fixture->makePerson();
+    $other = $fixture->makePerson();
+    $fixture->seed($other, null);
+    [$email, $username, $displayName] = $subject->identifiers;
+    $key = DB::table('api_keys')->where('uuid', $other->publicIds[1]);
+    $key->update([
+        'name' => "Proxy for {$displayName}",
+        'description' => 'Contact '.strtoupper($email),
+        'metadata' => json_encode(['labels' => ["owner {$username}", 'keep this']], JSON_THROW_ON_ERROR),
+        'revocation_note' => "{$displayName} left",
+    ]);
+    $before = $key->first();
+    $eraser = app(ApiKeysEraser::class);
+
+    $preview = $eraser->erase(...$subject->arguments($mode, isDryRun: true));
+    expect($key->first())->toEqual($before);
+    $report = $eraser->erase(...$subject->arguments($mode));
+
+    expect($preview->stores['api_keys'])->toBe($report->stores['api_keys'])
+        ->and($report->stores['api_keys'])->toBe(['deleted' => 0, 'anonymised' => 1, 'kept' => 0, 'reason' => null]);
+    $scrubbed = $key->first();
+    expect($scrubbed->name)->toBe('Proxy for [erased]')
+        ->and($scrubbed->description)->toBe('Contact [erased]')
+        ->and(json_decode($scrubbed->metadata, true, flags: JSON_THROW_ON_ERROR))->toBe(['labels' => ['owner [erased]', 'keep this']])
+        ->and($scrubbed->revocation_note)->toBe('[erased] left')
+        ->and($scrubbed->owner_principal_id)->toBe($before->owner_principal_id)
+        ->and($scrubbed->key_hash)->toBe($before->key_hash)
+        ->and($scrubbed->created_by)->toBe($before->created_by)
+        ->and($eraser->erase(...$subject->arguments($mode))->changed())->toBe(0);
+})->with(['delete', 'anonymise']);
 
 it('finds warning markers by snapshot UUID even after the credential row has gone', function (): void {
     $keyPublicId = (string) Str::uuid();
@@ -108,39 +145,37 @@ it('reports both stores when there is no data and legacy warnings are disabled',
         ->and($report->changed())->toBe(0);
 });
 
-it('retries an incomplete cache cleanup using the original identities from the product snapshot', function (): void {
-    $subjectPublicId = (string) Str::uuid();
-    $keyPublicId = (string) Str::uuid();
-    $leaseKey = 'api-keys:legacy-format-warning:'.$keyPublicId.':'.ErasureTestCase::LEGACY_CUTOFF;
-    Cache::forever($leaseKey, 'sent');
-
-    $repository = Mockery::mock(ApiKeyErasureRepositoryContract::class);
-    $repository->shouldReceive('connection')->andReturn(DB::connection());
-    $repository->shouldReceive('eraseForUser')->twice()->andReturn(
-        ['deleted' => 1, 'anonymised' => 0, 'keyIdsByPublicId' => [$keyPublicId => 71]],
-        ['deleted' => 0, 'anonymised' => 0, 'keyIdsByPublicId' => [$keyPublicId => 71]],
-    );
-
+it('retries an incomplete cache cleanup using the original identities from the product snapshot', function (string $mode): void {
     $store = Mockery::mock(ArrayStore::class)->makePartial();
-    $store->put('api-key:71', 1, 600);
-    $store->shouldReceive('forget')->with('api-key:71')->once()->andReturnFalse();
-    $store->shouldReceive('forget')->with('api-key:71')->passthru();
     Cache::extend('erasure-retry', fn () => Cache::repository($store));
     config()->set('cache.stores.erasure-retry', ['driver' => 'erasure-retry']);
     config()->set('api-keys.cache_store', 'erasure-retry');
+    $fixture = require __DIR__.'/fixture.php';
+    $subject = $fixture->makePerson();
+    $fixture->seed($subject, null);
+    $keyPublicId = $subject->publicIds[1];
+    $key = DB::table('api_keys')->where('uuid', $keyPublicId);
+    $keyId = $key->value('id');
+    $monthBucket = 'api-key:'.$keyId.':month';
+    $store->shouldReceive('forget')->with($monthBucket)->once()->andReturnFalse();
+    $store->shouldReceive('forget')->with($monthBucket)->passthru();
     Event::fake([SubjectErasedEvent::class]);
 
-    $eraser = new ApiKeysEraser($repository);
-    $erase = fn () => $eraser->erase('erasure-user', $subjectPublicId, 'delete');
-
+    $erase = fn () => app(ApiKeysEraser::class)->erase(...$subject->arguments($mode));
     expect($erase)->toThrow(RuntimeException::class, 'API key erasure could not forget its cache entries.');
     Event::assertNotDispatched(SubjectErasedEvent::class);
-    expect($store->get('api-key:71'))->toBe(1);
-    expect($erase()->changed())->toBe(2)
-        ->and($store->get('api-key:71'))->toBeNull()
-        ->and(Cache::has($leaseKey))->toBeFalse();
+    expect($key->exists())->toBeFalse()->and($store->get($monthBucket))->toBe(1);
+
+    app()->instance(ApiKeyErasureRepositoryContract::class, new ReferenceErasureRepository([
+        $subject->userPublicId => [$keyPublicId => $keyId],
+    ]));
+    $report = $erase();
+
+    expect($report->changed())->toBe(3)
+        ->and($store->get($monthBucket))->toBeNull()
+        ->and($store->get($monthBucket.':timer'))->toBeNull();
     Event::assertDispatchedOnce(SubjectErasedEvent::class);
-});
+})->with(['delete', 'anonymise']);
 
 it('redacts database and cache read failures before returning them to the product', function (bool $isDatabaseFailure): void {
     $fixture = require __DIR__.'/fixture.php';

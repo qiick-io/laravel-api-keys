@@ -442,3 +442,8 @@ it('reads a decoded array a product passes by the same shape rules', function ()
         // An array cannot tell {} from []: an empty section read from an array is a list, so it denies.
         ->and(KeyRestrictions::parse(['v' => 1, 'request' => []])->isDenied)->toBeTrue();
 });
+
+it('denies a JSON null string, and reads only a PHP null as unrestricted', function (): void {
+    expect(KeyRestrictions::parse('null')->isDenied)->toBeTrue()
+        ->and(KeyRestrictions::parse(null)->isDenied)->toBeFalse();
+});

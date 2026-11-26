@@ -1628,12 +1628,24 @@ it('decodes stored JSON columns and applies them', function (): void {
         ->and(authenticateWithStoredColumn('scopes', '["items:read"]'))->toBe(['authenticated', []]);
 });
 
-it('reads a SQL NULL or a JSON null as no restriction, and decoded arrays as before', function (): void {
+it('reads only a SQL NULL as no restriction, and decoded arrays as before', function (): void {
     expect(authenticateWithStoredColumn('ip_allowlist', null))->toBe(['authenticated', []])
-        ->and(authenticateWithStoredColumn('ip_allowlist', 'null'))->toBe(['authenticated', []])
-        ->and(authenticateWithStoredColumn('restrictions', 'null'))->toBe(['authenticated', []])
+        ->and(authenticateWithStoredColumn('restrictions', null))->toBe(['authenticated', []])
         ->and(authenticateWithStoredColumn('ip_allowlist', ['198.51.100.1']))->toBe(['ip_not_allowed', []]);
 });
+
+it('denies and reports a stored JSON null, which is not SQL NULL', function (string $column, string $errorCode): void {
+    [$outcome, $reported] = authenticateWithStoredColumn($column, 'null');
+
+    expect($outcome)->toBe($errorCode)
+        ->and($reported)->toBe([
+            "UnexpectedValueException: The stored {$column} of API key 00000000-0000-7000-8000-000000000001 is JSON null; only SQL NULL means no restriction: the key is denied.",
+        ]);
+})->with([
+    'ip allowlist' => ['ip_allowlist', 'ip_not_allowed'],
+    'restrictions' => ['restrictions', 'request_not_allowed'],
+    'scopes' => ['scopes', 'insufficient_scope'],
+]);
 
 it('denies a corrupted JSON column read from an Eloquent model as the contract asks, which its array cast would hide', function (): void {
     Schema::create('api_keys', function (Blueprint $table): void {

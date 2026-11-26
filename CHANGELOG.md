@@ -13,6 +13,11 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Added
+
+- `IpAllowlist::isValidEntry()` validates one allowlist entry by the same rules
+  `allows()` applies, for forms that edit an allowlist (#76).
+
 ### Fixed
 
 - When the stored `scopes` do not decode, the 403 names the required scope
@@ -27,6 +32,9 @@ were added; see UPGRADING.md.
   denies instead of reading as unrestricted; only null is unrestricted. Nested
   shapes are checked too: an object where a list belongs, or the reverse, at
   any depth denies (#72).
+- An allowlist prefix written with a leading zero (`/00`, `/024`) is invalid
+  and denies the allowlist, instead of reading as `/0` (every address) or
+  `/24` (#76).
 
 ## [0.3.0-beta.2] - 2026-11-25
 

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Qiick\ApiKeys\Tests\Support;
 
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Qiick\ApiKeys\Contracts\ApiKeyErasureRepositoryContract;
 
 /**
@@ -25,7 +27,9 @@ abstract class ErasureTestCase extends PackageTestCase
         $app['config']->set('database.connections.api_keys_erasure', $sqlite);
         $app['config']->set('database.connections.api_keys_erasure_cache', $sqlite);
         $app['config']->set('cache.default', 'array');
-        $app['config']->set('cache.stores.api-key-attempts', ['driver' => 'array']);
+        $attemptCachePath = sys_get_temp_dir().'/api-keys-erasure-'.Str::uuid();
+        $app['config']->set('cache.stores.api-key-attempts', ['driver' => 'file', 'path' => $attemptCachePath]);
+        $this->beforeApplicationDestroyed(fn () => (new Filesystem)->deleteDirectory($attemptCachePath));
         $app['config']->set('cache.stores.database', [
             'driver' => 'database',
             'connection' => 'api_keys_erasure_cache',

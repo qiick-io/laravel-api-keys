@@ -192,10 +192,7 @@ final class NotifyExpiringApiKeysCommand extends Command
         $warned = 0;
 
         foreach ($repository->findActiveLegacy() as $record) {
-            $idempotencyKey = 'api-keys:legacy-format-warning:'
-                .$record->publicId()
-                .':'
-                .$acceptUntil->format(\DateTimeInterface::ATOM);
+            $idempotencyKey = LegacyCutoff::warningKey($record->publicId(), $acceptUntil);
 
             // Resolve before claiming: a key with no recipient yet must stay claimable.
             $recipients = iterator_to_array($recipientResolver->recipientsFor($record, $roles), false);

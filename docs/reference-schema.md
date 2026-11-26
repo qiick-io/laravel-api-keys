@@ -29,8 +29,8 @@ divergence: there `id` is the public id.
 | `owner_principal_id` | FK principals (uuid) | no\* | — | index | Restrict, or null plus a revoke job; never silent cascade |
 | `created_by` | FK users | yes | null | index | `nullOnDelete` |
 | `scopes` | json | no | — | — | Parsed fail-closed by `ScopeSet` |
-| `ip_allowlist` | json | yes | null | — | Null/empty → allow all; malformed → deny |
-| `restrictions` | json | yes | null | — | Versioned shape below; null → unrestricted |
+| `ip_allowlist` | json | yes | null | — | A JSON list. Null or `[]` → allow all; an object (`{}` included) or anything malformed → deny |
+| `restrictions` | json | yes | null | — | Versioned object below; null → unrestricted; anything without `v` = 1 (`{}`, `[]` included) → deny |
 | `rate_limit_per_minute` | unsignedInteger | yes | null | — | Null → package default |
 | `rate_limit_per_day` | unsignedInteger | yes | null | — | Null → no day bucket (rolling 86_400 s, not calendar) |
 | `rate_limit_per_month` | unsignedInteger | yes | null | — | Null → no month bucket (rolling 2_592_000 s, not calendar) |
@@ -76,8 +76,9 @@ decode into null, and a null allowlist or null restrictions mean "no
 restriction". The authenticator decodes the stored string itself. A value
 that does not decode (an empty string included) denies the key
 (`ip_not_allowed`, `request_not_allowed` or `insufficient_scope`) and is
-reported to the exception handler. SQL `NULL` and JSON `null` still mean no
-restriction. The model can keep the cast for its own UI code.
+reported to the exception handler. So does a JSON object in `scopes` or
+`ip_allowlist`, which must be lists (`{}` would otherwise read as an empty,
+open allowlist). SQL `NULL` and JSON `null` still mean no restriction. The model can keep the cast for its own UI code.
 
 ### Not in this schema
 
@@ -103,8 +104,13 @@ content stays on the product; labels live under `metadata.labels`. The grant id
 }
 ```
 
-- Null, or an absent section, means unrestricted. A malformed value, an unknown
-  `v`, or an unknown key denies (fail closed, like `ip_allowlist`).
+- Null, or an absent section, means unrestricted. A malformed value, a missing
+  or unknown `v` (an empty `{}` or `[]` included), or an unknown key denies
+  (fail closed, like `ip_allowlist`).
+- Shapes are checked at every depth: the document, `request` and each resource
+  entry are objects; `methods`, `route_names`, `origins`, `referrers`,
+  `resources` and `values` are lists; `v` is the integer `1`. Any other shape
+  (`"request": []`, `"methods": {}`, `"v": "1"`) denies.
 - `request` is generic HTTP; the package evaluates it (methods, route names,
   origins, referrers). A denial is `403 request_not_allowed`.
 - Origin patterns: exact origin, or `https://*.example.com` (optional port) on

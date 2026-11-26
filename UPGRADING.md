@@ -18,6 +18,15 @@ wildcards over the suffixes it names.
 
 ## From 0.3.0-beta.2 to 0.3.0-beta.3
 
+- `KeyRestrictions::parse()` denies `[]`, `''` and any document without
+  `v` = 1; only null is unrestricted. Store null, not `{}` or `[]`, for a key
+  without restrictions, or those keys stop authenticating (fail closed).
+- A stored `scopes` or `ip_allowlist` that is a JSON object instead of a list
+  denies the key and is reported.
+- `restrictions` shapes are checked at every depth (docs/reference-schema.md).
+  An array cannot tell `{}` from `[]`, so a decoded array with an empty section
+  (`['v' => 1, 'request' => []]`) now denies. Pass the stored string
+  (`getRawOriginal('restrictions')`) as the contract asks.
 - **Contract break, `ApiKeyRepository`:** the expiry-notice claim is bound to
   a token and to the selected expiry.
   - Add `expiry_notice_claim_token` (string(64), nullable) to `api_keys`.

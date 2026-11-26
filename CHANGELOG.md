@@ -13,8 +13,20 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Fixed
+
+- When the stored `scopes` do not decode, the 403 names the required scope
+  (`scope=` in `WWW-Authenticate` and the JSON), like the other
+  `insufficient_scope` refusals (#73).
+
 ### Security
 
+- A stored `scopes` or `ip_allowlist` that is a JSON object instead of a list
+  (`{}` included) denies the key and is reported: decoded to an array, `{}`
+  read as an open allowlist. `restrictions` without `v` = 1 (`{}`, `[]`, `''`)
+  denies instead of reading as unrestricted; only null is unrestricted. Nested
+  shapes are checked too: an object where a list belongs, or the reverse, at
+  any depth denies (#72).
 - The expiry-notice claim is bound to a random claim token
   (`expiry_notice_claim_token`) and to the selected `expires_at`. A run whose
   lease expired can no longer mark or release the next run's claim, and a

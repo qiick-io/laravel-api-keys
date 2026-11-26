@@ -441,8 +441,9 @@ final class ApiKeyAuthenticator
      */
     private function defaultRateLimits(ApiKeyRecord $record): array
     {
+        $bucket = RateLimitDecision::API_KEY_BUCKET_PREFIX.$record->id();
         $decisions = [new RateLimitDecision(
-            bucketKey: 'api-key:'.$record->id(),
+            bucketKey: $bucket,
             maxAttempts: $record->rateLimitPerMinute() ?? $this->defaultRateLimitPerMinute,
             decaySeconds: 60,
         )];
@@ -450,7 +451,7 @@ final class ApiKeyAuthenticator
         $day = $record->rateLimitPerDay();
         if ($day !== null) {
             $decisions[] = new RateLimitDecision(
-                bucketKey: 'api-key:'.$record->id().':day',
+                bucketKey: $bucket.RateLimitDecision::DAY_BUCKET_SUFFIX,
                 maxAttempts: $day,
                 decaySeconds: 86_400,
             );
@@ -459,7 +460,7 @@ final class ApiKeyAuthenticator
         $month = $record->rateLimitPerMonth();
         if ($month !== null) {
             $decisions[] = new RateLimitDecision(
-                bucketKey: 'api-key:'.$record->id().':month',
+                bucketKey: $bucket.RateLimitDecision::MONTH_BUCKET_SUFFIX,
                 maxAttempts: $month,
                 decaySeconds: 2_592_000,
             );

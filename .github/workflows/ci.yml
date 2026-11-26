@@ -88,6 +88,12 @@ jobs:
       - name: Pest
         run: vendor/bin/pest
 
+      - run: node tests/Erasure/run.mjs
+
+      - run: node tests/Erasure/run.mjs
+        env:
+          API_KEYS_ERASURE_CACHE_STORE: database
+
   # Every runtime class at >=95%, per class (docs/decisions/2026-11-24-one-point-zero-checklist.md),
   # split into shards so the gate stays within the job timeout as classes grow.
   mutation:
@@ -252,6 +258,30 @@ jobs:
           API_KEYS_CLAIM_PASSWORD: password
         run: vendor/bin/pest --filter=ExpiryNoticeClaimCas
 
+      - name: Create the erasure run's private database
+        if: matrix.engine == 'mysql' || matrix.engine == 'mariadb' || matrix.engine == 'pgsql'
+        env:
+          ERASURE_DATABASE: api_keys_erasure_${{ github.run_id }}_${{ github.run_attempt }}
+        run: |
+          case "${{ matrix.engine }}" in
+            mysql)
+              docker exec claim-mysql mysql -uroot -ppassword -e "CREATE DATABASE $ERASURE_DATABASE"
+              ;;
+            mariadb)
+              docker exec claim-mariadb mariadb -uroot -ppassword -e "CREATE DATABASE $ERASURE_DATABASE"
+              ;;
+            pgsql)
+              docker exec claim-pgsql createdb -U postgres "$ERASURE_DATABASE"
+              ;;
+          esac
+          echo "API_KEYS_ERASURE_DB_DATABASE=$ERASURE_DATABASE" >> "$GITHUB_ENV"
+
+      - run: node tests/Erasure/run.mjs
+        if: matrix.engine != 'redis' && matrix.engine != 'memcached'
+        env:
+          API_KEYS_ERASURE_DB_ENGINE: ${{ matrix.engine }}
+          API_KEYS_ERASURE_DB_PASSWORD: password
+
   # CacheAttemptLimiter's store branches need live Redis and Memcached, so its
   # mutation score is gated here instead of in the tests matrix.
   mutate-cache-limiter:
@@ -313,8 +343,8 @@ jobs:
   # Pinned by commit like every action (1.0 checklist item 7); keep it on the
   # tag qiick-standards.json "ref" names.
   standards:
-    # qiick-io/app-ui v0.11.0
-    uses: qiick-io/app-ui/.github/workflows/drift-check.yml@f613af9febfce3b6d7f7f41785e9845a610080c7
+    # qiick-io/app-ui v0.15.0
+    uses: qiick-io/app-ui/.github/workflows/drift-check.yml@0d97ae1429a856411c76e6de1ec258cae0eabab6
     with:
       standards: true
       registry: false

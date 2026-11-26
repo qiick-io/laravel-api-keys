@@ -154,3 +154,55 @@ Every activity written under a key **must** carry `api_key_id` set to the key's
 Store in UTC. Products assert `app.timezone = UTC` in a conformance check. Wire
 format is RFC 3339. Future-dated columns (`expires_at`,
 `previous_key_valid_until`) use `dateTime`, not MySQL `TIMESTAMP`.
+
+## Personal data erasure
+
+The product's erasure orchestrator resolves `Qiick\ApiKeys\Erasure\ApiKeysEraser`
+from the container. Bind `ApiKeyErasureRepositoryContract` to the product's
+persistence adapter. The existing authentication repository binding is unchanged.
+The eraser uses the adapter's connection and joins an open transaction as a
+savepoint. The reference schema has no organisation discriminator, so a scoped
+call throws `OrganisationScopeUnsupportedException`. Products with that flow
+must erase their organisation-specific credentials using their tenant mapping.
+[Fleet erasure standard](https://github.com/qiick-io/app-ui/blob/v0.15.0/standards/rules/erasure.md)
+
+The adapter and orchestrator have these responsibilities.
+
+- Capture the user's principal and API key UUIDs in the encrypted erasure
+  request before principal cleanup. Keep the original map of owned key UUIDs to
+  internal IDs in that snapshot. Implement `keyIdsFromSnapshot($userPublicId)`
+  on the adapter to read the map from the current request. The eraser uses
+  those IDs for cache cleanup even after the rows have gone, and takes live
+  IDs when the same UUID appears in both maps. Block new writes for the
+  subject and drain in-flight usage and warning work before erasing credentials.
+- Match ownership via the principal directory and the trusted public IDs.
+  Include direct owners on installations without principals. In `delete`
+  mode remove solely owned credentials. In `anonymise` mode keep inert rows:
+  revoke them, discard current and previous token material, replace the key
+  UUID, and unlink the owner (use an unrelated, non-authenticating principal if
+  the foreign key is required). Scrub user attribution, usage IP and agent,
+  claim data, names, notes, metadata, restrictions, and any other personal
+  values. In both modes preserve other owners' keys while unlinking
+  `created_by` and `revoked_by` references. Scrub the supplied identifiers from
+  names, descriptions, metadata and revocation notes even on keys where the
+  subject has no attribution link.
+  The user row belongs to the product's later access step.
+- Suppress model events and identifying diagnostics such as query bindings.
+  Return accurate row counts, including attribution-only updates, with the same
+  counts on a read-only preview. Handle product columns, notification copies,
+  jobs, audit and retention through the product's erasure steps.
+- Cover custom attempt limiter and warning gate bindings, product-defined
+  buckets, stores or prefixes no longer configured, and legacy warning
+  markers and leases from previous cutoff settings. The package clears its
+  default per-key minute, day and month counters and timers on
+  `api-keys.cache_store` (or the default store), and the current-cutoff
+  legacy markers and leases on the default store. Shared pre-auth IP buckets
+  expire after 60 seconds. They can include requests from several users at the
+  same network address, so the eraser leaves them to expire and excludes them
+  from subject retention counts.
+
+After the outermost commit, the eraser clears the cache entries and dispatches
+`SubjectErasedEvent` with aggregate counts. A rollback leaves the cache alone.
+If the cache fails after the database commits, retry from the encrypted
+snapshot. Mark the step done only after the commit and cleanup return. A dry
+run reports prospective counts without erasing or dispatching.

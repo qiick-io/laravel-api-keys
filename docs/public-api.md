@@ -58,6 +58,7 @@ Internal on purpose: `RequestRestrictionsEvaluator`, `AppEnvironmentResolver`,
 
 ### `Qiick\ApiKeys\Contracts`
 
+- `ApiKeyErasureRepositoryContract` (interface)
 - `ApiKeyRecord` (interface)
 - `ApiKeyRepository` (interface)
 - `AttemptLimiter` (interface)
@@ -72,6 +73,12 @@ Internal on purpose: `RequestRestrictionsEvaluator`, `AppEnvironmentResolver`,
 - `ScopeVocabulary` (interface)
 - `UsageSideEffect` (interface)
 
+### `Qiick\ApiKeys\Erasure`
+
+- `ApiKeysEraser` (class)
+- `ErasureReport` (class)
+- `OrganisationScopeUnsupportedException` (class)
+
 ### `Qiick\ApiKeys\Events`
 
 - `ApiKeyAuthenticated` (class)
@@ -79,6 +86,7 @@ Internal on purpose: `RequestRestrictionsEvaluator`, `AppEnvironmentResolver`,
 - `ApiKeyExposed` (class)
 - `ApiKeyLegacyFormatWarningSent` (class)
 - `LegacyTokenUsed` (class)
+- `SubjectErasedEvent` (class)
 
 ### `Qiick\ApiKeys\Exceptions`
 

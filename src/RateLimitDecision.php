@@ -10,6 +10,15 @@ namespace Qiick\ApiKeys;
  */
 final readonly class RateLimitDecision
 {
+    /** @internal The authenticator and eraser must name the same cache buckets. */
+    public const string API_KEY_BUCKET_PREFIX = 'api-key:';
+
+    /** @internal The rolling daily window. */
+    public const string DAY_BUCKET_SUFFIX = ':day';
+
+    /** @internal The rolling monthly window. */
+    public const string MONTH_BUCKET_SUFFIX = ':month';
+
     /**
      * @throws \InvalidArgumentException when the window is shorter than one second
      */

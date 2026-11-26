@@ -49,6 +49,6 @@ final class CacheLegacyFormatWarningGate implements LegacyFormatWarningGate
 
     private function leaseKey(string $idempotencyKey): string
     {
-        return $idempotencyKey.':lease';
+        return $idempotencyKey.LegacyCutoff::WARNING_LEASE_SUFFIX;
     }
 }

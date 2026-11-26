@@ -88,6 +88,12 @@ jobs:
       - name: Pest
         run: vendor/bin/pest
 
+      - run: node tests/Erasure/run.mjs
+
+      - run: node tests/Erasure/run.mjs
+        env:
+          API_KEYS_ERASURE_CACHE_STORE: database
+
   # Every runtime class at >=95%, per class (docs/decisions/2026-11-24-one-point-zero-checklist.md),
   # split into shards so the gate stays within the job timeout as classes grow.
   mutation:
@@ -313,8 +319,8 @@ jobs:
   # Pinned by commit like every action (1.0 checklist item 7); keep it on the
   # tag qiick-standards.json "ref" names.
   standards:
-    # qiick-io/app-ui v0.11.0
-    uses: qiick-io/app-ui/.github/workflows/drift-check.yml@f613af9febfce3b6d7f7f41785e9845a610080c7
+    # qiick-io/app-ui v0.15.0
+    uses: qiick-io/app-ui/.github/workflows/drift-check.yml@0d97ae1429a856411c76e6de1ec258cae0eabab6
     with:
       standards: true
       registry: false

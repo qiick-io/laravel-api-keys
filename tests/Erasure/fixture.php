@@ -68,7 +68,8 @@ return new class implements ErasureFixture
 
     public function makePerson(): ErasurePerson
     {
-        $userId = DB::table('users')->insertGetId(['id' => random_int(100_000_000, 999_999_999)]);
+        $userId = random_int(100_000_000, 999_999_999);
+        DB::table('users')->insert(['id' => $userId]);
 
         return ErasurePerson::fresh((string) $userId);
     }

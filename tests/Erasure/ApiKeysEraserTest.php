@@ -107,7 +107,10 @@ it('scrubs the subject from third-party free text without an attribution match',
     $key->update([
         'name' => "Proxy for {$displayName}",
         'description' => 'Contact '.strtoupper($email),
-        'metadata' => json_encode(['labels' => ["owner {$username}", 'keep this']], JSON_THROW_ON_ERROR),
+        'metadata' => json_encode([
+            'labels' => ["owner {$username}", 'keep this'],
+            $email => ['notify' => true],
+        ], JSON_THROW_ON_ERROR),
         'revocation_note' => "{$displayName} left",
     ]);
     $before = $key->first();
@@ -173,7 +176,9 @@ it('retries an incomplete cache cleanup using the original identities from the p
     app()->instance(ApiKeyErasureRepositoryContract::class, new ReferenceErasureRepository([
         $subject->userPublicId => [$keyPublicId => $keyId],
     ]));
-    $report = $erase();
+    $retryArguments = $subject->arguments($mode);
+    $retryArguments['publicIds'] = [];
+    $report = app(ApiKeysEraser::class)->erase(...$retryArguments);
 
     expect($report->changed())->toBe(3)
         ->and($store->get($monthBucket))->toBeNull()

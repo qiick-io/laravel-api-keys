@@ -24,7 +24,7 @@ abstract class ErasureTestCase extends PackageTestCase
 
         $sqlite = ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => ''];
         $app['config']->set('database.default', 'api_keys_erasure');
-        $app['config']->set('database.connections.api_keys_erasure', $sqlite);
+        $app['config']->set('database.connections.api_keys_erasure', $this->productDatabase($sqlite));
         $app['config']->set('database.connections.api_keys_erasure_cache', $sqlite);
         $app['config']->set('cache.default', 'array');
         $attemptCachePath = sys_get_temp_dir().'/api-keys-erasure-'.Str::uuid();
@@ -38,6 +38,46 @@ abstract class ErasureTestCase extends PackageTestCase
         $app['config']->set('api-keys.cache_store', getenv('API_KEYS_ERASURE_CACHE_STORE') === 'database' ? 'database' : 'api-key-attempts');
         $app['config']->set('api-keys.legacy.accept_until', self::LEGACY_CUTOFF);
         $app->bind(ApiKeyErasureRepositoryContract::class, ReferenceErasureRepository::class);
+    }
+
+    /**
+     * The database matrix provisions an empty database for this run on the
+     * local container. Unit tests use SQLite in memory.
+     *
+     * @param  array{driver: string, database: string, prefix: string}  $sqlite
+     * @return array<string, int|string>
+     */
+    private function productDatabase(array $sqlite): array
+    {
+        $engine = getenv('API_KEYS_ERASURE_DB_ENGINE') ?: 'sqlite';
+
+        if ($engine === 'sqlite') {
+            return $sqlite;
+        }
+
+        $database = getenv('API_KEYS_ERASURE_DB_DATABASE');
+
+        if (! is_string($database) || preg_match('/^api_keys_erasure_[a-z0-9_]+$/D', $database) !== 1) {
+            throw new \InvalidArgumentException('Erasure tests require a dedicated api_keys_erasure_* database.');
+        }
+
+        $port = match ($engine) {
+            'mysql' => 3306,
+            'mariadb' => 3307,
+            'pgsql' => 5432,
+            default => throw new \InvalidArgumentException('The erasure test database engine is unsupported.'),
+        };
+
+        return [
+            'driver' => $engine,
+            'host' => '127.0.0.1',
+            'port' => $port,
+            'database' => $database,
+            'username' => $engine === 'pgsql' ? 'postgres' : 'root',
+            'password' => (string) getenv('API_KEYS_ERASURE_DB_PASSWORD'),
+            'charset' => $engine === 'pgsql' ? 'utf8' : 'utf8mb4',
+            'prefix' => '',
+        ];
     }
 
     /**
@@ -96,5 +136,12 @@ abstract class ErasureTestCase extends PackageTestCase
             $table->mediumText('value');
             $table->integer('expiration')->index();
         });
+    }
+
+    /** Each check gets the same empty fixture schema on persistent engines. */
+    protected function destroyDatabaseMigrations(): void
+    {
+        Schema::drop('api_keys');
+        Schema::drop('users');
     }
 }

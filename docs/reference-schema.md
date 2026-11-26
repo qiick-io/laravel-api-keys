@@ -173,8 +173,8 @@ The adapter and orchestrator have these responsibilities.
   internal IDs in that snapshot. Implement `keyIdsFromSnapshot($userPublicId)`
   on the adapter to read the map from the current request. The eraser uses
   those IDs for cache cleanup even after the rows have gone, and takes live
-  IDs when the same UUID appears in both maps. Block new writes for the subject and drain
-  in-flight usage and warning work before erasing credentials.
+  IDs when the same UUID appears in both maps. Block new writes for the
+  subject and drain in-flight usage and warning work before erasing credentials.
 - Match ownership via the principal directory and the trusted public IDs.
   Include direct owners on installations without principals. In `delete`
   mode remove solely owned credentials. In `anonymise` mode keep inert rows:

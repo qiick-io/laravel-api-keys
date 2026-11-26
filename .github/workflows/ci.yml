@@ -258,6 +258,30 @@ jobs:
           API_KEYS_CLAIM_PASSWORD: password
         run: vendor/bin/pest --filter=ExpiryNoticeClaimCas
 
+      - name: Create the erasure run's private database
+        if: matrix.engine == 'mysql' || matrix.engine == 'mariadb' || matrix.engine == 'pgsql'
+        env:
+          ERASURE_DATABASE: api_keys_erasure_${{ github.run_id }}_${{ github.run_attempt }}
+        run: |
+          case "${{ matrix.engine }}" in
+            mysql)
+              docker exec claim-mysql mysql -uroot -ppassword -e "CREATE DATABASE $ERASURE_DATABASE"
+              ;;
+            mariadb)
+              docker exec claim-mariadb mariadb -uroot -ppassword -e "CREATE DATABASE $ERASURE_DATABASE"
+              ;;
+            pgsql)
+              docker exec claim-pgsql createdb -U postgres "$ERASURE_DATABASE"
+              ;;
+          esac
+          echo "API_KEYS_ERASURE_DB_DATABASE=$ERASURE_DATABASE" >> "$GITHUB_ENV"
+
+      - run: node tests/Erasure/run.mjs
+        if: matrix.engine != 'redis' && matrix.engine != 'memcached'
+        env:
+          API_KEYS_ERASURE_DB_ENGINE: ${{ matrix.engine }}
+          API_KEYS_ERASURE_DB_PASSWORD: password
+
   # CacheAttemptLimiter's store branches need live Redis and Memcached, so its
   # mutation score is gated here instead of in the tests matrix.
   mutate-cache-limiter:

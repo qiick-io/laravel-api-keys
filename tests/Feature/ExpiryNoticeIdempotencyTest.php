@@ -207,6 +207,20 @@ it('B1: concurrent claimExpiryNotice allows only one winner within the lease', f
     Event::assertNotDispatched(ApiKeyExpiryNoticeSent::class);
 });
 
+it('B1: refuses an expiry claim when the selected key was revoked', function (): void {
+    $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
+    $selected = (new InMemoryApiKeyRecord(
+        publicId: '018f0000-0000-7000-8000-0000000000ef',
+        keyPrefix: 'tst_test_expiry15',
+        keyHash: 'hash',
+        scopes: ['items:read'],
+    ))->withExpiresAt(new DateTimeImmutable('2026-01-15T00:00:00+00:00'));
+    $repository = new FakeApiKeyRepository([$selected->withRevokedAt($now)]);
+
+    expect($repository->claimExpiryNotice($selected, $now, 900, 'token-a'))->toBeFalse()
+        ->and($repository->findByPublicId($selected->publicId())?->expiryNoticeClaimedAt())->toBeNull();
+});
+
 it('B1: crash after claim is reclaimable once the lease expires', function (): void {
     Notification::fake();
     Event::fake([ApiKeyExpiryNoticeSent::class]);

@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use Qiick\ApiKeys\Events\ApiKeyAuthenticated;
-use Qiick\ApiKeys\Events\LegacyTokenUsed;
+use Qiick\ApiKeys\Events\ApiKeyAuthenticatedEvent;
+use Qiick\ApiKeys\Events\LegacyTokenUsedEvent;
 use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
 use Qiick\ApiKeys\Tests\Support\RegexLegacyTokenMatcher;
 
@@ -31,13 +31,13 @@ it('assert helpers pin the RFC 6750 rejection shapes', function (): void {
 
 it('assertLegacyTokenUsed checks the event payload', function (): void {
     $until = new DateTimeImmutable('2027-01-01T00:00:00Z');
-    $event = new LegacyTokenUsed('ek_ABCDEFGHI', RegexLegacyTokenMatcher::class, $until);
+    $event = new LegacyTokenUsedEvent('ek_ABCDEFGHI', RegexLegacyTokenMatcher::class, $until);
 
     assertLegacyTokenUsed($event, 'ek_ABCDEFGHI', RegexLegacyTokenMatcher::class, $until);
 });
 
-it('ApiKeyAuthenticated carries ids without a plaintext token field', function (): void {
-    $event = new ApiKeyAuthenticated(
+it('ApiKeyAuthenticatedEvent carries ids without a plaintext token field', function (): void {
+    $event = new ApiKeyAuthenticatedEvent(
         apiKeyId: '00000000-0000-7000-8000-000000000042',
         keyPrefix: 'tst_test_abcdefgh',
         usedPreviousSecret: false,

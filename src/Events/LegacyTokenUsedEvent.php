@@ -13,7 +13,7 @@ use Qiick\ApiKeys\AuthenticationResult;
  * {@see AuthenticationResult::$legacyMatcherClass} is non-null —
  * never on format/hash miss.
  */
-final class LegacyTokenUsed
+final class LegacyTokenUsedEvent
 {
     /**
      * @param  class-string  $matcherClass

@@ -11,8 +11,8 @@ use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\ExpiryRecipientResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Contracts\RandomSource;
-use Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSent;
-use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSent;
+use Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSentEvent;
+use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSentEvent;
 use Qiick\ApiKeys\ExpiryRecipient;
 use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification;
@@ -126,7 +126,7 @@ it('accepts the smallest window and lease, and looks ahead exactly notice_days',
 
 it('notifies every eligible key, skipping the others without stopping the run', function (): void {
     Notification::fake();
-    Event::fake([ApiKeyExpiryNoticeSent::class]);
+    Event::fake([ApiKeyExpiryNoticeSentEvent::class]);
     $first = commandNotifiable(1);
     $second = commandNotifiable(2);
     $records = [
@@ -157,7 +157,7 @@ it('notifies every eligible key, skipping the others without stopping the run', 
         ->and($repository->markedPublicIds)->toBe([$records[3]->publicId(), $records[5]->publicId()]);
     Notification::assertSentTo($first, FailingForKeyExpiryNotification::class);
     Notification::assertSentTo($second, FailingForKeyExpiryNotification::class);
-    Event::assertDispatchedTimes(ApiKeyExpiryNoticeSent::class, 2);
+    Event::assertDispatchedTimes(ApiKeyExpiryNoticeSentEvent::class, 2);
 });
 
 it('asks the resolver for the configured roles, ignoring unknown and non-string entries', function (mixed $configured, array $expectedRoles): void {
@@ -186,7 +186,7 @@ function enableLegacyWarning(string $acceptUntil = '2026-12-01T00:00:00Z'): void
 
 it('warns every active legacy key inside the window, skipping the others without stopping the run', function (): void {
     Notification::fake();
-    Event::fake([ApiKeyLegacyFormatWarningSent::class]);
+    Event::fake([ApiKeyLegacyFormatWarningSentEvent::class]);
     $first = commandNotifiable(1);
     $legacy = [
         commandRecord('d1', tokenVersion: 0),     // no recipient: skipped
@@ -213,7 +213,7 @@ it('warns every active legacy key inside the window, skipping the others without
         'api-keys:legacy-format-warning:'.$legacy[4]->publicId().':2026-12-01T00:00:00+00:00',
     ])
         ->and($gate->leaseOwnersByKey)->toBe([]);
-    Event::assertDispatchedTimes(ApiKeyLegacyFormatWarningSent::class, 2);
+    Event::assertDispatchedTimes(ApiKeyLegacyFormatWarningSentEvent::class, 2);
 });
 
 it('warns from the first second of the window until just before the cut-off', function (string $now, int $expectedWarnings): void {
@@ -347,7 +347,7 @@ it('claims every notice with its own fresh token and marks or releases with that
 
 it('warns when a sent notice could not be marked because its claim was taken or its expiry changed', function (): void {
     Notification::fake();
-    Event::fake([ApiKeyExpiryNoticeSent::class]);
+    Event::fake([ApiKeyExpiryNoticeSentEvent::class]);
     $record = commandRecord('c3');
     $repository = new ScriptedApiKeyRepository([$record], lostMarkPublicIds: [$record->publicId()]);
     bindCommand($repository, new RecordingRecipientResolver([$record->publicId() => [commandNotifiable(1)]]));
@@ -357,7 +357,7 @@ it('warns when a sent notice could not be marked because its claim was taken or 
         ->expectsOutputToContain('Expiry notices sent: 1')
         ->assertSuccessful();
 
-    Event::assertDispatched(ApiKeyExpiryNoticeSent::class);
+    Event::assertDispatched(ApiKeyExpiryNoticeSentEvent::class);
 });
 
 it('warns when it could claim none of the notices it tried, which a bound format mismatch would cause', function (): void {

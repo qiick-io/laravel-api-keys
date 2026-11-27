@@ -13,6 +13,13 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Changed
+
+- Public API key event classes now end in `Event`. Update listener registrations
+  and event type hints using the mapping in UPGRADING.md (#93).
+- **Breaking response change:** HTTP 429 responses use `too_many_requests`.
+  Update clients and response tests as described in UPGRADING.md (#94).
+
 ### Fixed
 
 - Requests without a Bearer token now receive a `401` challenge with
@@ -20,7 +27,7 @@ were added; see UPGRADING.md.
   parameter (RFC 6750 §3.1). The authenticator uses the new
   `ApiKeyRejection::missingToken()` factory and keeps the `invalid_token` JSON
   response and failed-attempt count (#89).
-- HTTP 429 responses use the fleet error code `too_many_requests` (#94).
+- Expiry notices skip keys revoked between selection and claim (#86).
 
 ## [0.3.0-beta.3] - 2026-11-26
 

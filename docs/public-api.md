@@ -81,11 +81,11 @@ Internal on purpose: `RequestRestrictionsEvaluator`, `AppEnvironmentResolver`,
 
 ### `Qiick\ApiKeys\Events`
 
-- `ApiKeyAuthenticated` (class)
-- `ApiKeyExpiryNoticeSent` (class)
-- `ApiKeyExposed` (class)
-- `ApiKeyLegacyFormatWarningSent` (class)
-- `LegacyTokenUsed` (class)
+- `ApiKeyAuthenticatedEvent` (class)
+- `ApiKeyExpiryNoticeSentEvent` (class)
+- `ApiKeyExposedEvent` (class)
+- `ApiKeyLegacyFormatWarningSentEvent` (class)
+- `LegacyTokenUsedEvent` (class)
 - `SubjectErasedEvent` (class)
 
 ### `Qiick\ApiKeys\Exceptions`
@@ -219,8 +219,8 @@ Products may define these keys; each refusal falls back to an English message:
 
 ## Events
 
-- `ApiKeyAuthenticated`
-- `ApiKeyExpiryNoticeSent`
-- `ApiKeyExposed`
-- `ApiKeyLegacyFormatWarningSent`
-- `LegacyTokenUsed`
+- `ApiKeyAuthenticatedEvent`
+- `ApiKeyExpiryNoticeSentEvent`
+- `ApiKeyExposedEvent`
+- `ApiKeyLegacyFormatWarningSentEvent`
+- `LegacyTokenUsedEvent`

@@ -166,7 +166,7 @@ final class TokenCodec
     /**
      * First legacy matcher still accepting that recognises the token (A13).
      * Returns null for canonical tokens — products dispatch
-     * {@see Events\LegacyTokenUsed} only after successful authentication when
+     * {@see Events\LegacyTokenUsedEvent} only after successful authentication when
      * {@see AuthenticationResult::$legacyMatcherClass} is non-null.
      */
     public function legacyMatcherFor(

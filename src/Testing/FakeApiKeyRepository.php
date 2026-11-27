@@ -213,7 +213,7 @@ final class FakeApiKeyRepository implements ApiKeyRepository
         $current = $this->findByPublicId($publicId) ?? $record;
         $this->claimTokensUsed[] = $claimToken;
 
-        if ($current->expiryNotifiedAt() !== null || ! $this->isSameExpiry($current, $record)) {
+        if ($current->revokedAt() !== null || $current->expiryNotifiedAt() !== null || ! $this->isSameExpiry($current, $record)) {
             return false;
         }
 

@@ -11,7 +11,7 @@ use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\ExpiryRecipientResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Contracts\RandomSource;
-use Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSent;
+use Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSentEvent;
 use Qiick\ApiKeys\Notifications\ApiKeyExpiringNotification;
 use Qiick\ApiKeys\Testing\FakeApiKeyRepository;
 use Qiick\ApiKeys\Testing\FakeExpiryRecipientResolver;
@@ -73,7 +73,7 @@ function bindExpiryNoticeCommand(InMemoryApiKeyRecord $record, DateTimeImmutable
 
 it('B1: a second run sends nothing after markExpiryNotified', function (): void {
     Notification::fake();
-    Event::fake([ApiKeyExpiryNoticeSent::class]);
+    Event::fake([ApiKeyExpiryNoticeSentEvent::class]);
 
     $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
     $record = (new InMemoryApiKeyRecord(
@@ -88,18 +88,18 @@ it('B1: a second run sends nothing after markExpiryNotified', function (): void 
     $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
 
     Notification::assertSentTo($notifiable, ApiKeyExpiringNotification::class);
-    Event::assertDispatched(ApiKeyExpiryNoticeSent::class);
+    Event::assertDispatched(ApiKeyExpiryNoticeSentEvent::class);
     expect($repository->expiryNotifications)->toHaveCount(1)
         ->and($repository->findByPublicId($record->publicId())?->expiryNotifiedAt())->not->toBeNull()
         ->and($repository->findByPublicId($record->publicId())?->expiryNoticeClaimedAt())->toBeNull();
 
     Notification::fake();
-    Event::fake([ApiKeyExpiryNoticeSent::class]);
+    Event::fake([ApiKeyExpiryNoticeSentEvent::class]);
 
     $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
 
     Notification::assertNothingSent();
-    Event::assertNotDispatched(ApiKeyExpiryNoticeSent::class);
+    Event::assertNotDispatched(ApiKeyExpiryNoticeSentEvent::class);
     expect($repository->expiryNotifications)->toHaveCount(1);
 });
 
@@ -124,7 +124,7 @@ it('B1: a missed day still sends when expiry_notified_at was never stamped', fun
 });
 
 it('B1: send failure does not stamp and the next successful run retries', function (): void {
-    Event::fake([ApiKeyExpiryNoticeSent::class]);
+    Event::fake([ApiKeyExpiryNoticeSentEvent::class]);
 
     $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
     $record = (new InMemoryApiKeyRecord(
@@ -142,22 +142,22 @@ it('B1: send failure does not stamp and the next successful run retries', functi
     expect($repository->expiryNotifications)->toBe([])
         ->and($repository->findByPublicId($record->publicId())?->expiryNotifiedAt())->toBeNull()
         ->and($repository->findByPublicId($record->publicId())?->expiryNoticeClaimedAt())->toBeNull();
-    Event::assertNotDispatched(ApiKeyExpiryNoticeSent::class);
+    Event::assertNotDispatched(ApiKeyExpiryNoticeSentEvent::class);
 
     Notification::fake();
-    Event::fake([ApiKeyExpiryNoticeSent::class]);
+    Event::fake([ApiKeyExpiryNoticeSentEvent::class]);
     config(['api-keys.expiry.notification' => ApiKeyExpiringNotification::class]);
 
     $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
 
     Notification::assertSentTo($notifiable, ApiKeyExpiringNotification::class);
     expect($repository->expiryNotifications)->toHaveCount(1);
-    Event::assertDispatched(ApiKeyExpiryNoticeSent::class);
+    Event::assertDispatched(ApiKeyExpiryNoticeSentEvent::class);
 });
 
 it('B1: a successful send keeps the notified stamp and dispatches the event', function (): void {
     Notification::fake();
-    Event::fake([ApiKeyExpiryNoticeSent::class]);
+    Event::fake([ApiKeyExpiryNoticeSentEvent::class]);
 
     $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
     $record = (new InMemoryApiKeyRecord(
@@ -175,7 +175,7 @@ it('B1: a successful send keeps the notified stamp and dispatches the event', fu
     expect($repository->expiryNotifications)->toHaveCount(1)
         ->and($repository->expiryNotifications[0]['notifiedAt']->format(DateTimeInterface::ATOM))
         ->toBe($now->format(DateTimeInterface::ATOM));
-    Event::assertDispatched(ApiKeyExpiryNoticeSent::class, function (ApiKeyExpiryNoticeSent $event) use ($record, $now): bool {
+    Event::assertDispatched(ApiKeyExpiryNoticeSentEvent::class, function (ApiKeyExpiryNoticeSentEvent $event) use ($record, $now): bool {
         return $event->apiKeyId === $record->publicId()
             && $event->notifiedAt == $now;
     });
@@ -183,7 +183,7 @@ it('B1: a successful send keeps the notified stamp and dispatches the event', fu
 
 it('B1: concurrent claimExpiryNotice allows only one winner within the lease', function (): void {
     Notification::fake();
-    Event::fake([ApiKeyExpiryNoticeSent::class]);
+    Event::fake([ApiKeyExpiryNoticeSentEvent::class]);
 
     $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
     $record = (new InMemoryApiKeyRecord(
@@ -204,12 +204,26 @@ it('B1: concurrent claimExpiryNotice allows only one winner within the lease', f
     $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
 
     Notification::assertNothingSent();
-    Event::assertNotDispatched(ApiKeyExpiryNoticeSent::class);
+    Event::assertNotDispatched(ApiKeyExpiryNoticeSentEvent::class);
+});
+
+it('B1: refuses an expiry claim when the selected key was revoked', function (): void {
+    $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
+    $selected = (new InMemoryApiKeyRecord(
+        publicId: '018f0000-0000-7000-8000-0000000000ef',
+        keyPrefix: 'tst_test_expiry15',
+        keyHash: 'hash',
+        scopes: ['items:read'],
+    ))->withExpiresAt(new DateTimeImmutable('2026-01-15T00:00:00+00:00'));
+    $repository = new FakeApiKeyRepository([$selected->withRevokedAt($now)]);
+
+    expect($repository->claimExpiryNotice($selected, $now, 900, 'token-a'))->toBeFalse()
+        ->and($repository->findByPublicId($selected->publicId())?->expiryNoticeClaimedAt())->toBeNull();
 });
 
 it('B1: crash after claim is reclaimable once the lease expires', function (): void {
     Notification::fake();
-    Event::fake([ApiKeyExpiryNoticeSent::class]);
+    Event::fake([ApiKeyExpiryNoticeSentEvent::class]);
 
     $claimAt = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
     $record = (new InMemoryApiKeyRecord(
@@ -230,7 +244,7 @@ it('B1: crash after claim is reclaimable once the lease expires', function (): v
     // Still inside the lease: artisan must not send.
     $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
     Notification::assertNothingSent();
-    Event::assertNotDispatched(ApiKeyExpiryNoticeSent::class);
+    Event::assertNotDispatched(ApiKeyExpiryNoticeSentEvent::class);
 
     // After the lease: reclaim and send.
     $afterLease = $claimAt->modify('+61 seconds');
@@ -240,12 +254,12 @@ it('B1: crash after claim is reclaimable once the lease expires', function (): v
     app()->instance(ApiKeyRepository::class, $repository);
 
     Notification::fake();
-    Event::fake([ApiKeyExpiryNoticeSent::class]);
+    Event::fake([ApiKeyExpiryNoticeSentEvent::class]);
 
     $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
 
     Notification::assertSentTo($notifiable, ApiKeyExpiringNotification::class);
-    Event::assertDispatched(ApiKeyExpiryNoticeSent::class);
+    Event::assertDispatched(ApiKeyExpiryNoticeSentEvent::class);
     expect($repository->expiryNotifications)->toHaveCount(1)
         ->and($repository->findByPublicId($record->publicId())?->expiryNotifiedAt())->not->toBeNull()
         ->and($repository->findByPublicId($record->publicId())?->expiryNoticeClaimedAt())->toBeNull();

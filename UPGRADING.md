@@ -4,6 +4,23 @@ This package is **pre-release** (`0.x`). Breaking changes are allowed between
 minor versions while the major is `0`, and each break is recorded here before a
 tagged release.
 
+## Event names after 0.3.0-beta.3
+
+Update the imports in `Event::listen()` registrations, listener type hints,
+manual dispatchers, and event fakes and assertions. These classes stay in
+`Qiick\ApiKeys\Events` and carry the same payloads.
+
+| Previous class | Current class |
+| --- | --- |
+| `ApiKeyAuthenticated` | `ApiKeyAuthenticatedEvent` |
+| `ApiKeyExpiryNoticeSent` | `ApiKeyExpiryNoticeSentEvent` |
+| `ApiKeyExposed` | `ApiKeyExposedEvent` |
+| `ApiKeyLegacyFormatWarningSent` | `ApiKeyLegacyFormatWarningSentEvent` |
+| `LegacyTokenUsed` | `LegacyTokenUsedEvent` |
+
+Drain jobs containing the old event objects before deploying the new classes.
+Rebuild Laravel's event cache if the application caches discovered listeners.
+
 ## Every release: Public Suffix List refresh
 
 Origin wildcards are checked against a bundled snapshot of the Public Suffix
@@ -24,6 +41,14 @@ wildcards over the suffixes it names.
   during the rollout. `KeyRejectionCode::RateLimitExceeded` keeps its case name
   and has a new backing value. `Retry-After`, `X-RateLimit-*` and the translation
   key `api_keys.rate_limit_exceeded` stay the same.
+
+## Expiry claims after 0.3.0-beta.3
+
+- Products with a custom `ApiKeyRepository::claimExpiryNotice()` query must
+  add `revoked_at IS NULL` to the same atomic update as the other claim guards.
+  Using `ExpiryNoticeClaimSql::claim()` picks up the condition automatically.
+  Revocation before the claim prevents the send. Once a claim succeeds, the
+  send can already be in flight when revocation commits.
 
 ## From 0.3.0-beta.2 to 0.3.0-beta.3
 

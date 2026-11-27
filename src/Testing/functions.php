@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Qiick\ApiKeys\Testing;
 
-use Qiick\ApiKeys\Events\LegacyTokenUsed;
+use Qiick\ApiKeys\Events\LegacyTokenUsedEvent;
 use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
 use Qiick\ApiKeys\KeyRejectionCode;
 
@@ -49,7 +49,7 @@ function assertIpNotAllowed(ApiKeyRejection $rejection): void
  * @param  class-string  $matcherClass
  */
 function assertLegacyTokenUsed(
-    LegacyTokenUsed $event,
+    LegacyTokenUsedEvent $event,
     string $keyPrefix,
     string $matcherClass,
     \DateTimeImmutable $acceptUntil,

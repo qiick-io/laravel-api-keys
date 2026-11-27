@@ -113,11 +113,13 @@ it('N2: ExpiryNoticeClaimSql claim is affected-row CAS, bound to the claim token
     $pdo->exec($createSql);
 
     $uuid = '018f0000-0000-7000-8000-00000000ca51';
+    $revokedUuid = '018f0000-0000-7000-8000-00000000ca53';
     $selected = new DateTimeImmutable('2026-01-15T00:00:00+00:00');
     [$expiresFrom, $expiresUntil] = expiryNoticeClaimWindow($pdo, $selected);
     [$rotatedFrom, $rotatedUntil] = expiryNoticeClaimWindow($pdo, new DateTimeImmutable('2026-04-15T00:00:00+00:00'));
     $insert = $pdo->prepare('INSERT INTO api_keys (uuid, expires_at, expiry_notified_at, expiry_notice_claimed_at, expiry_notice_claim_token) VALUES (?, ?, NULL, NULL, NULL)');
     $insert->execute([$uuid, $expiresFrom]);
+    $insert->execute([$revokedUuid, $expiresFrom]);
 
     $now = new DateTimeImmutable('2026-01-10T12:00:00+00:00');
     $leaseSeconds = 900;
@@ -126,6 +128,11 @@ it('N2: ExpiryNoticeClaimSql claim is affected-row CAS, bound to the claim token
     $claim = $pdo->prepare(ExpiryNoticeClaimSql::claim());
     $mark = $pdo->prepare(ExpiryNoticeClaimSql::markNotified());
     $release = $pdo->prepare(ExpiryNoticeClaimSql::release());
+
+    // A revocation after selection must prevent the first claim for an unsent notice.
+    $pdo->prepare('UPDATE api_keys SET revoked_at = ? WHERE uuid = ?')->execute([$claimedAt, $revokedUuid]);
+    $claim->execute([$claimedAt, 'revoked-token', $revokedUuid, $expiresFrom, $expiresUntil, $cutoff]);
+    expect($claim->rowCount())->toBe(0);
 
     // A claim for an expiry the row no longer has (a rotation since the select) loses.
     $claim->execute([$claimedAt, 'token-a', $uuid, $rotatedFrom, $rotatedUntil, $cutoff]);

@@ -8,7 +8,7 @@ tagged release.
 
 Use a tagged Packagist version and commit the product lockfile. Remove any
 development alias for the package. On products with an unfrozen schema, fold
-API key changes into the existing `create_api_keys` migration, then verify
+API key changes into the existing migration that creates `api_keys`, then verify
 install from an empty isolated database. For existing data, plan a backfill
 and rollback before changing ownership, uniqueness or column types.
 
@@ -35,9 +35,8 @@ and rollback before changing ownership, uniqueness or column types.
   `error` parameter. JSON still reports `invalid_token`. Keep invalid, revoked
   and expired credential challenges on the `invalid_token` path, and update
   middleware and response tests that used the same challenge for both cases.
-- Read `too_many_requests` for HTTP 429, and update public event imports,
-  registrations and queue handling to match the `Event` class names in the
-  package's public API inventory.
+- Update public event imports, registrations and queue handling using the
+  event mapping below.
 - When enabling expiry notices, bind the recipient resolver and schedule the
   command. Use a single conditional claim update for the selected expiry, lease,
   unsent notice and non-revoked key. Bind all timestamps as stored in UTC.
@@ -51,16 +50,57 @@ and rollback before changing ownership, uniqueness or column types.
 
 ### Adopter-specific changes
 
-| Product | Work before rollout |
-| --- | --- |
-| Excubia | Replace the development alias. The create migration already has the restrict/NOT NULL principal owner, version, grace and lease columns. In `ApiKeyRepositoryService::claimExpiryNotice()`, add `whereNull('revoked_at')` to the atomic claim only. Add the erasure binding and product integration proof. |
-| Signaculum | Update the beta pin. Its create migration already includes the required principal owner, grant, version, grace and lease columns. Keep the stricter required expiry. Its repository calls `ExpiryNoticeClaimSql::claim()`, so the revocation condition arrives with the package. Add the erasure binding and prove the adapter. |
-| Instituta | Fold the reference columns, FK indexes and claim fields into its create migration when it adopts. Bind the authorizer to the principal's current perimeter. If keeping a UUID primary key, record the divergence and implement `publicId()` accordingly. |
-| Externa | Adopt after stable. Keep existing `ek_` readers, ownerless keys and role-based authorization during the transition. Backfill token version `0` for `ek_` rows, `sha256` for existing hashes, and `oauth_grant` for rows with `oauth_client_id`. Bind a matcher with an explicit cutoff and preserve both prefixes during rotation grace. Expand the existing schema with missing claim and prefix fields and UTC `dateTime` storage for future expiry and grace, with additive backfills and a rollback-compatible switch. Keep the historic role and owner fields available to the product adapter until their separate transition. |
+- **Excubia.** Replace the development alias. The create migration has the
+  restrict/NOT NULL principal owner, version, grace and lease columns. Give
+  the prefix and hash columns binary collation on MySQL and MariaDB, and make
+  `created_at` and `updated_at` non-null. Add `whereNull('revoked_at')` to
+  `ApiKeyRepositoryService::claimExpiryNotice()` in the atomic claim update.
+- **Signaculum.** Update the beta pin. Keep its required expiry and existing
+  principal owner, grant, version, grace and lease columns. Give the prefix
+  and hash columns binary collation on MySQL and MariaDB. Its repository
+  already calls `ExpiryNoticeClaimSql::claim()`, which now checks revocation.
+- **Instituta.** Add the missing reference columns to the `api_keys` block in
+  `2026_11_12_220000_create_instituta_tenancy_and_index_tables.php`. Keep the
+  declared UUID primary-key divergence and map it to `publicId()`. Add the
+  unique hash constraint after checking for existing duplicates. Preserve
+  tenancy columns and enforce the current principal's perimeter and the
+  key's area and path limits in the authorizer.
+- **Externa.** Adopt after stable using forward migrations. Add the reference
+  fields for versions (`token_version`, `hash_algorithm`), previous prefix,
+  credential kind and principal owner. Add description, request restrictions,
+  day and month quotas, metadata, the three expiry notice fields, last-used
+  user agent, rotation timestamp, exposure fields and revocation attribution
+  and notes. Preserve the existing `oauth_client_id` and backfill those rows as
+  `oauth_grant`. Check for duplicate current prefixes before making `key_prefix`
+  unique, and keep comparisons case-sensitive. Backfill nullable `scopes`
+  from the product's existing authorization data before enforcing required
+  scopes. Expand `expires_at` and `previous_key_valid_until` to UTC `dateTime`
+  storage with a rollback-compatible switch. Preserve `ek_` readers by
+  marking those keys token version 0, keeping SHA-256 hashes, binding a legacy
+  matcher with an absolute cutoff and persisting the previous prefix during
+  rotation grace. Keep the nullable owner and existing role authorization in
+  the adapter until their separate transition.
 
 For Excubia and the second adopter, run product CI on the tagged version and
 record at least one week of real use, or one product release cycle, before
 the stable package release.
+
+## Event names after 0.3.0-beta.3
+
+Update the imports in `Event::listen()` registrations, listener type hints,
+manual dispatchers, and event fakes and assertions. These classes stay in
+`Qiick\ApiKeys\Events` and carry the same payloads.
+
+| Previous class | Current class |
+| --- | --- |
+| `ApiKeyAuthenticated` | `ApiKeyAuthenticatedEvent` |
+| `ApiKeyExpiryNoticeSent` | `ApiKeyExpiryNoticeSentEvent` |
+| `ApiKeyExposed` | `ApiKeyExposedEvent` |
+| `ApiKeyLegacyFormatWarningSent` | `ApiKeyLegacyFormatWarningSentEvent` |
+| `LegacyTokenUsed` | `LegacyTokenUsedEvent` |
+
+Drain jobs containing the old event objects before deploying the new classes.
+Rebuild Laravel's event cache if the application caches discovered listeners.
 
 ## Every release: Public Suffix List refresh
 
@@ -73,6 +113,14 @@ platform's `https://*.platform.example`) parse as denied: those keys stop
 authenticating after you upgrade, with no migration. Each CHANGELOG entry says
 whether the list changed; before upgrading, search stored `restrictions` for
 wildcards over the suffixes it names.
+
+## Expiry claims after 0.3.0-beta.3
+
+- Products with a custom `ApiKeyRepository::claimExpiryNotice()` query must
+  add `revoked_at IS NULL` to the same atomic update as the other claim guards.
+  Using `ExpiryNoticeClaimSql::claim()` picks up the condition automatically.
+  Revocation before the claim prevents the send. Once a claim succeeds, the
+  send can already be in flight when revocation commits.
 
 ## From 0.3.0-beta.2 to 0.3.0-beta.3
 

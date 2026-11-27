@@ -10,7 +10,7 @@ use Qiick\ApiKeys\Contracts\ApiKeyRecord;
  * @api Successful authentication outcome.
  *
  * When `$legacyMatcherClass` is non-null the presented token matched a legacy
- * matcher — products should dispatch {@see Events\LegacyTokenUsed} only then
+ * matcher — products should dispatch {@see Events\LegacyTokenUsedEvent} only then
  * (never on format/hash miss).
  */
 final readonly class AuthenticationResult

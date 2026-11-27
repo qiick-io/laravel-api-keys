@@ -185,7 +185,7 @@ final class RevokeExposedKey implements CompromisedKeyRevoker
             'revoked_reason' => RevocationReason::Exposure->value,
         ]);
 
-        event(new ApiKeyExposed($record->publicId(), $exposureSource, $exposedAt));
+        event(new ApiKeyExposedEvent($record->publicId(), $exposureSource, $exposedAt));
     }
 }
 ```
@@ -319,7 +319,7 @@ A matcher is used only when `isAccepting($now) && now < min(config, acceptUntil(
 `prefixOf` must also recognise the bare stored `key_prefix` so rotation can migrate
 the row. `legacyMatcherFor` returns null for canonical tokens.
 
-Dispatch `Events\LegacyTokenUsed` only after **successful** authentication, using
+Dispatch `Events\LegacyTokenUsedEvent` only after **successful** authentication, using
 `AuthenticationResult::$legacyMatcherClass`:
 
 ```php
@@ -336,13 +336,13 @@ final class EkLegacyTokenMatcher implements LegacyTokenMatcher { /* ... */ }
 
 $result = $authenticator->authenticate($presented, $context);
 if ($result->legacyMatcherClass !== null) {
-    event(new LegacyTokenUsed(
+    event(new LegacyTokenUsedEvent(
         $result->record->keyPrefix(),
         $result->legacyMatcherClass,
         /* matcher acceptUntil from your registry */,
     ));
 }
-event(new ApiKeyAuthenticated(
+event(new ApiKeyAuthenticatedEvent(
     $result->record->publicId(), // the public UUID, never the internal row id
     $result->record->keyPrefix(),
     $result->usedPreviousSecret,

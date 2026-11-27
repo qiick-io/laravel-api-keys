@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Qiick\ApiKeys\Events\LegacyTokenUsed;
+use Qiick\ApiKeys\Events\LegacyTokenUsedEvent;
 use Qiick\ApiKeys\Testing\FixedEnvironment;
 use Qiick\ApiKeys\Testing\FixedRandomSource;
 use Qiick\ApiKeys\Tests\Support\RegexLegacyTokenMatcher;
@@ -68,7 +68,7 @@ it('applies the earlier of config cut-off and matcher acceptUntil', function ():
         ->and($codec->prefixOf($token, new DateTimeImmutable('2026-06-01T00:00:00+00:00')))->toBeNull();
 });
 
-it('builds LegacyTokenUsed from legacyMatcherFor for product dispatch', function (): void {
+it('builds LegacyTokenUsedEvent from legacyMatcherFor for product dispatch', function (): void {
     $acceptUntil = new DateTimeImmutable('2027-01-01T00:00:00+00:00');
     $matcher = RegexLegacyTokenMatcher::externaEkStyle($acceptUntil);
     $codec = new TokenCodec(
@@ -83,7 +83,7 @@ it('builds LegacyTokenUsed from legacyMatcherFor for product dispatch', function
     $hit = $codec->legacyMatcherFor($token, $now);
     expect($hit)->not->toBeNull();
 
-    $event = new LegacyTokenUsed(
+    $event = new LegacyTokenUsedEvent(
         keyPrefix: $hit->prefixOf($token) ?? '',
         matcherClass: $hit::class,
         acceptUntil: $hit->acceptUntil(),

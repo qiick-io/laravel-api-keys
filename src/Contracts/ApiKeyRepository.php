@@ -55,9 +55,10 @@ interface ApiKeyRepository
     /**
      * Atomic claim lease ({@see ExpiryNoticeClaimSql::claim()}): set
      * `expiry_notice_claimed_at` to `$now` and `expiry_notice_claim_token` to
-     * `$claimToken`. Wins when the notice is unsent, the row still has the
-     * `expires_at` the record was selected with, and it is either unclaimed or
-     * the prior claim is older than `$leaseSeconds`. Claim before send;
+     * `$claimToken`. Wins when the row is still non-revoked, the notice is unsent,
+     * the row still has the `expires_at` the record was selected with, and it is
+     * either unclaimed or the prior claim is older than `$leaseSeconds`.
+     * Claim before send;
      * {@see releaseExpiryNotice()} on send failure; {@see markExpiryNotified()}
      * after success, both with the same token.
      */

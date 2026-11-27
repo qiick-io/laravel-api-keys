@@ -113,6 +113,7 @@ it('denies malformed resources sections', function (mixed $resources): void {
     'empty type' => [[['type' => '', 'values' => ['a']]]],
     'non-string type' => [[['type' => 1, 'values' => ['a']]]],
     'deny mode' => [[['type' => 'collection', 'values' => ['a'], 'mode' => 'deny']]],
+    'null mode' => [[['type' => 'collection', 'values' => ['a'], 'mode' => null]]],
     'empty value string' => [[['type' => 'collection', 'values' => ['']]]],
     'values not list' => [[['type' => 'collection', 'values' => ['a' => 'b']]]],
     'values not array' => [[['type' => 'collection', 'values' => 'a']]],

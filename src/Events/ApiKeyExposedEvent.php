@@ -9,7 +9,7 @@ namespace Qiick\ApiKeys\Events;
  *
  * Never carries secret material.
  */
-final class ApiKeyExposed
+final class ApiKeyExposedEvent
 {
     public function __construct(
         public string $apiKeyId,

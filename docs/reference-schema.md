@@ -4,8 +4,8 @@ This package ships **no migrations**. Products own Eloquent models and tables.
 The columns below are the fleet contract for adoption (see the approved
 `laravel-api-keys-standards-review` knowledge note, 2026-11-22).
 
-Excubia, Signaculum and Instituta put this contract in their `create_api_keys`
-migrations while their schema is pre-1.0. Externa adopts through additive
+Excubia, Signaculum and Instituta put this contract in the migrations that
+create their `api_keys` tables while their schema is pre-1.0. Externa adopts through additive
 migrations after the package is stable. See the product steps in
 [UPGRADING.md](../UPGRADING.md#product-adoption-for-10).
 
@@ -26,7 +26,7 @@ migrations after the package is stable. See the product steps in
 | `previous_key_valid_until` | **dateTime** | yes | null | — | Future-dated: never MySQL `TIMESTAMP` |
 | `credential_kind` | string(16) | no | `'api_key'` | index (`credential_kind`, `revoked_at`) | `api_key` or `oauth_grant` |
 | `oauth_client_id` | uuid | yes | null | index | Set iff `credential_kind = oauth_grant` |
-| `owner_principal_id` | FK principals (uuid) | no\* | — | index | `restrictOnDelete`; revoke or reassign credentials before deleting the principal |
+| `owner_principal_id` | FK principals (uuid) | no\* | — | index | `restrictOnDelete`; reassign or erase referencing keys before deleting a principal |
 | `created_by` | FK users | yes | null | index | `nullOnDelete` |
 | `scopes` | json | no | — | — | Parsed fail-closed by `ScopeSet` |
 | `ip_allowlist` | json | yes | null | — | A JSON list. SQL NULL or `[]` → allow all; JSON `null`, an object (`{}` included) or anything malformed → deny |
@@ -37,7 +37,7 @@ migrations after the package is stable. See the product steps in
 | `metadata` | json | yes | null | — | Labels under `metadata.labels`; never secrets |
 | `expires_at` | **dateTime** | yes | null | index | Future-dated; index serves the expiry command |
 | `expiry_notified_at` | timestamp | yes | null | — | Final success stamp for expiry notices |
-| `expiry_notice_claimed_at` | timestamp | yes | null | — | In-flight claim lease (app clock); reclaimable after `api-keys.expiry.claim_lease_seconds` (keep above send latency; NTP-sync workers) |
+| `expiry_notice_claimed_at` | timestamp | yes | null | — | In-flight claim lease (app clock); only non-revoked keys can be claimed. Reclaimable after `api-keys.expiry.claim_lease_seconds` (keep above send latency; NTP-sync workers) |
 | `expiry_notice_claim_token` | string(64) | yes | null | — | Token of the in-flight claim (random, from the command). Mark and release match it and the selected `expires_at`, so a run whose lease expired cannot touch the next run's claim and a rotation is never stamped as notified |
 | `last_used_at` | timestamp | yes | null | — | Written via `saveQuietly` |
 | `last_used_ip` | string(45) | yes | null | — | |

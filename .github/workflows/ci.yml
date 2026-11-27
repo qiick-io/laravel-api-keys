@@ -54,7 +54,6 @@ jobs:
           DOCS_ONLY: ${{ needs.package-matrix.outputs.docs-only }}
           RUN_DATABASES: ${{ needs.package-matrix.outputs.run-databases }}
           MUTATE_SCOPE: ${{ needs.package-matrix.outputs.mutate-scope }}
-          MUTATE_CLASSES: ${{ needs.package-matrix.outputs.mutate-classes }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
@@ -67,12 +66,13 @@ jobs:
               compatibility_variant=full
             fi
             if ! git diff --quiet "$comparison" -- .github/workflows/ci.yml \
-                src/ExpiryNoticeClaimSql.php src/CacheAttemptLimiter.php src/Erasure tests/Database tests/Erasure; then
+                composer.json composer.lock src/ExpiryNoticeClaimSql.php src/CacheAttemptLimiter.php \
+                src/Erasure tests/Database tests/Erasure; then
               run_databases=true
             fi
+            # Tests can exercise classes outside the PR's changed source list.
             if ! git diff --quiet "$comparison" -- .github/workflows/ci.yml \
-                scripts/mutate-per-class.sh scripts/mutation-inventory.test.mjs ||
-                { [ "$MUTATE_CLASSES" = '[]' ] && ! git diff --quiet "$comparison" -- tests; }; then
+                scripts/mutate-per-class.sh scripts/mutation-inventory.test.mjs tests; then
               mutate_scope=all
             fi
           fi
@@ -193,7 +193,7 @@ jobs:
         shard: [1, 2, 3, 4]
     steps:
       - name: Checkout
-        if: env.RUN_MUTATION == 'true'
+        if: matrix.shard == 1 || env.RUN_MUTATION == 'true'
         # actions/checkout@v4.1.1
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -212,7 +212,7 @@ jobs:
         run: composer update --no-interaction --prefer-dist
 
       - name: Verify the mutation inventory
-        if: matrix.shard == 1 && env.RUN_MUTATION == 'true'
+        if: matrix.shard == 1
         run: node --test scripts/mutation-inventory.test.mjs
 
       - name: Pest mutate (per-class min 95)
@@ -223,6 +223,41 @@ jobs:
 
   # Expiry-notice claim CAS on SQLite / MySQL / MariaDB / PostgreSQL.
   # Services start only for the engine under test (docker in-step for cost).
+  sqlite:
+    name: Databases smoke (sqlite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: validation-plan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.1.1
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2.40.0
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+          extensions: pdo_sqlite, pcntl
+
+      - name: Install dependencies
+        run: composer update --no-interaction --prefer-dist
+
+      - name: Attempt limiter races on the SQLite cache store
+        if: needs.validation-plan.outputs.run-databases == 'true'
+        env:
+          API_KEYS_LIMITER_STORE: sqlite
+        run: vendor/bin/pest --filter=CacheAttemptLimiterConcurrency
+
+      - name: Expiry notice claim CAS (sqlite)
+        if: needs.validation-plan.outputs.run-databases == 'true'
+        run: vendor/bin/pest --filter=ExpiryNoticeClaimCas
+
+      # The fleet requires E1–E14 to run on every PR in a required check.
+      - run: node tests/Erasure/run.mjs
+
+  # SQL servers come from the fleet matrix. Redis and Memcached cover the
+  # independent cache-store paths.
   databases:
     name: Databases smoke (${{ matrix.database.connection }})
     runs-on: ubuntu-latest
@@ -236,8 +271,6 @@ jobs:
       matrix:
         database: ${{ fromJSON(needs.package-matrix.outputs.databases) }}
         include:
-          - database:
-              connection: sqlite
           - database:
               connection: redis
           - database:
@@ -459,7 +492,7 @@ jobs:
       registry: false
 
   nightly-failure:
-    needs: [tests, databases, mutation-gate, standards]
+    needs: [tests, sqlite, databases, mutation-gate, standards]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5

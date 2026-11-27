@@ -6,43 +6,118 @@ on:
       - main
       - develop
   pull_request:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  package-matrix:
+    uses: qiick-io/app-ui/.github/workflows/package-matrix.yml@0d97ae1429a856411c76e6de1ec258cae0eabab6 # v0.15.0
+    with:
+      app-ui-ref: 0d97ae1429a856411c76e6de1ec258cae0eabab6
+      variant: ${{ github.event.pull_request.base.ref == 'main' && 'full' || 'auto' }}
+
+  # Keep all existing check names on both protected branches. On a develop PR
+  # the shared plan decides which of those jobs actually install and run tests.
+  compatibility-matrix:
+    uses: qiick-io/app-ui/.github/workflows/package-matrix.yml@0d97ae1429a856411c76e6de1ec258cae0eabab6 # v0.15.0
+    with:
+      app-ui-ref: 0d97ae1429a856411c76e6de1ec258cae0eabab6
+      variant: full
+
+  validation-plan:
+    needs: package-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      compatibility-variant: ${{ steps.plan.outputs.compatibility-variant }}
+      run-databases: ${{ steps.plan.outputs.run-databases }}
+      mutate-scope: ${{ steps.plan.outputs.mutate-scope }}
+    steps:
+      - if: needs.package-matrix.outputs.variant == 'pr' && needs.package-matrix.outputs.docs-only != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.1.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Include package-specific database and gate paths
+        id: plan
+        env:
+          VARIANT: ${{ needs.package-matrix.outputs.variant }}
+          DOCS_ONLY: ${{ needs.package-matrix.outputs.docs-only }}
+          RUN_DATABASES: ${{ needs.package-matrix.outputs.run-databases }}
+          MUTATE_SCOPE: ${{ needs.package-matrix.outputs.mutate-scope }}
+          MUTATE_CLASSES: ${{ needs.package-matrix.outputs.mutate-classes }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          compatibility_variant="$VARIANT"
+          run_databases="$RUN_DATABASES"
+          mutate_scope="$MUTATE_SCOPE"
+          if [ "$VARIANT" = pr ] && [ "$DOCS_ONLY" != true ]; then
+            comparison="$BASE_SHA...$HEAD_SHA"
+            if ! git diff --quiet "$comparison" -- .github/workflows/ci.yml; then
+              compatibility_variant=full
+            fi
+            if ! git diff --quiet "$comparison" -- .github/workflows/ci.yml \
+                src/ExpiryNoticeClaimSql.php src/CacheAttemptLimiter.php src/Erasure tests/Database tests/Erasure; then
+              run_databases=true
+            fi
+            if ! git diff --quiet "$comparison" -- .github/workflows/ci.yml \
+                scripts/mutate-per-class.sh scripts/mutation-inventory.test.mjs ||
+                { [ "$MUTATE_CLASSES" = '[]' ] && ! git diff --quiet "$comparison" -- tests; }; then
+              mutate_scope=all
+            fi
+          fi
+          {
+            echo "compatibility-variant=$compatibility_variant"
+            echo "run-databases=$run_databases"
+            echo "mutate-scope=$mutate_scope"
+          } >> "$GITHUB_OUTPUT"
+
   tests:
     name: PHP ${{ matrix.php }} Laravel ${{ matrix.laravel }} ${{ matrix.dependency-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [package-matrix, compatibility-matrix, validation-plan]
     strategy:
       fail-fast: false
-      matrix:
-        php:
-          - '8.3'
-          - '8.4'
-          - '8.5'
-        laravel:
-          - '12'
-          - '13'
-        dependency-version:
-          - lowest
-          - stable
-        include:
-          - laravel: '12'
-            testbench: '10'
-          - laravel: '13'
-            testbench: '11'
+      matrix: ${{ fromJSON(needs.compatibility-matrix.outputs.matrix) }}
     steps:
+      - name: Select compatibility work
+        id: scope
+        env:
+          VARIANT: ${{ needs.validation-plan.outputs.compatibility-variant }}
+          PLANNED_MATRIX: ${{ needs.package-matrix.outputs.matrix }}
+          PHP_VERSION: ${{ matrix.php }}
+          LARAVEL_VERSION: ${{ matrix.laravel }}
+          DEPENDENCY_VERSION: ${{ matrix.dependency-version }}
+        run: |
+          node -e '
+            const { VARIANT, PLANNED_MATRIX, PHP_VERSION, LARAVEL_VERSION, DEPENDENCY_VERSION } = process.env;
+            const matrix = VARIANT === "full" ? { skip: false } :
+              JSON.parse(PLANNED_MATRIX).include.find(cell =>
+                cell.php === PHP_VERSION && cell.laravel === LARAVEL_VERSION &&
+                cell["dependency-version"] === DEPENDENCY_VERSION);
+            // Composer audit still runs on the canonical cell of a docs-only PR.
+            console.log("audit=" + (matrix !== undefined));
+            console.log("test=" + (matrix !== undefined && !matrix.skip));
+          ' >> "$GITHUB_OUTPUT"
+
       - name: Checkout
+        if: steps.scope.outputs.audit == 'true'
         # actions/checkout@v4.1.1
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Setup PHP
+        if: steps.scope.outputs.audit == 'true'
         # shivammathur/setup-php@2.40.0
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
         with:
@@ -51,9 +126,11 @@ jobs:
           tools: composer:v2
 
       - name: Validate composer.json
+        if: steps.scope.outputs.audit == 'true'
         run: composer validate --strict --no-check-lock
 
       - name: Install dependencies
+        if: steps.scope.outputs.audit == 'true'
         run: |
           composer require --dev --no-interaction --no-update "orchestra/testbench:^${{ matrix.testbench }}.0"
           composer require --no-interaction --no-update \
@@ -69,47 +146,59 @@ jobs:
           fi
 
       - name: Composer audit
+        if: steps.scope.outputs.audit == 'true'
         run: composer audit --no-interaction
 
       # Static analysis depends on the tool versions, not on the runtime floor:
       # with --prefer-lowest, old polyfills redefine core functions without types.
       - name: Pint
-        if: matrix.dependency-version == 'stable'
+        if: steps.scope.outputs.test == 'true' && matrix.dependency-version == 'stable'
         run: vendor/bin/pint --test
 
       - name: PHPStan
-        if: matrix.dependency-version == 'stable'
+        if: steps.scope.outputs.test == 'true' && matrix.dependency-version == 'stable'
         run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
 
       # Level max with no baseline: the ratchet fails if a baseline ever appears.
       - name: Larastan baseline only shrinks
+        if: steps.scope.outputs.test == 'true'
         run: node scripts/qiick-ratchet.mjs phpstan --min-level max
 
       - name: Pest
+        if: steps.scope.outputs.test == 'true'
         run: vendor/bin/pest
 
-      - run: node tests/Erasure/run.mjs
+      - if: steps.scope.outputs.test == 'true'
+        run: node tests/Erasure/run.mjs
 
-      - run: node tests/Erasure/run.mjs
+      - if: steps.scope.outputs.test == 'true'
+        run: node tests/Erasure/run.mjs
         env:
           API_KEYS_ERASURE_CACHE_STORE: database
 
-  # Every runtime class at >=95%, per class (docs/decisions/2026-11-24-one-point-zero-checklist.md),
-  # split into shards so the gate stays within the job timeout as classes grow.
+  # The full gate covers every runtime class at >=95%. Shards keep the per-class
+  # work within the job timeout as the inventory grows.
   mutation:
     name: mutate (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: [package-matrix, validation-plan]
+    env:
+      MUTATE_SCOPE: ${{ needs.validation-plan.outputs.mutate-scope }}
+      MUTATE_CLASSES: ${{ needs.package-matrix.outputs.mutate-classes }}
+      RUN_MUTATION: ${{ needs.validation-plan.outputs.mutate-scope == 'all' || needs.package-matrix.outputs.mutate-classes != '[]' }}
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
     steps:
       - name: Checkout
+        if: env.RUN_MUTATION == 'true'
         # actions/checkout@v4.1.1
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Setup PHP
+        if: env.RUN_MUTATION == 'true'
         # shivammathur/setup-php@2.40.0
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
         with:
@@ -119,13 +208,15 @@ jobs:
           tools: composer:v2
 
       - name: Install dependencies
+        if: env.RUN_MUTATION == 'true'
         run: composer update --no-interaction --prefer-dist
 
       - name: Verify the mutation inventory
-        if: matrix.shard == 1
+        if: matrix.shard == 1 && env.RUN_MUTATION == 'true'
         run: node --test scripts/mutation-inventory.test.mjs
 
       - name: Pest mutate (per-class min 95)
+        if: env.RUN_MUTATION == 'true'
         env:
           MUTATE_SHARD: ${{ matrix.shard }}/4
         run: bash scripts/mutate-per-class.sh
@@ -133,27 +224,32 @@ jobs:
   # Expiry-notice claim CAS on SQLite / MySQL / MariaDB / PostgreSQL.
   # Services start only for the engine under test (docker in-step for cost).
   databases:
-    name: Databases smoke (${{ matrix.engine }})
+    name: Databases smoke (${{ matrix.database.connection }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: [package-matrix, validation-plan]
+    env:
+      RUN_DATABASES: ${{ needs.validation-plan.outputs.run-databases }}
+      DATABASE_IMAGE: ${{ matrix.database.image }}
     strategy:
       fail-fast: false
       matrix:
-        engine:
-          - sqlite
-          - mysql
-          - mariadb
-          - pgsql
-          # CacheAttemptLimiter races on Redis and Memcached; the four engines
-          # above race it on Laravel's database cache store too.
-          - redis
-          - memcached
+        database: ${{ fromJSON(needs.package-matrix.outputs.databases) }}
+        include:
+          - database:
+              connection: sqlite
+          - database:
+              connection: redis
+          - database:
+              connection: memcached
     steps:
       - name: Checkout
+        if: env.RUN_DATABASES == 'true'
         # actions/checkout@v4.1.1
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Setup PHP
+        if: env.RUN_DATABASES == 'true'
         # shivammathur/setup-php@2.40.0
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
         with:
@@ -163,17 +259,18 @@ jobs:
           extensions: pdo_sqlite, pdo_mysql, pdo_pgsql, redis, memcached, pcntl
 
       - name: Install dependencies
+        if: env.RUN_DATABASES == 'true'
         run: composer update --no-interaction --prefer-dist
 
       - name: Start MySQL
-        if: matrix.engine == 'mysql'
+        if: env.RUN_DATABASES == 'true' && (matrix.database.connection == 'mysql')
         run: |
           docker run -d --name claim-mysql \
             -e MYSQL_ROOT_PASSWORD=password \
             -e MYSQL_DATABASE=api_keys_claim \
             -p 3306:3306 \
-            mysql:8.4
-          for attempt in $(seq 1 30); do
+            "$DATABASE_IMAGE"
+          for _attempt in $(seq 1 30); do
             if docker exec claim-mysql mysqladmin ping -h 127.0.0.1 -uroot -ppassword --silent; then
               exit 0
             fi
@@ -183,14 +280,14 @@ jobs:
           exit 1
 
       - name: Start MariaDB
-        if: matrix.engine == 'mariadb'
+        if: env.RUN_DATABASES == 'true' && (matrix.database.connection == 'mariadb')
         run: |
           docker run -d --name claim-mariadb \
             -e MARIADB_ROOT_PASSWORD=password \
             -e MARIADB_DATABASE=api_keys_claim \
             -p 3307:3306 \
-            mariadb:11.4
-          for attempt in $(seq 1 30); do
+            "$DATABASE_IMAGE"
+          for _attempt in $(seq 1 30); do
             if docker exec claim-mariadb mariadb-admin ping -h 127.0.0.1 -uroot -ppassword --silent; then
               exit 0
             fi
@@ -200,14 +297,14 @@ jobs:
           exit 1
 
       - name: Start PostgreSQL
-        if: matrix.engine == 'pgsql'
+        if: env.RUN_DATABASES == 'true' && (matrix.database.connection == 'pgsql')
         run: |
           docker run -d --name claim-pgsql \
             -e POSTGRES_PASSWORD=password \
             -e POSTGRES_DB=api_keys_claim \
             -p 5432:5432 \
-            postgres:17
-          for attempt in $(seq 1 30); do
+            "$DATABASE_IMAGE"
+          for _attempt in $(seq 1 30); do
             if docker exec claim-pgsql pg_isready -U postgres; then
               exit 0
             fi
@@ -217,10 +314,10 @@ jobs:
           exit 1
 
       - name: Start Redis
-        if: matrix.engine == 'redis'
+        if: env.RUN_DATABASES == 'true' && (matrix.database.connection == 'redis')
         run: |
           docker run -d --name limiter-redis -p 6379:6379 redis:7
-          for attempt in $(seq 1 30); do
+          for _attempt in $(seq 1 30); do
             if docker exec limiter-redis redis-cli ping | grep -q PONG; then
               exit 0
             fi
@@ -230,10 +327,10 @@ jobs:
           exit 1
 
       - name: Start Memcached
-        if: matrix.engine == 'memcached'
+        if: env.RUN_DATABASES == 'true' && (matrix.database.connection == 'memcached')
         run: |
           docker run -d --name limiter-memcached -p 11211:11211 memcached:1.6
-          for attempt in $(seq 1 30); do
+          for _attempt in $(seq 1 30); do
             if (echo > /dev/tcp/127.0.0.1/11211) 2>/dev/null; then
               exit 0
             fi
@@ -242,32 +339,32 @@ jobs:
           echo "Memcached did not become ready" >&2
           exit 1
 
-      - name: Attempt limiter races (${{ matrix.engine }})
-        if: matrix.engine == 'redis' || matrix.engine == 'memcached'
+      - name: Attempt limiter races (${{ matrix.database.connection }})
+        if: env.RUN_DATABASES == 'true' && (matrix.database.connection == 'redis' || matrix.database.connection == 'memcached')
         env:
-          API_KEYS_LIMITER_STORE: ${{ matrix.engine }}
+          API_KEYS_LIMITER_STORE: ${{ matrix.database.connection }}
         run: vendor/bin/pest --filter='CacheAttemptLimiter(Concurrency|Store)'
 
-      - name: Attempt limiter races on the database cache store (${{ matrix.engine }})
-        if: matrix.engine != 'redis' && matrix.engine != 'memcached'
+      - name: Attempt limiter races on the database cache store (${{ matrix.database.connection }})
+        if: env.RUN_DATABASES == 'true' && (matrix.database.connection != 'redis' && matrix.database.connection != 'memcached')
         env:
-          API_KEYS_LIMITER_STORE: ${{ matrix.engine }}
+          API_KEYS_LIMITER_STORE: ${{ matrix.database.connection }}
           API_KEYS_CLAIM_PASSWORD: password
         run: vendor/bin/pest --filter=CacheAttemptLimiterConcurrency
 
-      - name: Expiry notice claim CAS (${{ matrix.engine }})
-        if: matrix.engine != 'redis' && matrix.engine != 'memcached'
+      - name: Expiry notice claim CAS (${{ matrix.database.connection }})
+        if: env.RUN_DATABASES == 'true' && (matrix.database.connection != 'redis' && matrix.database.connection != 'memcached')
         env:
-          API_KEYS_CLAIM_ENGINE: ${{ matrix.engine }}
+          API_KEYS_CLAIM_ENGINE: ${{ matrix.database.connection }}
           API_KEYS_CLAIM_PASSWORD: password
         run: vendor/bin/pest --filter=ExpiryNoticeClaimCas
 
       - name: Create the erasure run's private database
-        if: matrix.engine == 'mysql' || matrix.engine == 'mariadb' || matrix.engine == 'pgsql'
+        if: env.RUN_DATABASES == 'true' && (matrix.database.connection == 'mysql' || matrix.database.connection == 'mariadb' || matrix.database.connection == 'pgsql')
         env:
           ERASURE_DATABASE: api_keys_erasure_${{ github.run_id }}_${{ github.run_attempt }}
         run: |
-          case "${{ matrix.engine }}" in
+          case "${{ matrix.database.connection }}" in
             mysql)
               docker exec claim-mysql mysql -uroot -ppassword -e "CREATE DATABASE $ERASURE_DATABASE"
               ;;
@@ -281,9 +378,9 @@ jobs:
           echo "API_KEYS_ERASURE_DB_DATABASE=$ERASURE_DATABASE" >> "$GITHUB_ENV"
 
       - run: node tests/Erasure/run.mjs
-        if: matrix.engine != 'redis' && matrix.engine != 'memcached'
+        if: env.RUN_DATABASES == 'true' && (matrix.database.connection != 'redis' && matrix.database.connection != 'memcached')
         env:
-          API_KEYS_ERASURE_DB_ENGINE: ${{ matrix.engine }}
+          API_KEYS_ERASURE_DB_ENGINE: ${{ matrix.database.connection }}
           API_KEYS_ERASURE_DB_PASSWORD: password
 
   # CacheAttemptLimiter's store branches need live Redis and Memcached, so its
@@ -292,12 +389,17 @@ jobs:
     name: mutate (cache limiter)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [package-matrix, validation-plan]
+    env:
+      RUN_CACHE_MUTATION: ${{ needs.validation-plan.outputs.mutate-scope == 'all' || contains(fromJSON(needs.package-matrix.outputs.mutate-classes), 'src/CacheAttemptLimiter.php') }}
     steps:
       - name: Checkout
+        if: env.RUN_CACHE_MUTATION == 'true'
         # actions/checkout@v4.1.1
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Setup PHP
+        if: env.RUN_CACHE_MUTATION == 'true'
         # shivammathur/setup-php@2.40.0
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
         with:
@@ -307,13 +409,15 @@ jobs:
           extensions: redis, memcached
 
       - name: Install dependencies
+        if: env.RUN_CACHE_MUTATION == 'true'
         run: composer update --no-interaction --prefer-dist
 
       - name: Start Redis and Memcached
+        if: env.RUN_CACHE_MUTATION == 'true'
         run: |
           docker run -d --name limiter-redis -p 6379:6379 redis:7
           docker run -d --name limiter-memcached -p 11211:11211 memcached:1.6
-          for attempt in $(seq 1 30); do
+          for _attempt in $(seq 1 30); do
             if docker exec limiter-redis redis-cli ping | grep -q PONG && (echo > /dev/tcp/127.0.0.1/11211) 2>/dev/null; then
               exit 0
             fi
@@ -323,6 +427,7 @@ jobs:
           exit 1
 
       - name: Pest mutate (CacheAttemptLimiter, min 95)
+        if: env.RUN_CACHE_MUTATION == 'true'
         env:
           API_KEYS_LIMITER_STORE: both
           MUTATE_ONLY: Qiick\ApiKeys\CacheAttemptLimiter
@@ -352,3 +457,24 @@ jobs:
     with:
       standards: true
       registry: false
+
+  nightly-failure:
+    needs: [tests, databases, mutation-gate, standards]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Report a failed nightly gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="ci: investigate failed nightly package checks ($(date -u +%F))"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "\"$title\" in:title" --json title --jq '.[].title')
+          if [ "$existing" != "$title" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+              --body "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+              --label ci --label priority:P1
+          fi

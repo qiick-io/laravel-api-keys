@@ -8,6 +8,10 @@
 
 # qiick/laravel-api-keys
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/qiick-io/laravel-api-keys/badge)](https://scorecard.dev/viewer/?uri=github.com/qiick-io/laravel-api-keys)
+
+PHPStan at `max` and the existing CI checks cover PHP. CodeQL covers GitHub Actions and JavaScript/TypeScript.
+
 > **Pre-release (0.x).** The public API may still change before 1.0.0: pin an exact version and read UPGRADING.md when you update.
 
 Contract-only API key mechanics for qiick Laravel products: token issue/parse/verify,
@@ -24,7 +28,7 @@ Part of the qiick fleet. Binding design:
 
 ## Status
 
-Beta `0.3.0-beta.3`. Public APIs may change in any 0.x release; see
+Beta `0.3.0-beta.4`. Public APIs may change in any 0.x release; see
 [UPGRADING.md](./UPGRADING.md). Pin an exact version.
 
 ## Requirements
@@ -35,7 +39,7 @@ Beta `0.3.0-beta.3`. Public APIs may change in any 0.x release; see
 ## Install
 
 ```bash
-composer require qiick/laravel-api-keys:0.3.0-beta.3
+composer require qiick/laravel-api-keys:0.3.0-beta.4
 php artisan vendor:publish --tag=api-keys-config
 ```
 
@@ -47,7 +51,7 @@ Set `API_KEYS_PRODUCT_PREFIX` (three-letter product code) before issuing tokens.
 | --- | --- |
 | Proxies | `KeyContext::ip` / `ClientIp::from` MUST use `Request::ip()` only after `TrustProxies` is configured correctly. Never pass raw `X-Forwarded-For` / `X-Real-IP` from untrusted clients. |
 | Enumeration | Format-miss and hash-miss return the **same** `401 invalid_token` body/headers. A dummy `hash_equals` runs when no candidates match. Pre-auth `FailedAttemptLimiter` is default-on in recipes. The public `key_prefix` is non-secret by design. |
-| Failed-attempt brake | Buckets IPv4 by `/32` and IPv6 by `/64`. IPv4-mapped (`::ffff:a.b.c.d`) expands to dotted IPv4 before bucketing (same path as `IpAllowlist`). Null/empty/unparseable client IPs **skip** the brake (never share one bucket — that would lock out everyone behind a misconfigured proxy). Repository/infra exceptions are **not** counted. The brake counts only failed guesses (one atomic `AttemptLimiter::hit` each), so valid requests in flight never take a slot. Once the bucket is full, a guess over the limit **and** a correct key are both answered `429 rate_limit_exceeded`, so racing guesses reveal at most the limit's worth of outcomes per window. Shared egress / NAT: many clients behind one public IP share one bucket and can lock each other out; keep the recipe default **on** (20/min) and raise only with a clear threat model. Wire after `TrustProxies` so `KeyContext::ip` is the real client, not the LB. An IPv6 /64 per bucket leaves an attacker holding a /48 65,536 buckets: pass `maxPerMinutePerIpv6Slash48` (at least 1) for a second tier over the whole /48. |
+| Failed-attempt brake | Buckets IPv4 by `/32` and IPv6 by `/64`. IPv4-mapped (`::ffff:a.b.c.d`) expands to dotted IPv4 before bucketing (same path as `IpAllowlist`). Null/empty/unparseable client IPs **skip** the brake (never share one bucket — that would lock out everyone behind a misconfigured proxy). Repository/infra exceptions are **not** counted. The brake counts only failed guesses, so valid requests in flight never take a slot. Once the bucket is full, a guess over the limit **and** a correct key are both answered HTTP 429, subject to the cache store and window-start behavior under [Quotas](#quotas-minute--day--month). Shared egress / NAT: many clients behind one public IP share one bucket and can lock each other out; keep the recipe default **on** (20/min) and raise only with a clear threat model. Wire after `TrustProxies` so `KeyContext::ip` is the real client, not the LB. An IPv6 /64 per bucket leaves an attacker holding a /48 65,536 buckets: pass `maxPerMinutePerIpv6Slash48` (at least 1) for a second tier over the whole /48. |
 | Redaction | Presented tokens / Bearer values MUST NEVER appear in exception messages, JSON bodies, logs, telemetry, activity properties, or `__debugInfo`. |
 | Scopes | Fail-closed: whitespace, wrong case, duplicates, or non-vocabulary values → empty set → `403 insufficient_scope` (never 401). |
 | Audit | Activity under a key carries `api_key_id` = the key’s **public UUID** via `Audit::withApiKeyId` (never the internal bigint; lowercase UUID; rejects non-UUID, nil UUID, and a conflicting existing `api_key_id`). |
@@ -80,8 +84,7 @@ and `X-RateLimit-Reset`; `X-RateLimit-Reset` is the number of **seconds** until
 the window resets (like `Retry-After`), not an epoch timestamp.
 Durable calendar quotas are LATER (standards review L4).
 
-Limits hold under concurrency: the authenticator counts a request first with
-`AttemptLimiter::hit()`, one atomic increment that returns the new count, and
+The authenticator counts a request first with `AttemptLimiter::hit()` and
 refuses it when that count is over the limit. A refused request hands back the
 hits it took on every window, so it counts against none of them. It never
 checks and then counts in two steps.
@@ -123,7 +126,7 @@ $this->app->singleton(AttemptLimiter::class, fn () => new CacheAttemptLimiter(Ca
 
 `api-keys:notify-expiring` takes a CAS lease on `expiry_notice_claimed_at`
 before sending, with a fresh random `expiry_notice_claim_token`, for the
-`expires_at` it selected. It stamps `expiry_notified_at` only after a
+`expires_at` it selected, while the key is still non-revoked. It stamps `expiry_notified_at` only after a
 successful send, and only while the row still holds that token and expiry (see
 `ExpiryNoticeClaimSql`). A run whose lease expired therefore cannot mark or
 release the next run's claim, and a key rotated in between is not stamped as
@@ -186,7 +189,7 @@ final class RevokeExposedKey implements CompromisedKeyRevoker
             'revoked_reason' => RevocationReason::Exposure->value,
         ]);
 
-        event(new ApiKeyExposed($record->publicId(), $exposureSource, $exposedAt));
+        event(new ApiKeyExposedEvent($record->publicId(), $exposureSource, $exposedAt));
     }
 }
 ```
@@ -290,12 +293,16 @@ up only if false lockouts outweigh credential-stuffing risk.
 
 Refusals are `ApiKeyRejection`: `401 invalid_token` and `403 insufficient_scope`
 carry RFC 6750 `WWW-Authenticate`; `403 ip_not_allowed`, `403 request_not_allowed`,
-and rate-limit responses do not. Every `insufficient_scope` names the scope the
+and rate-limit responses do not. Pass an empty string to the authenticator when
+the extractor returns `null`. This case uses `ApiKeyRejection::missingToken()`
+and challenges with `Bearer realm="api-keys"` without an `error` parameter
+(RFC 6750 §3.1). The JSON still carries `invalid_token` and the failed-attempt
+brake still counts the refusal. Every `insufficient_scope` names the scope the
 request required (`scope="items:write"`, and `scope` in the JSON) when there is
 one. With `api-keys.resource_metadata_url` set to your RFC 9728
-protected-resource metadata (absolute https), both challenges also carry
-`resource_metadata="<url>"`, as the MCP authorization spec asks. When the attempt store (Redis, Memcached) is
-down, the request fails closed as `503 service_unavailable` (the cause goes to
+protected-resource metadata (absolute https), Bearer challenges also carry
+`resource_metadata="<url>"`, as the MCP authorization spec asks. When the
+configured attempt store fails, the request fails closed as `503 service_unavailable` (the cause goes to
 the exception reporter), never a bare 500. Format-miss and hash-miss share the same
 body/headers. Presented tokens are `#[SensitiveParameter]` and never appear in
 messages, `render()`, `__debugInfo`, JSON, or serialize output.
@@ -316,7 +323,7 @@ A matcher is used only when `isAccepting($now) && now < min(config, acceptUntil(
 `prefixOf` must also recognise the bare stored `key_prefix` so rotation can migrate
 the row. `legacyMatcherFor` returns null for canonical tokens.
 
-Dispatch `Events\LegacyTokenUsed` only after **successful** authentication, using
+Dispatch `Events\LegacyTokenUsedEvent` only after **successful** authentication, using
 `AuthenticationResult::$legacyMatcherClass`:
 
 ```php
@@ -333,13 +340,13 @@ final class EkLegacyTokenMatcher implements LegacyTokenMatcher { /* ... */ }
 
 $result = $authenticator->authenticate($presented, $context);
 if ($result->legacyMatcherClass !== null) {
-    event(new LegacyTokenUsed(
+    event(new LegacyTokenUsedEvent(
         $result->record->keyPrefix(),
         $result->legacyMatcherClass,
         /* matcher acceptUntil from your registry */,
     ));
 }
-event(new ApiKeyAuthenticated(
+event(new ApiKeyAuthenticatedEvent(
     $result->record->publicId(), // the public UUID, never the internal row id
     $result->record->keyPrefix(),
     $result->usedPreviousSecret,
@@ -384,7 +391,8 @@ across PHP 8.3/8.4/8.5 × Laravel 12/13.
 
 ## Security
 
-Private vulnerability reporting: see [SECURITY.md](./SECURITY.md).
+See the [security checklist](./docs/security-checklist.md) for the tests behind
+these guarantees and [SECURITY.md](./SECURITY.md) for private reporting.
 
 ## License
 

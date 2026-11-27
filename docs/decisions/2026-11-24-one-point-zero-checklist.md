@@ -4,9 +4,30 @@ Team Leader bot, 2026-11-24, under Luca's rule "standard and safe". Taken from t
 comparison of this package with the qiick packages 1.0 checklist and the standards
 review of the package.
 
+## Mutation scope checked again on 2026-11-27
+
+The complete inventory has 49 targets, including `Erasure/ApiKeysEraser` and
+the cache limiter in its real-store job. Discovery excludes interfaces in any
+namespace, methodless enums and test doubles. It selects the exact PSR-4 file
+for each class, trait or executable enum. Unknown or misspelled targets fail.
+An empty changed-file plan can pass without invoking Pest.
+
+The audited run reported no generated mutations for the constructor-only
+authentication result and six events and for the empty organisation-scope
+exception. The gate reports those as having no generated mutations, with no
+percentage. Every file for which Pest generates mutations must reach 95%.
+
+Line-level exceptions cover semantically equivalent boundaries, redundant
+work on the decoded JSON path, timing-only comparisons covered by the
+comparison probe, and integer constant declarations that Pest cannot
+attribute to a test line. The constants have direct value or boundary tests
+in `TokenCodecTest`, `RotationServiceTest` and `KeyRestrictionsTest`.
+
+## Original decisions
+
 | Item | Decision | Why |
 | --- | --- | --- |
-| F8 Scanner adapter for `CompromisedKeyRevoker` | **LATER** (additive after 1.0). The package keeps the seam and the `ApiKeyExposed` recipe in the README. | A secret-scanning partner callback is a product route with the scanner's signature verification and its own secrets; the seam and the event are the stable contract, and an adapter adds nothing to the schema or the API. |
+| F8 Scanner adapter for `CompromisedKeyRevoker` | **LATER** (additive after 1.0). The package keeps the seam and the `ApiKeyExposedEvent` recipe in the README. | A secret-scanning partner callback is a product route with the scanner's signature verification and its own secrets; the seam and the event are the stable contract, and an adapter adds nothing to the schema or the API. |
 | F12 Maximum lifetime on issue | **Before 1.0, option (a):** public `LifetimeAssertion::assertAllows()` plus a README recipe that the product calls before inserting a key; `RotationService` uses the same assertion. | Issuance is product-owned (`TokenCodec::issue()` writes nothing), so an `IssuanceService` would add contract for little gain. One assertion gives one refusal for both paths. It is a static helper, not a method on `LifetimePolicy`, so implementations of the interface do not change. |
 | F13 UTC timestamps | **Before 1.0:** `php artisan api-keys:check` fails when `app.timezone` is not `UTC`. | Expiry, grace and claim-lease comparisons assume UTC (RFC 3339 on the wire); a deploy-time check catches a misconfigured app without breaking every artisan command. |
 | L3 Day/month buckets | **Changed:** counted by the package's atomic `CacheAttemptLimiter` (Lua on Redis, `add` + `increment` on Memcached), not by Laravel's `RateLimiter` as the standards review said. | Proven in the review of #28: `RateLimiter::increment()` recreates counters with a non-atomic `put()` and the database store is not atomic, so 50 parallel attempts against a limit of 10 let up to 36 through, and late decrements left counters negative. **Superseded 2026-11-25** (#59, maintainer's decision): Laravel's `RateLimiter` on any store, with the window-start race accepted and bounded in docs/security.md. |

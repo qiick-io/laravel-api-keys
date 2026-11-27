@@ -21,6 +21,20 @@ it('renders invalid_token as 401 with RFC 6750 WWW-Authenticate (A11)', function
         ]);
 });
 
+it('keeps the JSON error and advertises configured metadata in a missing-token challenge', function (): void {
+    $url = 'https://api.example.com/.well-known/oauth-protected-resource';
+    ApiKeyRejection::setResourceMetadataUrl($url);
+
+    $response = ApiKeyRejection::missingToken()->render();
+
+    expect($response->getStatusCode())->toBe(401)
+        ->and($response->headers->get('WWW-Authenticate'))->toBe('Bearer realm="api-keys", resource_metadata="'.$url.'"')
+        ->and($response->getData(true))->toBe([
+            'message' => 'The API key is not valid.',
+            'error' => 'invalid_token',
+        ]);
+});
+
 it('renders insufficient_scope with scope in body and challenge (A11)', function (): void {
     $rejection = ApiKeyRejection::insufficientScope('items:write');
     $response = $rejection->render();
@@ -80,7 +94,7 @@ it('renders rateLimited as 429 with Retry-After and optional X-RateLimit headers
     $response = $rejection->render();
 
     expect($rejection->getStatusCode())->toBe(429)
-        ->and($rejection->errorCode())->toBe('rate_limit_exceeded')
+        ->and($rejection->errorCode())->toBe('too_many_requests')
         ->and($response->headers->get('Retry-After'))->toBe('42')
         ->and($response->headers->get('X-RateLimit-Limit'))->toBe('60')
         ->and($response->headers->get('X-RateLimit-Remaining'))->toBe('0')
@@ -94,7 +108,7 @@ it('renders rateLimited as 429 with Retry-After and optional X-RateLimit headers
         ])
         ->and($response->getData(true))->toBe([
             'message' => 'Too many requests.',
-            'error' => 'rate_limit_exceeded',
+            'error' => 'too_many_requests',
         ]);
 });
 
@@ -125,7 +139,7 @@ it('exposes KeyRejectionCode values used by the fleet contract', function (): vo
     expect(KeyRejectionCode::InvalidToken->value)->toBe('invalid_token')
         ->and(KeyRejectionCode::InsufficientScope->value)->toBe('insufficient_scope')
         ->and(KeyRejectionCode::IpNotAllowed->value)->toBe('ip_not_allowed')
-        ->and(KeyRejectionCode::RateLimitExceeded->value)->toBe('rate_limit_exceeded');
+        ->and(KeyRejectionCode::RateLimitExceeded->value)->toBe('too_many_requests');
 });
 
 it('redacts debug info to status, error, message and scope only', function (): void {

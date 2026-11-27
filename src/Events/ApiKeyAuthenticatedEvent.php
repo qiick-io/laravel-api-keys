@@ -11,7 +11,7 @@ use Qiick\ApiKeys\ApiKeyAuthenticator;
  *
  * Payload never includes the plaintext token. `$apiKeyId` is the public UUID.
  */
-final class ApiKeyAuthenticated
+final class ApiKeyAuthenticatedEvent
 {
     public function __construct(
         public string $apiKeyId,

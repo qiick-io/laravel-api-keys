@@ -12,7 +12,7 @@ use Qiick\ApiKeys\Contracts\ApiKeyRepository;
 use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\ExpiryRecipientResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
-use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSent;
+use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSentEvent;
 use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
 use Qiick\ApiKeys\Testing\FakeApiKeyRepository;
 use Qiick\ApiKeys\Testing\FakeExpiryRecipientResolver;
@@ -102,20 +102,20 @@ it('does not consume the warning when no recipient resolves yet', function (): v
 it('releases the claim when the send fails, so the next run retries', function (): void {
     $notifiable = legacyWarningNotifiable();
     bindLegacyWarningCommand([$notifiable]);
-    Event::fake([ApiKeyLegacyFormatWarningSent::class]);
+    Event::fake([ApiKeyLegacyFormatWarningSentEvent::class]);
     config(['api-keys.legacy.warning_notification' => ThrowingLegacyFormatWarningNotification::class]);
 
     $this->artisan(NotifyExpiringApiKeysCommand::class)
         ->expectsOutputToContain('Legacy-format warning failed for '.LEGACY_WARNING_PUBLIC_ID)
         ->assertSuccessful();
-    Event::assertNotDispatched(ApiKeyLegacyFormatWarningSent::class);
+    Event::assertNotDispatched(ApiKeyLegacyFormatWarningSentEvent::class);
 
     Notification::fake();
     config(['api-keys.legacy.warning_notification' => ApiKeyLegacyFormatWarningNotification::class]);
     $this->artisan(NotifyExpiringApiKeysCommand::class)->assertSuccessful();
 
     Notification::assertSentToTimes($notifiable, ApiKeyLegacyFormatWarningNotification::class, 1);
-    Event::assertDispatched(ApiKeyLegacyFormatWarningSent::class);
+    Event::assertDispatched(ApiKeyLegacyFormatWarningSentEvent::class);
 });
 
 it('lets the warning be reclaimed once a dead worker\'s lease has expired', function (): void {

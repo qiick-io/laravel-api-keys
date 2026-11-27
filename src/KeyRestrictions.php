@@ -209,7 +209,8 @@ final readonly class KeyRestrictions
                 return null;
             }
 
-            $mode = $entry['mode'] ?? 'allow';
+            $mode = array_key_exists('mode', $entry) ? $entry['mode'] : 'allow';
+
             if ($mode !== 'allow') {
                 return null;
             }

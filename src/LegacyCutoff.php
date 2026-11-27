@@ -14,6 +14,16 @@ namespace Qiick\ApiKeys;
  */
 final class LegacyCutoff
 {
+    public const string WARNING_KEY_PREFIX = 'api-keys:legacy-format-warning:';
+
+    public const string WARNING_LEASE_SUFFIX = ':lease';
+
+    /** The warning command and eraser address the same sent marker. */
+    public static function warningKey(#[\SensitiveParameter] string $publicId, \DateTimeImmutable $acceptUntil): string
+    {
+        return self::WARNING_KEY_PREFIX.$publicId.':'.$acceptUntil->format(\DateTimeInterface::ATOM);
+    }
+
     /**
      * @return \DateTimeImmutable|null null when unset (null or empty)
      *

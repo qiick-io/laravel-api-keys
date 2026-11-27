@@ -13,6 +13,66 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+## [0.3.0-beta.4] - 2026-11-27
+
+Fourth beta: fleet names for events and rate-limit errors, a credential-free
+Bearer challenge, and an explicit adoption contract for 1.0. **0.x may still
+break;** read UPGRADING.md before adopting: events were renamed, 429 responses
+use a new error code, and four adopters have product-specific steps.
+
+Public Suffix List: unchanged since 0.3.0-beta.3.
+
+### Added
+
+- `ApiKeysEraser` and `ApiKeyErasureRepositoryContract` implement the fleet
+  erasure contract, with conformance tests and `SubjectErasedEvent` (#44, #87).
+- The adoption guide fixes the reference schema and the product upgrade
+  contract, with adopter-specific steps for Excubia, Signaculum, Instituta and
+  Externa (#97, #101).
+- CI uses the shared package compatibility matrix and gates mutation coverage
+  for every executable source file (#96, #98, #102, #103).
+
+### Changed
+
+- Public API key event classes now end in `Event` (F5). Update listener
+  registrations and event type hints using the mapping in UPGRADING.md
+  (#93, #99).
+- **Breaking response change:** HTTP 429 responses use `too_many_requests` in
+  the fleet JSON error shape (F11). Update clients and response tests as
+  described in UPGRADING.md (#94, #100).
+
+### Fixed
+
+- Requests without a Bearer token now receive a `401` challenge with
+  `realm="api-keys"` and optional `resource_metadata`, without the `error`
+  parameter (RFC 6750 §3.1). The authenticator uses the new
+  `ApiKeyRejection::missingToken()` factory and keeps the `invalid_token` JSON
+  response and failed-attempt count (#89, #90).
+- Expiry notices skip keys revoked between selection and claim (#86, #92).
+
+### Security
+
+- Resource restrictions with an explicitly null mode now deny the key (#88,
+  #91).
+
+### Upgrade notes
+
+- Update event imports, listener registrations, dispatchers and fakes to the
+  `...Event` names in [UPGRADING.md](./UPGRADING.md#event-names-after-030-beta3)
+  (F5), and drain queued jobs still carrying the old classes.
+- Update clients, middleware, monitoring rules and response tests to read
+  `too_many_requests` from HTTP 429 JSON errors (F11). Accept
+  `rate_limit_exceeded` too while older deployments are still rolling out.
+- Update challenge assertions: a missing Bearer token now gets `401` with
+  `WWW-Authenticate: Bearer realm="api-keys"`, no `error` parameter, and
+  `resource_metadata` when configured; the JSON still reports `invalid_token`.
+- Products with a custom expiry-notice claim query must add
+  `revoked_at IS NULL` to the atomic claim. Repair explicitly null resource
+  modes before deploying the stricter decoder.
+- Follow the [product adoption steps](./UPGRADING.md#product-adoption-for-10),
+  including the ones for Excubia, Signaculum, Instituta and Externa, and bind
+  `ApiKeyErasureRepositoryContract` for the fleet erasure orchestrator.
+
 ## [0.3.0-beta.3] - 2026-11-26
 
 Third beta: fail-closed JSON shapes and literal `null`, the expiry-notice claim
@@ -376,7 +436,8 @@ First pre-release. The API may still change before 1.0.0; see UPGRADING.md.
   (PHP 8.3/8.4/8.5 × Laravel 12/13 × lowest/stable) with `composer validate
   --strict`, `composer audit`, and SHA-pinned Actions.
 
-[Unreleased]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.3...HEAD
+[Unreleased]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.4...HEAD
+[0.3.0-beta.4]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.3...v0.3.0-beta.4
 [0.3.0-beta.3]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.2...v0.3.0-beta.3
 [0.3.0-beta.2]: https://github.com/qiick-io/laravel-api-keys/compare/v0.3.0-beta.1...v0.3.0-beta.2
 [0.3.0-beta.1]: https://github.com/qiick-io/laravel-api-keys/compare/v0.2.0...v0.3.0-beta.1

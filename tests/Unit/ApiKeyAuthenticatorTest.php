@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Schema;
@@ -15,6 +17,8 @@ use Qiick\ApiKeys\Contracts\AttemptLimiter;
 use Qiick\ApiKeys\Contracts\UsageSideEffect;
 use Qiick\ApiKeys\Exceptions\ApiKeyRejection;
 use Qiick\ApiKeys\FailedAttemptLimiter;
+use Qiick\ApiKeys\Http\BearerTokenExtractor;
+use Qiick\ApiKeys\Http\KeyContextFactory;
 use Qiick\ApiKeys\IpAllowlist;
 use Qiick\ApiKeys\KeyContext;
 use Qiick\ApiKeys\RateLimitDecision;
@@ -255,6 +259,36 @@ it('accepts the previous secret inside the grace window (A3)', function (): void
         ->and($result->record->id())->toBe('7');
 });
 
+it('challenges a request without credentials without a Bearer error and still counts the refusal', function (): void {
+    $failures = new FakeAttemptLimiter;
+    $fixture = authenticator([
+        'failedLimiter' => new FailedAttemptLimiter($failures, maxPerMinute: 2),
+    ]);
+    $extractor = new BearerTokenExtractor;
+    $ip = '203.0.113.10';
+
+    $challenge = function (Request $request) use ($extractor, $fixture): JsonResponse {
+        try {
+            $fixture['auth']->authenticate($extractor->fromRequest($request) ?? '', KeyContextFactory::fromRequest($request));
+            $this->fail('expected an authentication refusal');
+        } catch (ApiKeyRejection $rejection) {
+            return $rejection->render();
+        }
+    };
+
+    $missing = $challenge(Request::create('/', server: ['REMOTE_ADDR' => $ip]));
+    $malformed = $challenge(Request::create('/', server: [
+        'REMOTE_ADDR' => $ip,
+        'HTTP_AUTHORIZATION' => 'Bearer malformed',
+    ]));
+
+    expect($missing->getStatusCode())->toBe(401)
+        ->and($missing->headers->get('WWW-Authenticate'))->toBe('Bearer realm="api-keys"')
+        ->and($missing->getData(true))->toBe($malformed->getData(true))
+        ->and($malformed->headers->get('WWW-Authenticate'))->toBe('Bearer error="invalid_token"')
+        ->and($failures->hitsFor('api-key-failures:v4:'.$ip))->toBe(2);
+});
+
 it('returns identical invalid_token for format-miss and hash-miss (A2b)', function (): void {
     $fixture = authenticator(['defaultRate' => 0]);
 
@@ -473,7 +507,7 @@ it('rate-limits with default api-key:{id} bucket and rejects over limit (A17)', 
         $this->fail('expected rate limit');
     } catch (ApiKeyRejection $rejection) {
         expect($rejection->getStatusCode())->toBe(429)
-            ->and($rejection->errorCode())->toBe('rate_limit_exceeded')
+            ->and($rejection->errorCode())->toBe('too_many_requests')
             ->and($rejection->render()->headers->get('Retry-After'))->not->toBeNull();
     }
 });
@@ -675,7 +709,7 @@ it('prefers the record rate_limit_per_minute over the package default', function
         $auth['auth']->authenticate($fixture['token'], keyContext());
         $this->fail('expected rate limit');
     } catch (ApiKeyRejection $rejection) {
-        expect($rejection->errorCode())->toBe('rate_limit_exceeded');
+        expect($rejection->errorCode())->toBe('too_many_requests');
     }
 });
 
@@ -991,7 +1025,7 @@ it('applies the pre-auth failed-attempt limiter on 401 paths (A15)', function ()
         $fixture['auth']->authenticate($fixture['token'], keyContext('203.0.113.10'));
         $this->fail('expected rate limit');
     } catch (ApiKeyRejection $rejection) {
-        expect($rejection->errorCode())->toBe('rate_limit_exceeded')
+        expect($rejection->errorCode())->toBe('too_many_requests')
             ->and($rejection->getStatusCode())->toBe(429);
     }
 });
@@ -1525,9 +1559,9 @@ it('answers rate_limited, never the real outcome, once the failed-attempt bucket
     expect($outcome($fixture['token']))->toBe('authenticated')
         ->and($outcome('bad-1'))->toBe('invalid_token')
         ->and($outcome('bad-2'))->toBe('invalid_token')
-        ->and($outcome('bad-3'))->toBe('rate_limit_exceeded')
+        ->and($outcome('bad-3'))->toBe('too_many_requests')
         // A correct key is not revealed while the bucket is full.
-        ->and($outcome($fixture['token']))->toBe('rate_limit_exceeded')
+        ->and($outcome($fixture['token']))->toBe('too_many_requests')
         ->and($failures->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(2);
 });
 

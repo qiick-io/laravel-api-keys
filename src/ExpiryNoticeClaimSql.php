@@ -8,10 +8,10 @@ namespace Qiick\ApiKeys;
  * @api Portable SQL for the expiry-notice claim lease (products / engine smoke).
  *
  * Claim sets `expiry_notice_claimed_at` and `expiry_notice_claim_token` only
- * when the notice is still unsent, the row still has the `expires_at` the
- * command selected, and it is either unclaimed or the prior claim is older than
- * the lease. Mark and release apply only while the row holds that same token
- * and `expires_at`: a run whose lease expired cannot touch the next run's claim,
+ * when the key is still active, the notice is unsent, the row still has the
+ * `expires_at` the command selected, and it is either unclaimed or the prior
+ * claim is older than the lease. Mark and release apply only while the row holds
+ * that same token and `expires_at`: a run whose lease expired cannot touch the next run's claim,
  * and a rotation in between is never stamped as notified.
  *
  * `expires_at` is matched within {@see expiryWindow()}, not by equality, so a
@@ -35,6 +35,7 @@ final class ExpiryNoticeClaimSql
             CREATE TABLE api_keys (
                 uuid TEXT PRIMARY KEY NOT NULL,
                 expires_at TEXT NULL,
+                revoked_at TEXT NULL,
                 expiry_notified_at TEXT NULL,
                 expiry_notice_claimed_at TEXT NULL,
                 expiry_notice_claim_token TEXT NULL
@@ -48,6 +49,7 @@ final class ExpiryNoticeClaimSql
             CREATE TABLE api_keys (
                 uuid CHAR(36) PRIMARY KEY NOT NULL,
                 expires_at DATETIME NULL,
+                revoked_at DATETIME NULL,
                 expiry_notified_at DATETIME NULL,
                 expiry_notice_claimed_at DATETIME NULL,
                 expiry_notice_claim_token VARCHAR(64) NULL
@@ -61,6 +63,7 @@ final class ExpiryNoticeClaimSql
             CREATE TABLE api_keys (
                 uuid UUID PRIMARY KEY NOT NULL,
                 expires_at TIMESTAMPTZ NULL,
+                revoked_at TIMESTAMPTZ NULL,
                 expiry_notified_at TIMESTAMPTZ NULL,
                 expiry_notice_claimed_at TIMESTAMPTZ NULL,
                 expiry_notice_claim_token VARCHAR(64) NULL
@@ -99,6 +102,7 @@ final class ExpiryNoticeClaimSql
             SET expiry_notice_claimed_at = ?, expiry_notice_claim_token = ?
             WHERE uuid = ?
               AND expires_at >= ? AND expires_at <= ?
+              AND revoked_at IS NULL
               AND expiry_notified_at IS NULL
               AND (
                   expiry_notice_claimed_at IS NULL

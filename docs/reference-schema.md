@@ -4,17 +4,17 @@ This package ships **no migrations**. Products own Eloquent models and tables.
 The columns below are the fleet contract for adoption (see the approved
 `laravel-api-keys-standards-review` knowledge note, 2026-11-22).
 
-Excubia, signaculum and instituta (pre-1.0) write this into their
-`create_api_keys` migrations. Externa adds it additively after the package is
-stable `1.0.0`. Instituta may keep `uuid` as the primary key as a declared
-divergence: there `id` is the public id.
+Excubia, Signaculum and Instituta put this contract in the migrations that
+create their `api_keys` tables while their schema is pre-1.0. Externa adopts
+through additive migrations after the package is stable. See the product steps in
+[UPGRADING.md](../UPGRADING.md#product-adoption-for-10).
 
 ## `api_keys`
 
 | Column | Type | Null | Default | Index | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `id` | bigint unsigned, auto | no | — | PK | Internal only; never leave the database |
-| `uuid` | uuid (v7) | no | generated | unique | Public id; `api_key_id` in audit |
+| `uuid` | uuid (v7) | no | generated | unique | Public id from `ApiKeyRecord::publicId()` and `api_key_id` in audit. The reference uses the adopters' established `uuid` column. |
 | `name` | string(255) | no | — | — | Display name |
 | `description` | text | yes | null | — | Optional longer copy |
 | `key_prefix` | string(32) | no | — | **unique** | Non-secret lookup prefix; names exactly one row |
@@ -26,7 +26,7 @@ divergence: there `id` is the public id.
 | `previous_key_valid_until` | **dateTime** | yes | null | — | Future-dated: never MySQL `TIMESTAMP` |
 | `credential_kind` | string(16) | no | `'api_key'` | index (`credential_kind`, `revoked_at`) | `api_key` or `oauth_grant` |
 | `oauth_client_id` | uuid | yes | null | index | Set iff `credential_kind = oauth_grant` |
-| `owner_principal_id` | FK principals (uuid) | no\* | — | index | Restrict, or null plus a revoke job; never silent cascade |
+| `owner_principal_id` | FK principals (uuid) | no\* | — | index | `restrictOnDelete`; reassign or erase referencing keys before deleting a principal |
 | `created_by` | FK users | yes | null | index | `nullOnDelete` |
 | `scopes` | json | no | — | — | Parsed fail-closed by `ScopeSet` |
 | `ip_allowlist` | json | yes | null | — | A JSON list. SQL NULL or `[]` → allow all; JSON `null`, an object (`{}` included) or anything malformed → deny |
@@ -37,7 +37,7 @@ divergence: there `id` is the public id.
 | `metadata` | json | yes | null | — | Labels under `metadata.labels`; never secrets |
 | `expires_at` | **dateTime** | yes | null | index | Future-dated; index serves the expiry command |
 | `expiry_notified_at` | timestamp | yes | null | — | Final success stamp for expiry notices |
-| `expiry_notice_claimed_at` | timestamp | yes | null | — | In-flight claim lease (app clock); reclaimable after `api-keys.expiry.claim_lease_seconds` (keep above send latency; NTP-sync workers) |
+| `expiry_notice_claimed_at` | timestamp | yes | null | — | In-flight claim lease (app clock); only non-revoked keys can be claimed. Reclaimable after `api-keys.expiry.claim_lease_seconds` (keep above send latency; NTP-sync workers) |
 | `expiry_notice_claim_token` | string(64) | yes | null | — | Token of the in-flight claim (random, from the command). Mark and release match it and the selected `expires_at`, so a run whose lease expired cannot touch the next run's claim and a rotation is never stamped as notified |
 | `last_used_at` | timestamp | yes | null | — | Written via `saveQuietly` |
 | `last_used_ip` | string(45) | yes | null | — | |
@@ -46,13 +46,20 @@ divergence: there `id` is the public id.
 | `exposed_at` | timestamp | yes | null | index | Secret-scanning / manual exposure |
 | `exposure_source` | string(64) | yes | null | — | e.g. `github_secret_scanning`, `manual` |
 | `revoked_at` | timestamp | yes | null | index | Past-event stamp |
-| `revoked_by` | FK users | yes | null | — | `nullOnDelete` |
+| `revoked_by` | FK users | yes | null | index | `nullOnDelete` |
 | `revoked_reason` | string(32) | yes | null | — | Package enum values (below) |
 | `revocation_note` | text | yes | null | — | Free text; never secret material |
 | `created_at`, `updated_at` | timestamp | no | Laravel | — | |
 
-\* NOT NULL where the product has principals. Products without principals yet may
-keep the owner column nullable until the principals programme lands.
+\* Existing products without principals can keep a nullable owner column behind
+their own authorization and revocation adapter. Historic ownerless keys may use
+their product's established policy. Deleting an owner must never silently turn
+an owned key into an authorized ownerless key. Instituta may map its UUID primary
+key to `publicId()` as a declared divergence.
+
+Use case-sensitive comparison for current and previous prefixes and hashes,
+including binary collation on MySQL and MariaDB. Keep the owner and attribution
+indexes explicit so PostgreSQL and SQLite use them too.
 
 ### Value sets (package-backed; products do not invent values)
 
@@ -127,7 +134,8 @@ content stays on the product; labels live under `metadata.labels`. The grant id
   parse time so `app.example.com.evil.com` cannot sneak through.
 - `resources[].type` is an opaque product string. The package validates the
   shape and hands a `ResourceRestrictions` value object to the product.
-- `mode` accepts only `allow` in version 1.
+- `mode` accepts only `allow` in version 1. Omitting it defaults to `allow`.
+  An explicit null mode denies the key.
 - A product keeps **one** authoritative copy of each restriction: either this
   column or its own column, never both written.
 
@@ -154,3 +162,55 @@ Every activity written under a key **must** carry `api_key_id` set to the key's
 Store in UTC. Products assert `app.timezone = UTC` in a conformance check. Wire
 format is RFC 3339. Future-dated columns (`expires_at`,
 `previous_key_valid_until`) use `dateTime`, not MySQL `TIMESTAMP`.
+
+## Personal data erasure
+
+The product's erasure orchestrator resolves `Qiick\ApiKeys\Erasure\ApiKeysEraser`
+from the container. Bind `ApiKeyErasureRepositoryContract` to the product's
+persistence adapter. The existing authentication repository binding is unchanged.
+The eraser uses the adapter's connection and joins an open transaction as a
+savepoint. The reference schema has no organisation discriminator, so a scoped
+call throws `OrganisationScopeUnsupportedException`. Products with that flow
+must erase their organisation-specific credentials using their tenant mapping.
+[Fleet erasure standard](https://github.com/qiick-io/app-ui/blob/v0.15.0/standards/rules/erasure.md)
+
+The adapter and orchestrator have these responsibilities.
+
+- Capture the user's principal and API key UUIDs in the encrypted erasure
+  request before principal cleanup. Keep the original map of owned key UUIDs to
+  internal IDs in that snapshot. Implement `keyIdsFromSnapshot($userPublicId)`
+  on the adapter to read the map from the current request. The eraser uses
+  those IDs for cache cleanup even after the rows have gone, and takes live
+  IDs when the same UUID appears in both maps. Block new writes for the
+  subject and drain in-flight usage and warning work before erasing credentials.
+- Match ownership via the principal directory and the trusted public IDs.
+  Include direct owners on installations without principals. In `delete`
+  mode remove solely owned credentials. In `anonymise` mode keep inert rows:
+  revoke them, discard current and previous token material, replace the key
+  UUID, and unlink the owner (use an unrelated, non-authenticating principal if
+  the foreign key is required). Scrub user attribution, usage IP and agent,
+  claim data, names, notes, metadata, restrictions, and any other personal
+  values. In both modes preserve other owners' keys while unlinking
+  `created_by` and `revoked_by` references. Scrub the supplied identifiers from
+  names, descriptions, metadata and revocation notes even on keys where the
+  subject has no attribution link.
+  The user row belongs to the product's later access step.
+- Suppress model events and identifying diagnostics such as query bindings.
+  Return accurate row counts, including attribution-only updates, with the same
+  counts on a read-only preview. Handle product columns, notification copies,
+  jobs, audit and retention through the product's erasure steps.
+- Cover custom attempt limiter and warning gate bindings, product-defined
+  buckets, stores or prefixes no longer configured, and legacy warning
+  markers and leases from previous cutoff settings. The package clears its
+  default per-key minute, day and month counters and timers on
+  `api-keys.cache_store` (or the default store), and the current-cutoff
+  legacy markers and leases on the default store. Shared pre-auth IP buckets
+  expire after 60 seconds. They can include requests from several users at the
+  same network address, so the eraser leaves them to expire and excludes them
+  from subject retention counts.
+
+After the outermost commit, the eraser clears the cache entries and dispatches
+`SubjectErasedEvent` with aggregate counts. A rollback leaves the cache alone.
+If the cache fails after the database commits, retry from the encrypted
+snapshot. Mark the step done only after the commit and cleanup return. A dry
+run reports prospective counts without erasing or dispatching.

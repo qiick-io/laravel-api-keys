@@ -84,8 +84,8 @@ final class ApiKeyAuthenticator
     }
 
     /**
-     * The evaluation order itself. Every credential failure is the same
-     * `invalid_token` refusal (A2b), which is what the brake counts.
+     * The evaluation order itself. The brake counts `invalid_token` refusals,
+     * including an empty token passed by the HTTP adapter.
      *
      * @throws ApiKeyRejection
      */
@@ -94,6 +94,10 @@ final class ApiKeyAuthenticator
         KeyContext $context,
         ?Scope $requiredScope,
     ): AuthenticationResult {
+        if ($presentedToken === '') {
+            throw ApiKeyRejection::missingToken();
+        }
+
         $clientIp = $context->ip;
 
         $now = $this->clock->now();
@@ -441,8 +445,9 @@ final class ApiKeyAuthenticator
      */
     private function defaultRateLimits(ApiKeyRecord $record): array
     {
+        $bucket = RateLimitDecision::API_KEY_BUCKET_PREFIX.$record->id();
         $decisions = [new RateLimitDecision(
-            bucketKey: 'api-key:'.$record->id(),
+            bucketKey: $bucket,
             maxAttempts: $record->rateLimitPerMinute() ?? $this->defaultRateLimitPerMinute,
             decaySeconds: 60,
         )];
@@ -450,7 +455,7 @@ final class ApiKeyAuthenticator
         $day = $record->rateLimitPerDay();
         if ($day !== null) {
             $decisions[] = new RateLimitDecision(
-                bucketKey: 'api-key:'.$record->id().':day',
+                bucketKey: $bucket.RateLimitDecision::DAY_BUCKET_SUFFIX,
                 maxAttempts: $day,
                 decaySeconds: 86_400,
             );
@@ -459,7 +464,7 @@ final class ApiKeyAuthenticator
         $month = $record->rateLimitPerMonth();
         if ($month !== null) {
             $decisions[] = new RateLimitDecision(
-                bucketKey: 'api-key:'.$record->id().':month',
+                bucketKey: $bucket.RateLimitDecision::MONTH_BUCKET_SUFFIX,
                 maxAttempts: $month,
                 decaySeconds: 2_592_000,
             );

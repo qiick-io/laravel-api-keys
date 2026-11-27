@@ -370,7 +370,7 @@ it('warns when it could claim none of the notices it tried, which a bound format
     ]));
 
     $this->artisan(NotifyExpiringApiKeysCommand::class)
-        ->expectsOutputToContain('None of the 2 expiry notices could be claimed: another run may hold them, or expires_at is bound in a different format or time zone than it is stored (see ExpiryNoticeClaimSql::expiryWindow()).')
+        ->expectsOutputToContain('None of the 2 expiry notices could be claimed. Keys may have been revoked, rotated, or claimed by another run. Check the expires_at binding format and time zone (see ExpiryNoticeClaimSql::expiryWindow()).')
         ->assertSuccessful();
 });
 

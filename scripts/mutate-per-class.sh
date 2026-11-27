@@ -20,9 +20,15 @@ case "${MUTATE_SCOPE:-all}" in
   all) ;;
   changed)
     CHANGED_FILES="$(node -e '
+      const { existsSync } = require("node:fs");
       const paths = JSON.parse(process.argv[1]);
-      if (!Array.isArray(paths) || paths.some(path => typeof path !== "string" || path.includes("\n"))) {
-        throw new TypeError("MUTATE_CLASSES must be a JSON list of single-line paths.");
+      if (!Array.isArray(paths)) {
+        throw new TypeError("MUTATE_CLASSES must be a JSON list.");
+      }
+      for (const path of paths) {
+        if (typeof path !== "string" || !/^src\/(?:\w+\/)*\w+\.php$/.test(path) || !existsSync(path)) {
+          throw new TypeError("Invalid mutation path: " + path);
+        }
       }
       console.log(paths.join("\n"));
     ' "${MUTATE_CLASSES:-[]}")"
@@ -82,8 +88,13 @@ fi
 POSITIONS=("${!CLASSES[@]}")
 
 if [[ -n "${MUTATE_SHARD:-}" ]]; then
-  shard_index="${MUTATE_SHARD%/*}"
-  shard_count="${MUTATE_SHARD#*/}"
+  if [[ ! "${MUTATE_SHARD}" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] ||
+      (( BASH_REMATCH[1] > BASH_REMATCH[2] )); then
+    echo "Invalid mutation shard: ${MUTATE_SHARD}" >&2
+    exit 1
+  fi
+  shard_index="${BASH_REMATCH[1]}"
+  shard_count="${BASH_REMATCH[2]}"
   POSITIONS=()
 
   for position in "${!CLASSES[@]}"; do

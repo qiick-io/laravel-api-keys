@@ -4,6 +4,27 @@ Team Leader bot, 2026-11-24, under Luca's rule "standard and safe". Taken from t
 comparison of this package with the qiick packages 1.0 checklist and the standards
 review of the package.
 
+## Mutation scope checked again on 2026-11-27
+
+The complete inventory has 49 targets, including `Erasure/ApiKeysEraser` and
+the cache limiter in its real-store job. Discovery excludes interfaces in any
+namespace, methodless enums and test doubles. It selects the exact PSR-4 file
+for each class, trait or executable enum. Unknown or misspelled targets fail.
+An empty changed-file plan can pass without invoking Pest.
+
+The audited run reported no generated mutations for the constructor-only
+authentication result and six events and for the empty organisation-scope
+exception. The gate reports those as having no generated mutations, with no
+percentage. Every file for which Pest generates mutations must reach 95%.
+
+Line-level exceptions cover semantically equivalent boundaries, redundant
+work on the decoded JSON path, timing-only comparisons covered by the
+comparison probe, and integer constant declarations that Pest cannot
+attribute to a test line. The constants have direct value or boundary tests
+in `TokenCodecTest`, `RotationServiceTest` and `KeyRestrictionsTest`.
+
+## Original decisions
+
 | Item | Decision | Why |
 | --- | --- | --- |
 | F8 Scanner adapter for `CompromisedKeyRevoker` | **LATER** (additive after 1.0). The package keeps the seam and the `ApiKeyExposedEvent` recipe in the README. | A secret-scanning partner callback is a product route with the scanner's signature verification and its own secrets; the seam and the event are the stable contract, and an adapter adds nothing to the schema or the API. |

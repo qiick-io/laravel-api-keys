@@ -121,6 +121,10 @@ jobs:
       - name: Install dependencies
         run: composer update --no-interaction --prefer-dist
 
+      - name: Verify the mutation inventory
+        if: matrix.shard == 1
+        run: node --test scripts/mutation-inventory.test.mjs
+
       - name: Pest mutate (per-class min 95)
         env:
           MUTATE_SHARD: ${{ matrix.shard }}/4

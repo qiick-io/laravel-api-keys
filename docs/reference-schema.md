@@ -5,8 +5,8 @@ The columns below are the fleet contract for adoption (see the approved
 `laravel-api-keys-standards-review` knowledge note, 2026-11-22).
 
 Excubia, Signaculum and Instituta put this contract in the migrations that
-create their `api_keys` tables while their schema is pre-1.0. Externa adopts through additive
-migrations after the package is stable. See the product steps in
+create their `api_keys` tables while their schema is pre-1.0. Externa adopts
+through additive migrations after the package is stable. See the product steps in
 [UPGRADING.md](../UPGRADING.md#product-adoption-for-10).
 
 ## `api_keys`

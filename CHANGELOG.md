@@ -27,6 +27,10 @@ were added; see UPGRADING.md.
   response and failed-attempt count (#89).
 - Expiry notices skip keys revoked between selection and claim (#86).
 
+### Security
+
+- Resource restrictions with an explicitly null mode now deny the key (#88).
+
 ## [0.3.0-beta.3] - 2026-11-26
 
 Third beta: fail-closed JSON shapes and literal `null`, the expiry-notice claim

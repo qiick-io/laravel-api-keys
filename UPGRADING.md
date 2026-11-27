@@ -4,6 +4,87 @@ This package is **pre-release** (`0.x`). Breaking changes are allowed between
 minor versions while the major is `0`, and each break is recorded here before a
 tagged release.
 
+## Product adoption for 1.0
+
+Use a tagged Packagist version and commit the product lockfile. Remove any
+development alias for the package. On products with an unfrozen schema, fold
+API key changes into the existing migration that creates `api_keys`, then verify
+install from an empty isolated database. For existing data, plan a backfill
+and rollback before changing ownership, uniqueness or column types.
+
+### Every product
+
+- Match the [reference schema](docs/reference-schema.md#api_keys) and keep its
+  UUID separate from the internal key used for cache buckets. Preserve existing
+  token versions and hashes. Write the version from new issuance (2 by default),
+  and store the SHA-256 of the complete token. Persist every rotation field under
+  a row lock, including the previous prefix, hash and expiry. Treat grant rows
+  as `oauth_grant`, with their client UUID, and refuse them on the API-key path.
+- Implement `ApiKeyRecord` and `ApiKeyRepository` around the product's model.
+  Match current and unexpired previous prefixes and return raw stored JSON
+  from the three `raw*()` accessors. Keep nullable SQL columns distinct from
+  JSON literal nulls. Repair explicit null resource modes by restoring the
+  intended rule before deploying the stricter decoder.
+- Apply product permissions and resource restrictions in `KeyAuthorizer`,
+  including the current owner's permissions. Call `LifetimeAssertion` before
+  persisting issuance. Keep write policies, token redaction and the show-once
+  secret flow at the product boundary. Pass the configured failed-attempt brake
+  and the trusted client IP to the authenticator. Run `api-keys:check` on deploy.
+- Missing Bearer credentials now return `401` with `WWW-Authenticate: Bearer
+  realm="api-keys"` and optional `resource_metadata`; the challenge has no
+  `error` parameter. JSON still reports `invalid_token`. Keep invalid, revoked
+  and expired credential challenges on the `invalid_token` path, and update
+  middleware and response tests that used the same challenge for both cases.
+- Update public event imports, registrations and queue handling using the
+  event mapping below.
+- When enabling expiry notices, bind the recipient resolver and schedule the
+  command. Use a single conditional claim update for the selected expiry, lease,
+  unsent notice and non-revoked key. Bind all timestamps as stored in UTC.
+- Bind `ApiKeyErasureRepositoryContract` on the product's writer connection.
+  Capture owned key UUIDs, their internal cache IDs and the principal ID in
+  the encrypted resumable request before principal cleanup. Call `ApiKeysEraser`
+  from the fleet erasure orchestrator. Prove delete, anonymise, attribution-only
+  cleanup and retry, including cache cleanup after commit and product conformance
+  C17. The [erasure contract](docs/reference-schema.md#personal-data-erasure)
+  lists the row fields and compatibility stores the adapter must cover.
+
+### Adopter-specific changes
+
+- **Excubia.** Replace the development alias. The create migration has the
+  restrict/NOT NULL principal owner, version, grace and lease columns. Give
+  the prefix and hash columns binary collation on MySQL and MariaDB, and make
+  `created_at` and `updated_at` non-null. Add `whereNull('revoked_at')` to
+  `ApiKeyRepositoryService::claimExpiryNotice()` in the atomic claim update.
+- **Signaculum.** Update the beta pin. Keep its required expiry and existing
+  principal owner, grant, version, grace and lease columns. Give the prefix
+  and hash columns binary collation on MySQL and MariaDB. Its repository
+  already calls `ExpiryNoticeClaimSql::claim()`, which now checks revocation.
+- **Instituta.** Add the missing reference columns to the `api_keys` block in
+  `2026_11_12_220000_create_instituta_tenancy_and_index_tables.php`. Keep the
+  declared UUID primary-key divergence and map it to `publicId()`. Add the
+  unique hash constraint after checking for existing duplicates. Preserve
+  tenancy columns and enforce the current principal's perimeter and the
+  key's area and path limits in the authorizer.
+- **Externa.** Adopt after stable using forward migrations. Add the reference
+  fields for versions (`token_version`, `hash_algorithm`), previous prefix,
+  credential kind and principal owner. Add description, request restrictions,
+  day and month quotas, metadata, the three expiry notice fields, last-used
+  user agent, rotation timestamp, exposure fields and revocation attribution
+  and notes. Preserve the existing `oauth_client_id` and backfill those rows as
+  `oauth_grant`. Check for duplicate current prefixes before making `key_prefix`
+  unique, and keep comparisons case-sensitive. Backfill nullable `scopes`
+  from the product's existing authorization data before enforcing required
+  scopes. Expand `expires_at` and `previous_key_valid_until` to UTC `dateTime`
+  storage with a rollback-compatible switch. Preserve `ek_` readers by
+  marking those keys token version 0, keeping SHA-256 hashes, binding a legacy
+  matcher with an absolute cutoff and persisting the previous prefix during
+  rotation grace. Keep the nullable owner and existing role authorization in
+  the adapter until their separate transition.
+
+For Excubia and the second adopter, run product CI on the tagged version and
+record at least one week of real use, or one product release cycle, before
+the stable package release.
+
 ## Event names after 0.3.0-beta.3
 
 Update the imports in `Event::listen()` registrations, listener type hints,

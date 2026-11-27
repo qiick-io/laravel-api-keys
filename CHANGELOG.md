@@ -13,6 +13,11 @@ were added; see UPGRADING.md.
 
 ## [Unreleased]
 
+### Changed
+
+- Public API key event classes now end in `Event`. Update listener registrations
+  and event type hints using the mapping in UPGRADING.md (#93).
+
 ### Fixed
 
 - Requests without a Bearer token now receive a `401` challenge with

@@ -10,7 +10,7 @@ use Qiick\ApiKeys\Contracts\ApiKeyRepository;
 use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\ExpiryRecipientResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
-use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSent;
+use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSentEvent;
 use Qiick\ApiKeys\Notifications\ApiKeyLegacyFormatWarningNotification;
 use Qiick\ApiKeys\Testing\FakeApiKeyRepository;
 use Qiick\ApiKeys\Testing\FakeExpiryRecipientResolver;
@@ -22,7 +22,7 @@ mutates(NotifyExpiringApiKeysCommand::class);
 
 it('N2: warns active token_version 0 keys within warn_days_before accept_until, once', function (): void {
     Notification::fake();
-    Event::fake([ApiKeyLegacyFormatWarningSent::class]);
+    Event::fake([ApiKeyLegacyFormatWarningSentEvent::class]);
 
     $now = new DateTimeImmutable('2026-11-01T00:00:00+00:00');
     $acceptUntil = new DateTimeImmutable('2026-12-01T00:00:00+00:00');
@@ -75,7 +75,7 @@ it('N2: warns active token_version 0 keys within warn_days_before accept_until, 
         ->assertSuccessful();
 
     Notification::assertSentTo($notifiable, ApiKeyLegacyFormatWarningNotification::class);
-    Event::assertDispatched(ApiKeyLegacyFormatWarningSent::class, function (ApiKeyLegacyFormatWarningSent $event) use ($legacy, $acceptUntil): bool {
+    Event::assertDispatched(ApiKeyLegacyFormatWarningSentEvent::class, function (ApiKeyLegacyFormatWarningSentEvent $event) use ($legacy, $acceptUntil): bool {
         return $event->apiKeyId === $legacy->publicId()
             && $event->acceptUntil == $acceptUntil;
     });

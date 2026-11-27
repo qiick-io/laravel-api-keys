@@ -12,8 +12,8 @@ use Qiick\ApiKeys\Contracts\Clock;
 use Qiick\ApiKeys\Contracts\ExpiryRecipientResolver;
 use Qiick\ApiKeys\Contracts\LegacyFormatWarningGate;
 use Qiick\ApiKeys\Contracts\RandomSource;
-use Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSent;
-use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSent;
+use Qiick\ApiKeys\Events\ApiKeyExpiryNoticeSentEvent;
+use Qiick\ApiKeys\Events\ApiKeyLegacyFormatWarningSentEvent;
 use Qiick\ApiKeys\ExpiryRecipient;
 use Qiick\ApiKeys\Laravel\ApiKeysServiceProvider;
 use Qiick\ApiKeys\LegacyCutoff;
@@ -126,7 +126,7 @@ final class NotifyExpiringApiKeysCommand extends Command
                 $this->warn('Expiry notice for '.$record->publicId().' was sent, but its claim was taken by another run or the key\'s expiry changed: not marked as notified.');
             }
 
-            $events->dispatch(new ApiKeyExpiryNoticeSent(
+            $events->dispatch(new ApiKeyExpiryNoticeSentEvent(
                 apiKeyId: $record->publicId(),
                 expiresAt: $expiresAt,
                 notifiedAt: $now,
@@ -215,7 +215,7 @@ final class NotifyExpiringApiKeysCommand extends Command
             }
 
             $legacyWarningGate->markSent($idempotencyKey, $leaseOwner);
-            $events->dispatch(new ApiKeyLegacyFormatWarningSent(
+            $events->dispatch(new ApiKeyLegacyFormatWarningSentEvent(
                 apiKeyId: $record->publicId(),
                 acceptUntil: $acceptUntil,
                 warnedAt: $now,

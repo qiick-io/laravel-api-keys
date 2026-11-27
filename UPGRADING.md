@@ -4,6 +4,23 @@ This package is **pre-release** (`0.x`). Breaking changes are allowed between
 minor versions while the major is `0`, and each break is recorded here before a
 tagged release.
 
+## Event names after 0.3.0-beta.3
+
+Update the imports in `Event::listen()` registrations, listener type hints,
+manual dispatchers, and event fakes and assertions. These classes stay in
+`Qiick\ApiKeys\Events` and carry the same payloads.
+
+| Previous class | Current class |
+| --- | --- |
+| `ApiKeyAuthenticated` | `ApiKeyAuthenticatedEvent` |
+| `ApiKeyExpiryNoticeSent` | `ApiKeyExpiryNoticeSentEvent` |
+| `ApiKeyExposed` | `ApiKeyExposedEvent` |
+| `ApiKeyLegacyFormatWarningSent` | `ApiKeyLegacyFormatWarningSentEvent` |
+| `LegacyTokenUsed` | `LegacyTokenUsedEvent` |
+
+Drain jobs containing the old event objects before deploying the new classes.
+Rebuild Laravel's event cache if the application caches discovered listeners.
+
 ## Every release: Public Suffix List refresh
 
 Origin wildcards are checked against a bundled snapshot of the Public Suffix

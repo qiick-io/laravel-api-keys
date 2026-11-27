@@ -9,7 +9,7 @@ namespace Qiick\ApiKeys\Events;
  *
  * Never carries secret material.
  */
-final class ApiKeyExpiryNoticeSent
+final class ApiKeyExpiryNoticeSentEvent
 {
     public function __construct(
         public string $apiKeyId,

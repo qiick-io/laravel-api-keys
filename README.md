@@ -8,6 +8,10 @@
 
 # qiick/laravel-api-keys
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/qiick-io/laravel-api-keys/badge)](https://scorecard.dev/viewer/?uri=github.com/qiick-io/laravel-api-keys)
+
+PHPStan at `max` and the existing CI checks cover PHP. CodeQL covers GitHub Actions and JavaScript/TypeScript.
+
 > **Pre-release (0.x).** The public API may still change before 1.0.0: pin an exact version and read UPGRADING.md when you update.
 
 Contract-only API key mechanics for qiick Laravel products: token issue/parse/verify,

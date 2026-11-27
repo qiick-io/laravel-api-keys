@@ -20,6 +20,7 @@ were added; see UPGRADING.md.
   parameter (RFC 6750 §3.1). The authenticator uses the new
   `ApiKeyRejection::missingToken()` factory and keeps the `invalid_token` JSON
   response and failed-attempt count (#89).
+- Expiry notices skip keys revoked between selection and claim (#86).
 
 ## [0.3.0-beta.3] - 2026-11-26
 

@@ -16,6 +16,14 @@ authenticating after you upgrade, with no migration. Each CHANGELOG entry says
 whether the list changed; before upgrading, search stored `restrictions` for
 wildcards over the suffixes it names.
 
+## Expiry claims after 0.3.0-beta.3
+
+- Products with a custom `ApiKeyRepository::claimExpiryNotice()` query must
+  add `revoked_at IS NULL` to the same atomic update as the other claim guards.
+  Using `ExpiryNoticeClaimSql::claim()` picks up the condition automatically.
+  Revocation before the claim prevents the send. Once a claim succeeds, the
+  send can already be in flight when revocation commits.
+
 ## From 0.3.0-beta.2 to 0.3.0-beta.3
 
 - **Contract break, `ApiKeyRepository`:** the expiry-notice claim is bound to

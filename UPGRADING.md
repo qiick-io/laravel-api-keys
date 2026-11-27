@@ -33,6 +33,15 @@ authenticating after you upgrade, with no migration. Each CHANGELOG entry says
 whether the list changed; before upgrading, search stored `restrictions` for
 wildcards over the suffixes it names.
 
+## Rate-limit responses after 0.3.0-beta.3
+
+- Update API clients, product middleware, monitoring rules and response tests
+  to read `too_many_requests` in the JSON `error` field of HTTP 429 responses.
+  Clients that also call older deployments should accept `rate_limit_exceeded`
+  during the rollout. `KeyRejectionCode::RateLimitExceeded` keeps its case name
+  and has a new backing value. `Retry-After`, `X-RateLimit-*` and the translation
+  key `api_keys.rate_limit_exceeded` stay the same.
+
 ## Expiry claims after 0.3.0-beta.3
 
 - Products with a custom `ApiKeyRepository::claimExpiryNotice()` query must

@@ -206,7 +206,7 @@ Products may define these keys; each refusal falls back to an English message:
   regex in the README; `token_version` 0 (legacy), 1, 2.
 - Refusal `error` codes: `KeyRejectionCode` backing values; RFC 6750
   `WWW-Authenticate` on `invalid_token` and `insufficient_scope`; `Retry-After`
-  and `X-RateLimit-*` on `rate_limit_exceeded` (`X-RateLimit-Reset` in seconds
+  and `X-RateLimit-*` on `too_many_requests` (`X-RateLimit-Reset` in seconds
   until the reset, not an epoch timestamp); `503 service_unavailable` when the
   attempt store is down.
 - `ApiKeyRejection::missingToken()` returns `401` with the `invalid_token` JSON

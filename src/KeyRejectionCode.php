@@ -13,6 +13,6 @@ enum KeyRejectionCode: string
     case InsufficientScope = 'insufficient_scope';
     case IpNotAllowed = 'ip_not_allowed';
     case RequestNotAllowed = 'request_not_allowed';
-    case RateLimitExceeded = 'rate_limit_exceeded';
+    case RateLimitExceeded = 'too_many_requests';
     case ServiceUnavailable = 'service_unavailable';
 }

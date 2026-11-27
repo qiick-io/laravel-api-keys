@@ -17,6 +17,8 @@ were added; see UPGRADING.md.
 
 - Public API key event classes now end in `Event`. Update listener registrations
   and event type hints using the mapping in UPGRADING.md (#93).
+- **Breaking response change:** HTTP 429 responses use `too_many_requests`.
+  Update clients and response tests as described in UPGRADING.md (#94).
 
 ### Fixed
 

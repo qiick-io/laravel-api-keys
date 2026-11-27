@@ -507,7 +507,7 @@ it('rate-limits with default api-key:{id} bucket and rejects over limit (A17)', 
         $this->fail('expected rate limit');
     } catch (ApiKeyRejection $rejection) {
         expect($rejection->getStatusCode())->toBe(429)
-            ->and($rejection->errorCode())->toBe('rate_limit_exceeded')
+            ->and($rejection->errorCode())->toBe('too_many_requests')
             ->and($rejection->render()->headers->get('Retry-After'))->not->toBeNull();
     }
 });
@@ -709,7 +709,7 @@ it('prefers the record rate_limit_per_minute over the package default', function
         $auth['auth']->authenticate($fixture['token'], keyContext());
         $this->fail('expected rate limit');
     } catch (ApiKeyRejection $rejection) {
-        expect($rejection->errorCode())->toBe('rate_limit_exceeded');
+        expect($rejection->errorCode())->toBe('too_many_requests');
     }
 });
 
@@ -1025,7 +1025,7 @@ it('applies the pre-auth failed-attempt limiter on 401 paths (A15)', function ()
         $fixture['auth']->authenticate($fixture['token'], keyContext('203.0.113.10'));
         $this->fail('expected rate limit');
     } catch (ApiKeyRejection $rejection) {
-        expect($rejection->errorCode())->toBe('rate_limit_exceeded')
+        expect($rejection->errorCode())->toBe('too_many_requests')
             ->and($rejection->getStatusCode())->toBe(429);
     }
 });
@@ -1559,9 +1559,9 @@ it('answers rate_limited, never the real outcome, once the failed-attempt bucket
     expect($outcome($fixture['token']))->toBe('authenticated')
         ->and($outcome('bad-1'))->toBe('invalid_token')
         ->and($outcome('bad-2'))->toBe('invalid_token')
-        ->and($outcome('bad-3'))->toBe('rate_limit_exceeded')
+        ->and($outcome('bad-3'))->toBe('too_many_requests')
         // A correct key is not revealed while the bucket is full.
-        ->and($outcome($fixture['token']))->toBe('rate_limit_exceeded')
+        ->and($outcome($fixture['token']))->toBe('too_many_requests')
         ->and($failures->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(2);
 });
 

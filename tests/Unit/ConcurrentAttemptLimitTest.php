@@ -77,7 +77,7 @@ it('admits only maxAttempts requests when two requests race on one key bucket', 
     });
     $firstOutcome = concurrentOutcome($authenticate);
 
-    expect([$firstOutcome, $secondOutcome])->toEqualCanonicalizing(['authenticated', 'rate_limit_exceeded'])
+    expect([$firstOutcome, $secondOutcome])->toEqualCanonicalizing(['authenticated', 'too_many_requests'])
         ->and($limiter->inner->hitsFor('api-key:42'))->toBe(1);
 });
 
@@ -109,7 +109,7 @@ it('evaluates only maxPerMinute guesses when two invalid guesses race from one I
     });
     $firstOutcome = concurrentOutcome($authenticate);
 
-    expect([$firstOutcome, $secondOutcome])->toEqualCanonicalizing(['invalid_token', 'rate_limit_exceeded'])
+    expect([$firstOutcome, $secondOutcome])->toEqualCanonicalizing(['invalid_token', 'too_many_requests'])
         ->and($failureLimiter->inner->hitsFor('api-key-failures:v4:203.0.113.10'))->toBe(1);
 });
 
